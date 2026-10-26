@@ -750,8 +750,8 @@ def contact_menu(owner, caller, contact, rest):
     # Copy number: USSD can't reach the clipboard, so text it to the user to copy/call/save
     if action == "3":
         send_sms_async(caller, f"{name}: {phone}" if name != phone else phone)
-        whose = f"{name}'s number" if name != phone else "The number"
-        return screen(f"{whose} is on its way by SMS. Open it to copy, call or save it.")
+        title = f"{name}\n{phone}" if name != phone else phone
+        return screen(f"{title}\nAlso sent to you by SMS: hold it there to copy.")
 
     return screen(INVALID)
 
