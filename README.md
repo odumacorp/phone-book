@@ -8,6 +8,13 @@ Numbers are registered in the mobile app (SMS code + PIN); an unregistered numbe
 Wrong PINs count toward the same lockout as the app (5 tries, then 15 minutes).
 PINs are changed or reset only in the mobile app (Change PIN / Forgot PIN), never over USSD.
 
+Typing a name on the main menu searches straight away.
+
+The network ends a USSD session after a few minutes (sooner if a screen sits idle); that limit
+can't be changed. If it happens, redialling within 5 minutes asks only for the PIN and returns
+to the same screen (`0` starts over). A screen that just saved/sent/deleted resumes at the main menu
+instead, so nothing runs twice.
+
 After login, every screen offers `0. Back` and `00. Home`, and results (saved, sent, deleted)
 keep the session open instead of ending it. Actions only run once: input typed after a result
 is rejected rather than repeating the save/send/delete.
