@@ -435,7 +435,7 @@ function ChangePinScreen({
 
 const LOGIN_RESULT: Record<UssdLogin['reason'], string> = {
   ok: 'Logged in',
-  resumed: 'Continued (within 5 min)',
+  resumed: 'Continued (within 2 min)',
   wrong_pin: 'Wrong PIN',
   locked: 'Blocked: too many wrong PINs',
 };

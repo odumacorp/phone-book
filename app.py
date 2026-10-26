@@ -45,7 +45,7 @@ NAME_MAX = 13  # names are shortened on list screens so a full page + Back/Home 
 MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 160  # one SMS
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
-RESUME_SECONDS = 5 * 60  # a USSD login stays active this long after the last screen (inactivity timeout)
+RESUME_SECONDS = 2 * 60  # a USSD login stays active this long after the last screen (inactivity timeout)
 
 TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
@@ -621,12 +621,16 @@ def handle(caller, text, session_id="", network=""):
             if trusted_resume(state, caller):
                 return con(f"Welcome back {masked(state['owner'])}\n1. Continue where you left off\n2. Main menu\n0. Log out")
             return con(f"Welcome back. Enter PIN for {masked(state['owner'])} to continue where you left off:\n0. Start over")
-        # Logged-in state that went 5 minutes without activity is a logout: delete it (and any
+        # Logged-in state that went RESUME_SECONDS without activity is a logout: delete it (and any
         # other expired ones) so nothing about the old login stays usable
         expired = state and state["saved_at"] and not fresh
         execute("DELETE FROM ussd_resume WHERE saved_at < ?", (int(time.time()) - RESUME_SECONDS,))
         if expired:
-            return con("Your session expired after 5 minutes of inactivity. You were logged out for security.\nEnter your phone number:")
+            minutes = RESUME_SECONDS // 60
+            return con(
+                f"Your session expired after {minutes} minute{'s' if minutes != 1 else ''} of inactivity. "
+                "You were logged out for security.\nEnter your phone number:"
+            )
         return con("Welcome to Remote Phone-Book\nEnter your phone number:")
 
     if state and state["offered_in"] == session_id and trusted_resume(state, caller, offered=True):
