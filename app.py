@@ -15,6 +15,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import json
 import logging
 from functools import wraps
 from xml.sax.saxutils import quoteattr
@@ -40,6 +41,7 @@ PAGE_SIZE = 4  # contacts per screen; leaves room for "9. More" and the pick hin
 NAME_MAX = 14  # names are shortened on list screens so a full page + Back/Home fits
 SMS_MAX = 140
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
+RESUME_SECONDS = 5 * 60  # redial within this long to continue a timed-out USSD session
 
 TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
@@ -141,6 +143,16 @@ def init_db():
                sent_at INTEGER NOT NULL,
                attempts INTEGER NOT NULL DEFAULT 0
            )""",
+        """CREATE TABLE IF NOT EXISTS ussd_resume (
+               caller TEXT PRIMARY KEY,
+               owner TEXT NOT NULL,
+               path TEXT NOT NULL,
+               saved_at INTEGER NOT NULL,
+               session_id TEXT NOT NULL,
+               offered_in TEXT,
+               resume_owner TEXT,
+               resume_from TEXT
+           )""",
         """CREATE TABLE IF NOT EXISTS pending_calls (
                user_phone TEXT PRIMARY KEY,
                contact_phone TEXT NOT NULL,
@@ -195,10 +207,12 @@ def priority_only(owner):
 
 
 def add_contact(owner, name, phone):
+    g.action_done = True
     execute("INSERT INTO contacts (owner, name, phone) VALUES (?, ?, ?)", (owner, name, phone))
 
 
 def delete_contact(owner, contact_id):
+    g.action_done = True
     execute("DELETE FROM contacts WHERE id = ? AND owner = ?", (contact_id, owner))
 
 
@@ -298,6 +312,8 @@ def format_contacts(rows, numbered=False, short=False):
 
 
 def send_sms_async(to, message):
+    g.action_done = True  # a USSD path that sent an SMS must not be resumed (it would send again)
+
     def _send():
         try:
             resp = sms.send(message, [to], AT_SENDER_ID)
@@ -325,7 +341,8 @@ MAIN_MENU = (
     "2. Search contact\n"
     "3. My contacts\n"
     "4. Delete contact\n"
-    "5. SMS me my contacts"
+    "5. SMS me my contacts\n"
+    "Or type a name to search"
 )
 BACK, HOME = "0", "00"
 NAV = "0. Back  00. Home"
@@ -380,15 +397,93 @@ def check_pin(phone, pin):
     return user, None
 
 
-def handle(caller, text):
+# ---------------------------------------------------------------- resume after a timeout
+# Networks end USSD sessions after a few minutes (and sooner when a screen sits idle); we can't
+# extend that. Instead each phone's last menu screen is saved, and redialling within
+# RESUME_SECONDS asks only for the PIN and returns there. The session that was offered the
+# resume is remembered (offered_in) so its later inputs are read the same way.
+
+def get_resume(caller):
+    return fetch_one(
+        "SELECT owner, path, saved_at, session_id, offered_in, resume_owner, resume_from "
+        "FROM ussd_resume WHERE caller = ?",
+        (caller,),
+    )
+
+
+def save_resume(caller, owner, path, session_id, state):
+    keep = state is not None and state["offered_in"] == session_id
+    values = (
+        owner,
+        json.dumps(path),
+        int(time.time()),
+        session_id,
+        session_id if keep else None,
+        state["resume_owner"] if keep else None,
+        state["resume_from"] if keep else None,
+    )
+    db = get_db()
+    db.execute(sql("DELETE FROM ussd_resume WHERE caller = ?"), (caller,))
+    db.execute(
+        sql(
+            "INSERT INTO ussd_resume (owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, caller) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ),
+        values + (caller,),
+    )
+    db.commit()
+
+
+def offer_resume(caller, session_id):
+    execute(
+        "UPDATE ussd_resume SET offered_in = ?, resume_owner = owner, resume_from = path WHERE caller = ?",
+        (session_id, caller),
+    )
+
+
+def masked(phone):
+    return "0" + phone[4:7] + "***" + phone[-3:] if phone.startswith("+254") else phone
+
+
+def run_menu(owner, caller, path, session_id, state):
+    """Show a menu screen and remember it for resuming (never a path that just ran an action)."""
+    g.action_done = False
+    body = menu(owner, caller, path)
+    if body.startswith("CON "):
+        save_resume(caller, owner, [] if g.action_done else path, session_id, state)
+    else:
+        execute("DELETE FROM ussd_resume WHERE caller = ?", (caller,))
+    return body
+
+
+def handle(caller, text, session_id=""):
     """Every session starts with: phone number -> PIN -> main menu (numbers register in the app).
 
     The number entered decides whose phone book opens, so users can reach their contacts
     from any phone. SMS replies and calls go to `caller`, the phone actually in use.
     """
     parts = text.split("*") if text else []
+    state = get_resume(caller)
+
     if not parts:
+        fresh = state and time.time() - state["saved_at"] <= RESUME_SECONDS
+        if fresh and state["session_id"] != session_id:
+            offer_resume(caller, session_id)
+            return con(f"Welcome back. Enter PIN for {masked(state['owner'])} to continue where you left off:\n0. Start over")
         return con("Welcome to Remote Phone-Book\nEnter your phone number:")
+
+    if state and state["offered_in"] == session_id:
+        # This session started with the resume offer: first input is the PIN, or 0 to start over
+        if parts[0] != BACK:
+            owner = state["resume_owner"]
+            _user, error = check_pin(owner, parts[0])
+            if error:
+                return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
+            path = resolve_nav(json.loads(state["resume_from"]) + parts[1:])
+            return run_menu(owner, caller, path, session_id, state)
+        parts = parts[1:]
+        if not parts:
+            return con("Enter your phone number:")
 
     owner = login_phone(parts[0])
     if not owner:
@@ -403,7 +498,7 @@ def handle(caller, text):
     if error:
         # PINs are changed or reset only in the mobile app
         return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
-    return menu(owner, caller, resolve_nav(parts[2:]))
+    return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state)
 
 
 # ---------------------------------------------------------------- menu logic
@@ -415,6 +510,8 @@ def menu(owner, caller, parts):
         return con(MAIN_MENU)
 
     choice, rest = parts[0], parts[1:]
+    if choice.strip() and not choice.strip().isdigit():
+        return menu(owner, caller, ["2"] + parts)  # typed a name on the main menu: search straight away
     only = priority_only(owner)
     none_yet = NO_PRIORITY if only else "You have no contacts yet."
 
@@ -585,7 +682,7 @@ def ussd():
         body = end("Could not identify your phone number.")
     else:
         try:
-            body = handle(caller, text)
+            body = handle(caller, text, session_id)
         except Exception:
             log.exception("Error handling USSD request")
             body = end("Something went wrong. Please try again.")
