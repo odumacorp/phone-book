@@ -4,6 +4,9 @@ import type { SyncContact } from './api';
 
 const FIELDS = [ContactField.FULL_NAME, ContactField.PHONES] as const;
 
+/** The phone app reads the phonebook directly (the website version may import a file instead). */
+export const contactSource: 'phone' | 'file' = 'phone';
+
 /** Reads every contact with a phone number; one entry per number. Returns null if permission is denied. */
 export async function readDeviceContacts(): Promise<SyncContact[] | null> {
   const { granted } = await requestPermissionsAsync();

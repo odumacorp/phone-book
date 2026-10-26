@@ -1,12 +1,10 @@
-import * as Device from 'expo-device';
-import * as SecureStore from 'expo-secure-store';
+import { defaultApiUrl, deviceName, tokenStore } from './platform';
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://phone-book.odumacorp.com';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? defaultApiUrl;
 
 const TOKEN_KEY = 'phonebook.token';
 
-/** Shown in the Sessions list. The model ("iPhone 14"), not the phone's own name, which is often personal. */
-const DEVICE_NAME = Device.modelName ?? Device.osName ?? 'Unknown device';
+const DEVICE_NAME = deviceName();
 
 export type SyncContact = { name: string; phone: string };
 export type SyncResult = { added: number; skipped: number; total: number };
@@ -49,8 +47,8 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string |
   return body as T;
 }
 
-export const loadToken = () => SecureStore.getItemAsync(TOKEN_KEY);
-export const clearToken = () => SecureStore.deleteItemAsync(TOKEN_KEY);
+export const loadToken = () => tokenStore.get(TOKEN_KEY);
+export const clearToken = () => tokenStore.remove(TOKEN_KEY);
 
 /** Same rule as the server: +254XXXXXXXXX or 0XXXXXXXXX (spaces and dashes are ignored). */
 export const PHONE_FORMAT = '+254XXXXXXXXX or 0XXXXXXXXX';
@@ -58,7 +56,7 @@ export const isValidPhone = (phone: string) => /^(\+254\d{9}|0\d{9})$/.test(phon
 
 async function saveToken(path: string, body: object, token?: string): Promise<string> {
   const res = await request<{ token: string }>(path, { method: 'POST', body: JSON.stringify(body) }, token);
-  await SecureStore.setItemAsync(TOKEN_KEY, res.token);
+  await tokenStore.set(TOKEN_KEY, res.token);
   return res.token;
 }
 

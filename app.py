@@ -24,7 +24,7 @@ from functools import wraps
 from xml.sax.saxutils import quoteattr
 
 from dotenv import load_dotenv
-from flask import Flask, request, Response, g, jsonify
+from flask import Flask, request, Response, g, jsonify, send_from_directory
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -1705,9 +1705,37 @@ def api_sync():
     return jsonify({"added": len(new_rows), "skipped": skipped, "total": len(seen)})
 
 
-@app.route("/", methods=["GET"])
+@app.route("/health", methods=["GET"])
 def health():
     return "Phone Book USSD service is running"
+
+
+# ---------------------------------------------------------------- website
+# The Remote Phonebook website: the mobile app built for the web (npm run build:web in mobile/),
+# served from the same address as the API.
+
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+
+
+@app.route("/", methods=["GET"])
+def website():
+    if not os.path.exists(os.path.join(WEB_DIR, "index.html")):
+        return health()
+    response = send_from_directory(WEB_DIR, "index.html")
+    response.headers["Cache-Control"] = "no-cache"  # always pick up a new build
+    return response
+
+
+@app.route("/_expo/<path:filename>", methods=["GET"])
+def website_assets(filename):
+    response = send_from_directory(os.path.join(WEB_DIR, "_expo"), filename)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"  # file names change with each build
+    return response
+
+
+@app.route("/favicon.ico", methods=["GET"])
+def favicon():
+    return send_from_directory(WEB_DIR, "favicon.ico")
 
 
 init_db()

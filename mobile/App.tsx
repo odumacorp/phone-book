@@ -2,7 +2,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -50,7 +49,9 @@ import {
   setShowOthers,
   syncContacts,
 } from './src/api';
-import { readDeviceContacts } from './src/deviceContacts';
+import { contactSource, readDeviceContacts } from './src/deviceContacts';
+import { DialogProvider, useDialog } from './src/dialog';
+import { isWeb } from './src/platform';
 
 const USSD_CODE = '*384*88041#';
 const BATCH_SIZE = 1000;
@@ -68,6 +69,15 @@ type View_ =
   | 'pickContacts';
 
 export default function App() {
+  return (
+    <DialogProvider>
+      <Main />
+    </DialogProvider>
+  );
+}
+
+function Main() {
+  const ask = useDialog();
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [view, setView] = useState<View_>('login');
@@ -116,7 +126,7 @@ export default function App() {
       if (token) await logoutApp(token, everywhere).catch(() => null); // offline: still log out here
       await logout();
     };
-    Alert.alert('Log out?', 'Log out everywhere also ends your app login on other devices and any USSD session.', [
+    ask('Log out?', 'Log out everywhere also ends your app login on other devices and any USSD session.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Log out everywhere', style: 'destructive', onPress: () => out(true) },
       { text: 'Log out', onPress: () => out(false) },
@@ -179,6 +189,7 @@ export default function App() {
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
+      <View style={styles.column}>
       <View style={styles.titleRow}>
         <Text style={styles.title}>Remote Phonebook</Text>
         {token && !booting && view !== 'register' && view !== 'reset' ? (
@@ -187,7 +198,8 @@ export default function App() {
           </Pressable>
         ) : null}
       </View>
-      {content}
+        {content}
+      </View>
     </View>
   );
 }
@@ -512,6 +524,7 @@ type SessionItem = { kind: 'app'; s: AppSession } | { kind: 'ussd'; s: UssdSessi
 
 /** Every session on the account (app devices and USSD phones): login, logout, duration; log out each one. */
 function SessionsScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+  const ask = useDialog();
   const [data, setData] = useState<{ app: AppSession[]; ussd: UssdSession[]; timeout: number; days: number } | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -544,7 +557,7 @@ function SessionsScreen({ token, onBack, onLogout }: { token: string; onBack: ()
       : item.kind === 'app'
         ? 'That device will be logged out of the app.'
         : 'The USSD session ends on its next screen, and the next dial needs the phone number and PIN.';
-    Alert.alert(`Log out ${label}?`, message, [
+    ask(`Log out ${label}?`, message, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log out',
@@ -597,7 +610,8 @@ function SessionsScreen({ token, onBack, onLogout }: { token: string; onBack: ()
           </Text>
           {data ? (
             <Text style={styles.hint}>
-              USSD sessions end after {Math.round(data.timeout / 60)} minutes without activity.
+              USSD sessions end after {Math.round(data.timeout / 60)} minute{Math.round(data.timeout / 60) === 1 ? '' : 's'}{' '}
+              without activity.
             </Text>
           ) : null}
           {notice ? <Text style={styles.status}>{notice}</Text> : null}
@@ -809,33 +823,47 @@ function PickContactsScreen({
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const { busy, error, setError, run } = useForm();
+  // On the website, the phonebook picker / file chooser can only open from a tap
+  const [waitingForTap, setWaitingForTap] = useState(isWeb);
+
+  const load = async (devicePromise: Promise<SyncContact[] | null>) => {
+    try {
+      const [device, saved] = await Promise.all([devicePromise, getContacts(token)]);
+      if (device === null) {
+        setEntries([]);
+        return setError(
+          isWeb ? 'No contacts were chosen.' : 'Contacts permission is needed. Allow it in Settings → Apps → Remote Phonebook.',
+        );
+      }
+      setError('');
+      const savedPhones = new Set(saved.contacts.map((c) => c.phone));
+      const seen = new Set<string>();
+      const list: DeviceEntry[] = [];
+      for (const c of device) {
+        const key = normalizePhone(c.phone);
+        if (!key || seen.has(key)) continue; // skip invalid numbers and duplicates
+        seen.add(key);
+        list.push({ ...c, key, saved: savedPhones.has(key) });
+      }
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      setEntries(list);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onLogout();
+      setEntries([]);
+      setError(e instanceof Error ? e.message : 'Could not read your contacts.');
+    }
+  };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const [device, saved] = await Promise.all([readDeviceContacts(), getContacts(token)]);
-        if (device === null) {
-          setEntries([]);
-          return setError('Contacts permission is needed. Allow it in Settings → Apps → Remote Phonebook.');
-        }
-        const savedPhones = new Set(saved.contacts.map((c) => c.phone));
-        const seen = new Set<string>();
-        const list: DeviceEntry[] = [];
-        for (const c of device) {
-          const key = normalizePhone(c.phone);
-          if (!key || seen.has(key)) continue; // skip invalid numbers and duplicates
-          seen.add(key);
-          list.push({ ...c, key, saved: savedPhones.has(key) });
-        }
-        list.sort((a, b) => a.name.localeCompare(b.name));
-        setEntries(list);
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401) return onLogout();
-        setEntries([]);
-        setError(e instanceof Error ? e.message : 'Could not read your contacts.');
-      }
-    })();
+    if (!isWeb) load(readDeviceContacts());
   }, [token]);
+
+  const openOnWeb = () => {
+    setWaitingForTap(false);
+    setEntries(null);
+    setSelected(new Set());
+    load(readDeviceContacts()); // called straight from the tap, so the browser allows the picker
+  };
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -878,6 +906,20 @@ function PickContactsScreen({
               <Text style={styles.hint}>
                 Tick the contacts to add to your Remote Phonebook. Ones already added are marked.
               </Text>
+              {isWeb ? (
+                <>
+                  <Text style={styles.hint}>
+                    {contactSource === 'phone'
+                      ? 'Your browser will open your phonebook so you can choose contacts.'
+                      : 'This browser cannot open your phonebook. Export your contacts as a .vcf file (Contacts app → Share / Export) and choose it here.'}
+                  </Text>
+                  <Button
+                    title={contactSource === 'phone' ? 'Open my phonebook' : 'Choose a contacts file (.vcf)'}
+                    onPress={openOnWeb}
+                    disabled={busy}
+                  />
+                </>
+              ) : null}
               {error ? <Text style={styles.error}>{error}</Text> : null}
               <Link title="Cancel" onPress={onCancel} disabled={busy} />
             </View>
@@ -900,10 +942,12 @@ function PickContactsScreen({
           </>
         }
         ListEmptyComponent={
-          entries === null ? (
+          waitingForTap ? undefined : entries === null ? (
             <ActivityIndicator color={COLORS.primary} />
           ) : (
-            <Text style={styles.hint}>{query ? 'No contacts match.' : 'No contacts with phone numbers on this phone.'}</Text>
+            <Text style={styles.hint}>
+              {query ? 'No contacts match.' : isWeb ? 'No contacts to show yet.' : 'No contacts with phone numbers on this phone.'}
+            </Text>
           )
         }
         renderItem={({ item }) => {
@@ -970,6 +1014,7 @@ function SyncScreen({
   onSessions: () => void;
   onLogout: () => void;
 }) {
+  const ask = useDialog();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(notice);
   const [error, setError] = useState('');
@@ -1025,7 +1070,7 @@ function SyncScreen({
       const device = await readDeviceContacts();
       if (device === null) {
         setStatus('');
-        setError('Contacts permission is needed. Allow it in Settings → Apps → Remote Phonebook.');
+        setError(isWeb ? 'No contacts were chosen.' : 'Contacts permission is needed. Allow it in Settings → Apps → Remote Phonebook.');
         return;
       }
       let added = 0;
@@ -1064,7 +1109,7 @@ function SyncScreen({
   };
 
   const confirmRemove = (contact: Contact) =>
-    Alert.alert(contact.name, `${contact.phone}\n\nRemove from your Remote Phonebook? It stays on your phone.`, [
+    ask(contact.name, `${contact.phone}\n\nRemove from your Remote Phonebook? It stays on your phone.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
@@ -1347,7 +1392,8 @@ function Link({ title, onPress, disabled }: { title: string; onPress: () => void
 const COLORS = { primary: '#0B6E4F', text: '#1A1A1A', muted: '#6B6B6B', border: '#D5D5D5', error: '#B3261E' };
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#F6F7F6', paddingHorizontal: 20, paddingTop: 80 },
+  screen: { flex: 1, backgroundColor: '#F6F7F6', paddingHorizontal: 16, paddingTop: isWeb ? 24 : 80 },
+  column: { flex: 1, width: '100%', maxWidth: 640, alignSelf: 'center' }, // centred on tablets and computers
   title: { fontSize: 26, fontWeight: '700', color: COLORS.text, flexShrink: 1 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
   logout: { color: COLORS.error, fontSize: 16, fontWeight: '600' },

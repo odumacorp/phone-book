@@ -26,7 +26,15 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single",
+      "name": "Remote Phonebook",
+      "shortName": "Phonebook",
+      "description": "Manage the phone book you reach by dialling *384*88041#.",
+      "themeColor": "#0B6E4F",
+      "backgroundColor": "#F6F7F6",
+      "lang": "en"
     },
     "plugins": [
       "expo-secure-store",
