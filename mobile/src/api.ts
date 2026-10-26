@@ -1,8 +1,12 @@
+import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://phone-book.odumacorp.com';
 
 const TOKEN_KEY = 'phonebook.token';
+
+/** Shown in the Sessions list. The model ("iPhone 14"), not the phone's own name, which is often personal. */
+const DEVICE_NAME = Device.modelName ?? Device.osName ?? 'Unknown device';
 
 export type SyncContact = { name: string; phone: string };
 export type SyncResult = { added: number; skipped: number; total: number };
@@ -31,6 +35,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string |
       ...init,
       headers: {
         'Content-Type': 'application/json',
+        'X-Device-Name': DEVICE_NAME,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
@@ -96,15 +101,34 @@ export const PASSWORD_MIN = 8;
 export const getMe = (token: string) => request<Me>('/api/me', {}, token);
 
 /** USSD login attempts on this account, newest first (kept for `keep_days`). */
-export type UssdSession = { phone: string; own_phone: boolean; last_active: number; expires_at: number };
+/** Times are unix seconds; logged_out is null while the session is active. */
+type SessionTimes = {
+  logged_in: number;
+  logged_out: number | null;
+  duration_seconds: number;
+  active: boolean;
+  last_active: number;
+  end_reason: string | null;
+};
+export type AppSession = SessionTimes & { id: string; device: string; current: boolean };
+export type UssdSession = SessionTimes & {
+  id: number;
+  phone: string; // the phone that dialled
+  own_phone: boolean;
+  network: string;
+  expires_at: number | null; // when an active session ends if left idle
+};
+export type Sessions = { app: AppSession[]; ussd: UssdSession[]; ussd_timeout_seconds: number; history_days: number };
 
-/** Logged-in USSD sessions on this account (they end after `timeout_seconds` without a screen). */
-export const getUssdSessions = (token: string) =>
-  request<{ sessions: UssdSession[]; timeout_seconds: number }>('/api/ussd/sessions', {}, token);
+/** App devices and USSD logins: active ones first, then ended ones from the last `history_days`. */
+export const getSessions = (token: string) => request<Sessions>('/api/sessions', {}, token);
 
-/** Ends USSD sessions: an open one stops on its next screen, and the next dial needs a full login. */
-export const logoutUssd = (token: string) =>
-  request<{ logged_out: number }>('/api/ussd/logout', { method: 'POST' }, token);
+export const logoutAppSession = (token: string, id: string) =>
+  request<{ current: boolean }>(`/api/sessions/app/${encodeURIComponent(id)}/logout`, { method: 'POST' }, token);
+
+/** Ends one USSD login: if it's open, it stops on its next screen, and the next dial needs a full login. */
+export const logoutUssdSession = (token: string, id: number) =>
+  request<{ logged_out: number }>(`/api/sessions/ussd/${id}/logout`, { method: 'POST' }, token);
 
 /** Revokes this device's login on the server, or every app login plus USSD when `everywhere`. */
 export const logoutApp = (token: string, everywhere = false) =>

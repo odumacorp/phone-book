@@ -21,6 +21,7 @@ import {
   Me,
   PASSWORD_MIN,
   SyncContact,
+  AppSession,
   UssdLogin,
   UssdSession,
   PHONE_FORMAT,
@@ -31,13 +32,14 @@ import {
   deleteContact,
   getContacts,
   getLogins,
-  getUssdSessions,
+  getSessions,
   getMe,
   isValidPhone,
   loadToken,
   login,
   logoutApp,
-  logoutUssd,
+  logoutAppSession,
+  logoutUssdSession,
   normalizePhone,
   register,
   requestPasswordReset,
@@ -53,7 +55,17 @@ import { readDeviceContacts } from './src/deviceContacts';
 const USSD_CODE = '*384*88041#';
 const BATCH_SIZE = 1000;
 
-type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin' | 'changePassword' | 'logins' | 'addContact' | 'pickContacts';
+type View_ =
+  | 'login'
+  | 'register'
+  | 'reset'
+  | 'sync'
+  | 'changePin'
+  | 'changePassword'
+  | 'logins'
+  | 'sessions'
+  | 'addContact'
+  | 'pickContacts';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
@@ -122,6 +134,7 @@ export default function App() {
   else if (view === 'changePassword')
     content = <ChangePasswordScreen token={token} onDone={(t) => loggedIn(t, 'Password changed.')} onCancel={back} onLogout={logout} />;
   else if (view === 'logins') content = <LoginHistoryScreen token={token} onBack={back} onLogout={logout} />;
+  else if (view === 'sessions') content = <SessionsScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'addContact')
     content = <AddContactScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
   else if (view === 'pickContacts')
@@ -154,6 +167,10 @@ export default function App() {
         onLoginHistory={() => {
           setNotice('');
           setView('logins');
+        }}
+        onSessions={() => {
+          setNotice('');
+          setView('sessions');
         }}
         onLogout={logout}
       />
@@ -463,24 +480,193 @@ const LOGIN_RESULT: Record<UssdLogin['reason'], string> = {
   locked: 'Blocked: too many wrong PINs',
 };
 
+/** "45 s", "12 min", "1 h 5 min", "3 d 2 h" */
+function formatDuration(seconds: number) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d} d ${h % 24} h` : `${d} d`;
+}
+
+const formatTime = (unix: number) => new Date(unix * 1000).toLocaleString();
+
+const END_REASON: Record<string, string> = {
+  'logged out': 'Logged out',
+  'logged out from another device': 'Logged out from another device',
+  'logged out everywhere': 'Logged out everywhere',
+  'logged out from the app': 'Logged out from the app',
+  'logged out on USSD': 'Logged out on USSD',
+  'password or PIN changed': 'Password or PIN changed',
+  'PIN changed': 'PIN changed',
+  'timed out': 'Timed out (idle)',
+  'session ended': 'Session ended',
+  'new login': 'Replaced by a new login',
+  expired: 'Expired',
+};
+
+type SessionItem = { kind: 'app'; s: AppSession } | { kind: 'ussd'; s: UssdSession };
+
+/** Every session on the account (app devices and USSD phones): login, logout, duration; log out each one. */
+function SessionsScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+  const [data, setData] = useState<{ app: AppSession[]; ussd: UssdSession[]; timeout: number; days: number } | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(Date.now() / 1000);
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const res = await getSessions(token);
+      setData({ app: res.app, ussd: res.ussd, timeout: res.ussd_timeout_seconds, days: res.history_days });
+      setNow(Date.now() / 1000);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onLogout();
+      setError(e instanceof Error ? e.message : 'Could not load your sessions.');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(() => setNow(Date.now() / 1000), 15000); // keep active durations ticking
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const endSession = (item: SessionItem) => {
+    const label = item.kind === 'app' ? item.s.device : `USSD on ${item.s.phone}`;
+    const thisDevice = item.kind === 'app' && item.s.current;
+    const message = thisDevice
+      ? 'You will be logged out of this app.'
+      : item.kind === 'app'
+        ? 'That device will be logged out of the app.'
+        : 'The USSD session ends on its next screen, and the next dial needs the phone number and PIN.';
+    Alert.alert(`Log out ${label}?`, message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            if (item.kind === 'app') await logoutAppSession(token, item.s.id);
+            else await logoutUssdSession(token, item.s.id);
+            if (thisDevice) return onLogout();
+            setNotice(`${label} logged out.`);
+            await load();
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 401) return onLogout();
+            setError(e instanceof Error ? e.message : 'Could not log out that session.');
+            await load();
+          }
+        },
+      },
+    ]);
+  };
+
+  const sections: { title: string; items: SessionItem[] }[] = data
+    ? [
+        { title: 'This app', items: data.app.map((s) => ({ kind: 'app' as const, s })) },
+        { title: `USSD (${USSD_CODE})`, items: data.ussd.map((s) => ({ kind: 'ussd' as const, s })) },
+      ]
+    : [];
+  const rows = sections.flatMap((sec) => [
+    { key: `h-${sec.title}`, header: sec.title, empty: sec.items.length === 0 },
+    ...sec.items.map((item) => ({ key: `${item.kind}-${item.s.id}`, item })),
+  ]);
+
+  return (
+    <FlatList
+      style={styles.list}
+      data={rows}
+      keyExtractor={(r) => r.key}
+      refreshing={refreshing}
+      onRefresh={async () => {
+        setRefreshing(true);
+        await load();
+        setRefreshing(false);
+      }}
+      ListHeaderComponent={
+        <View style={styles.card}>
+          <Text style={styles.heading}>Sessions</Text>
+          <Text style={styles.hint}>
+            Where your account is logged in, with login and logout times and how long each lasted. Active sessions come
+            first; ended ones are kept for {data?.days ?? 30} days. Pull down to refresh.
+          </Text>
+          {data ? (
+            <Text style={styles.hint}>
+              USSD sessions end after {Math.round(data.timeout / 60)} minutes without activity.
+            </Text>
+          ) : null}
+          {notice ? <Text style={styles.status}>{notice}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Link title="Back" onPress={onBack} />
+        </View>
+      }
+      ListEmptyComponent={<ActivityIndicator color={COLORS.primary} />}
+      renderItem={({ item: row }) => {
+        if ('header' in row) {
+          return (
+            <>
+              <Text style={styles.sectionTitle}>{row.header}</Text>
+              {row.empty ? <Text style={styles.hint}>No sessions.</Text> : null}
+            </>
+          );
+        }
+        const { item } = row;
+        const s = item.s;
+        const title =
+          item.kind === 'app'
+            ? `${item.s.device}${item.s.current ? '  (this device)' : ''}`
+            : `${item.s.phone}  (${item.s.own_phone ? 'your phone' : 'another phone'}) · ${item.s.network}`;
+        const idleEnd = item.kind === 'ussd' ? item.s.expires_at : null;
+        const duration = s.active ? now - s.logged_in : s.duration_seconds;
+        return (
+          <View style={[styles.sessionRow, s.active && styles.sessionActive]}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowName} numberOfLines={2}>
+                {title}
+              </Text>
+              <Text style={styles.rowPhone}>Logged in: {formatTime(s.logged_in)}</Text>
+              {s.active ? (
+                <Text style={[styles.rowPhone, styles.activeText]}>
+                  Active now · last active {new Date(s.last_active * 1000).toLocaleTimeString()}
+                  {idleEnd ? ` · ends ${new Date(idleEnd * 1000).toLocaleTimeString()} if idle` : ''}
+                </Text>
+              ) : (
+                <Text style={styles.rowPhone}>
+                  Logged out: {formatTime(s.logged_out as number)} · {END_REASON[s.end_reason ?? ''] ?? s.end_reason ?? 'Ended'}
+                </Text>
+              )}
+              <Text style={styles.rowPhone}>Duration: {formatDuration(duration)}{s.active ? ' so far' : ''}</Text>
+            </View>
+            {s.active ? (
+              <Pressable onPress={() => endSession(item)} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.logout}>Log out</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        );
+      }}
+    />
+  );
+}
+
 /** USSD login history: which phones logged in to this phone book over USSD, and failed attempts. */
 function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
   const [logins, setLogins] = useState<UssdLogin[] | null>(null);
   const [keepDays, setKeepDays] = useState(90);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [sessions, setSessions] = useState<UssdSession[]>([]);
-  const [timeout, setTimeoutSeconds] = useState(120);
-  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
     setError('');
     try {
-      const [res, active] = await Promise.all([getLogins(token), getUssdSessions(token)]);
+      const res = await getLogins(token);
       setLogins(res.logins);
       setKeepDays(res.keep_days);
-      setSessions(active.sessions);
-      setTimeoutSeconds(active.timeout_seconds);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onLogout();
       setError(e instanceof Error ? e.message : 'Could not load your login history.');
@@ -490,25 +676,6 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
   useEffect(() => {
     load();
   }, [load]);
-
-  const endUssd = () =>
-    Alert.alert('Log out USSD?', 'The open USSD session ends on its next screen, and the next dial needs your number and PIN.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log out USSD',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await logoutUssd(token);
-            setSessions([]);
-            setNotice('USSD session logged out.');
-          } catch (e) {
-            if (e instanceof ApiError && e.status === 401) return onLogout();
-            setError(e instanceof Error ? e.message : 'Could not log out the USSD session.');
-          }
-        },
-      },
-    ]);
 
   const failures = logins?.filter((l) => !l.success).length ?? 0;
   const otherPhones = new Set(logins?.filter((l) => l.success && !l.own_phone).map((l) => l.phone)).size;
@@ -526,28 +693,8 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
       }}
       ListHeaderComponent={
         <>
-          <View style={[styles.card, sessions.length ? styles.activeCard : null]}>
-            <Text style={styles.heading}>Active USSD session</Text>
-            {sessions.length ? (
-              <>
-                {sessions.map((s) => (
-                  <Text key={s.phone} style={styles.status}>
-                    {s.phone} {s.own_phone ? '(your phone)' : '(another phone)'} · active at{' '}
-                    {new Date(s.last_active * 1000).toLocaleTimeString()} · ends by{' '}
-                    {new Date(s.expires_at * 1000).toLocaleTimeString()} if idle
-                  </Text>
-                ))}
-                <Button title="Log out USSD session" onPress={endUssd} />
-              </>
-            ) : (
-              <Text style={styles.hint}>
-                {notice || `None. A USSD login ends after ${Math.round(timeout / 60)} minutes without activity.`}
-              </Text>
-            )}
-          </View>
-          <View style={styles.spacer} />
           <View style={styles.card}>
-            <Text style={styles.heading}>USSD logins</Text>
+            <Text style={styles.heading}>USSD login attempts</Text>
             <Text style={styles.hint}>
               Every time someone logs in to your phone book by dialling {USSD_CODE}, or tries to. Kept for {keepDays} days.
               Pull down to refresh.
@@ -808,6 +955,7 @@ function SyncScreen({
   onAddContact,
   onPickContacts,
   onLoginHistory,
+  onSessions,
   onLogout,
 }: {
   token: string;
@@ -819,6 +967,7 @@ function SyncScreen({
   onAddContact: () => void;
   onPickContacts: () => void;
   onLoginHistory: () => void;
+  onSessions: () => void;
   onLogout: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -989,7 +1138,8 @@ function SyncScreen({
           <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
         </View>
         <View style={styles.linkRow}>
-          <Link title="USSD logins" onPress={onLoginHistory} disabled={busy} />
+          <Link title="Sessions" onPress={onSessions} disabled={busy} />
+          <Link title="Login attempts" onPress={onLoginHistory} disabled={busy} />
           <Link title="Change password" onPress={onChangePassword} disabled={busy} />
           <Link title="Change USSD PIN" onPress={onChangePin} disabled={busy} />
         </View>
@@ -1202,6 +1352,17 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
   logout: { color: COLORS.error, fontSize: 16, fontWeight: '600' },
   activeCard: { borderWidth: 2, borderColor: COLORS.primary },
+  sessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 14,
+    marginTop: 8,
+    borderRadius: 10,
+    gap: 12,
+  },
+  sessionActive: { borderLeftWidth: 4, borderLeftColor: COLORS.primary },
+  activeText: { color: COLORS.primary },
   heading: { fontSize: 20, fontWeight: '600', color: COLORS.text },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 20, gap: 8 },
   label: { fontSize: 14, color: COLORS.muted, marginTop: 4 },
