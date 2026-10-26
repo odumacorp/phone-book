@@ -203,14 +203,11 @@ def get_user(phone):
 
 
 def set_pin(phone, pin):
-    pin_hash = generate_password_hash(pin)
+    """A PIN can be set only once; returns False if this number already has one."""
     if get_user(phone):
-        execute(
-            "UPDATE users SET pin_hash = ?, failed_attempts = 0, locked_until = 0 WHERE phone = ?",
-            (pin_hash, phone),
-        )
-    else:
-        execute("INSERT INTO users (phone, pin_hash) VALUES (?, ?)", (phone, pin_hash))
+        return False
+    execute("INSERT INTO users (phone, pin_hash) VALUES (?, ?)", (phone, generate_password_hash(pin)))
+    return True
 
 
 # ---------------------------------------------------------------- helpers
@@ -277,9 +274,10 @@ MAIN_MENU = (
     "2. Search contact\n"
     "3. My contacts\n"
     "4. Delete contact\n"
-    "5. SMS me my contacts\n"
-    "6. Set app PIN"
+    "5. SMS me my contacts"
 )
+SET_PIN_ITEM = "\n6. Set app PIN"  # only shown until the number has a PIN
+PIN_ALREADY_SET = "Your app PIN is already set. Use it to log in to the app."
 
 
 # ---------------------------------------------------------------- menu logic
@@ -287,7 +285,7 @@ MAIN_MENU = (
 def handle(phone_number, text):
     parts = text.split("*") if text else []
     if not parts:
-        return con(MAIN_MENU)
+        return con(MAIN_MENU + ("" if get_user(phone_number) else SET_PIN_ITEM))
 
     choice, rest = parts[0], parts[1:]
 
@@ -361,8 +359,10 @@ def handle(phone_number, text):
         send_sms_async(phone_number, "Your contacts:\n" + format_contacts(rows))
         return end("You will receive your contacts by SMS shortly.")
 
-    # 6. Set / reset the mobile app PIN: 6 -> pin -> confirm
+    # 6. Set the mobile app PIN (once only): 6 -> pin -> confirm
     if choice == "6":
+        if get_user(phone_number):
+            return end(PIN_ALREADY_SET)
         if len(rest) == 0:
             return con("Enter a 4-digit PIN for the Phone Book app:")
         if not PIN_RE.match(rest[0]):
@@ -371,7 +371,8 @@ def handle(phone_number, text):
             return con("Confirm your PIN:")
         if rest[1] != rest[0]:
             return end("PINs do not match. Please try again.")
-        set_pin(phone_number, rest[0])
+        if not set_pin(phone_number, rest[0]):
+            return end(PIN_ALREADY_SET)
         return end(f"App PIN set. Log in to the app with {phone_number} and this PIN.")
 
     return end("Invalid choice. Please dial again.")
