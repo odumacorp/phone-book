@@ -3,7 +3,7 @@
 A USSD phone book built on Africa's Talking. Each phone number has its own contact list,
 reachable from any phone after logging in.
 
-Every session starts with a login: phone number (`+254XXXXXXXXX` or `07XXXXXXXX`) -> 4-digit PIN -> main menu.
+Every session starts with a login: phone number (`+254XXXXXXXXX` or `0XXXXXXXXX`, e.g. 07… or 01…) -> 4-digit PIN -> main menu.
 Numbers are registered in the mobile app (SMS code + PIN); an unregistered number dialling in is told to register there.
 Wrong PINs count toward the same lockout as the app (5 tries, then 15 minutes).
 PINs are changed or reset only in the mobile app (Change PIN / Forgot PIN), never over USSD.
@@ -22,7 +22,7 @@ is rejected rather than repeating the save/send/delete.
 ```
 1. Add contact      -> name -> phone number
 2. Search contact   -> part of a name -> pick a contact
-3. My contacts      -> 4 per screen, 9 = more -> pick a contact
+3. My contacts      -> 4 per screen, 98 = next page (numbers continue: 5-8, 9-12...) -> pick a contact
 4. Delete contact   -> pick number -> 1 Yes / 2 No
 5. SMS me my contacts (sent to the phone in use, with the Africa's Talking SMS API)
 ```
