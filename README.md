@@ -10,10 +10,13 @@ PINs are changed or reset only in the mobile app (Change PIN / Forgot PIN), neve
 
 Typing a name on the main menu searches straight away.
 
-The network ends a USSD session after a few minutes (sooner if a screen sits idle); that limit
-can't be changed. If it happens, redialling within 5 minutes asks only for the PIN and returns
-to the same screen (`0` starts over). A screen that just saved/sent/deleted resumes at the main menu
-instead, so nothing runs twice.
+The network ends each USSD session after a few minutes (sooner if a screen sits idle); that limit
+can't be changed. A *login*, though, stays active for **5 minutes of inactivity**:
+redialling from your own phone within 5 minutes shows "Welcome back: 1. Continue where you left off,
+2. Main menu, 0. Log out" with no PIN. A borrowed phone always asks for the PIN again. After 5 minutes
+without activity, or once the PIN is changed in the app or the account is locked, a full login is needed.
+A screen that just saved/sent/deleted continues at the main menu instead, so nothing runs twice.
+Continues without a PIN appear in the app's login history as "Continued".
 
 After login, every screen offers `0. Back` and `00. Home`, and results (saved, sent, deleted)
 keep the session open instead of ending it. Actions only run once: input typed after a result
@@ -65,9 +68,9 @@ gunicorn -w 2 -b 0.0.0.0:8000 app:app
 Set `DATABASE_URL` to a Postgres connection string (e.g. Neon) in production. Without it,
 contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must be set for app logins.
 
-## Mobile app (`mobile/`)
+## Mobile app (`mobile/`): Remote Phonebook
 
-An Expo (React Native) app that uploads the phone's contacts to the user's phone book.
+An Expo (React Native) app for managing the phone book that USSD uses.
 
 - **Register:** name, phone number (confirmed with a 6-digit SMS code), optional email, a password of the
   user's choosing (8+ characters) and a 4-digit USSD PIN.
@@ -79,7 +82,9 @@ An Expo (React Native) app that uploads the phone's contacts to the user's phone
 - Emails aren't verified (the server can't send email yet); they are only a login name and must be unique.
 - **USSD logins:** a separate screen lists every USSD login attempt on the account: the phone that dialled
   (the user's own or another), its network, the time, and whether it succeeded.
-- After syncing, the app lists the phone book; users star up to 5 priority contacts (shown first everywhere)
+- **Contacts:** choose which phone contacts to add (checkboxes, search, select all; already-added ones are
+  marked), add one by hand, sync all at once, or tap a contact to remove it.
+- The app lists the phone book; users star up to 5 priority contacts (shown first everywhere)
   and choose whether their other contacts appear on USSD.
 
 ```bash
@@ -100,6 +105,8 @@ API (JSON):
 - `GET /api/logins?limit=` -> `{logins: [{at, phone, own_phone, network, success, reason}], keep_days}`: USSD login
   attempts on this account (one per session; reason ok / wrong_pin / locked), newest first, kept 90 days
 - `GET /api/contacts` -> `{contacts: [{id, name, phone, priority}], max_priority, show_others}` (priority first)
+- `POST /api/contacts` `{name, phone}` -> the new contact (409 if the number is already saved)
+- `DELETE /api/contacts/<id>`
 - `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
 - `POST /api/settings` `{show_others?, name?, email?}`; name signs the user's SMS; email ("" removes it) is a login;
   when show_others is false, USSD lists/search/delete/SMS-me show only priority contacts

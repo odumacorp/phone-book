@@ -45,7 +45,7 @@ NAME_MAX = 13  # names are shortened on list screens so a full page + Back/Home 
 MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 160  # one SMS
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
-RESUME_SECONDS = 5 * 60  # redial within this long to continue a timed-out USSD session
+RESUME_SECONDS = 5 * 60  # a USSD login stays active this long after the last screen (inactivity timeout)
 
 TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
@@ -326,6 +326,7 @@ def update_pin(phone, pin):
         "UPDATE users SET pin_hash = ?, failed_attempts = 0, locked_until = 0 WHERE phone = ?",
         (generate_password_hash(pin), phone),
     )
+    execute("DELETE FROM ussd_resume WHERE owner = ? OR resume_owner = ?", (phone, phone))  # end active USSD logins
     return get_user(phone, fresh=True)
 
 
@@ -447,7 +448,7 @@ def resolve_nav(inputs):
 
 
 INVALID = "Invalid choice."
-NO_PRIORITY = "No priority contacts yet. Choose up to 5 in the Phone Book app."
+NO_PRIORITY = "No priority contacts yet. Choose up to 5 in the Remote Phonebook app."
 
 
 # ---------------------------------------------------------------- login
@@ -541,13 +542,15 @@ LOGIN_LOG_DAYS = 90
 NETWORKS = {"63902": "Safaricom", "63903": "Airtel", "63907": "Telkom", "99999": "Sandbox"}
 
 
-def log_login(owner, caller, network, session_id, error):
+def log_login(owner, caller, network, session_id, error, resumed=False):
     success = error is None
     if success and session_id and fetch_one(
         "SELECT 1 AS x FROM login_logs WHERE owner = ? AND session_id = ? AND success = 1", (owner, session_id)
     ):
         return  # already logged this session (only happens without SECRET_KEY, when every screen re-checks)
-    if success:
+    if resumed:
+        reason = "resumed"  # own phone, within the inactivity window: no PIN asked
+    elif success:
         reason = "ok"
     elif error.startswith("Too many"):
         reason = "locked"
@@ -573,6 +576,18 @@ def offer_resume(caller, session_id):
         "UPDATE ussd_resume SET offered_in = ?, resume_owner = owner, resume_from = path WHERE caller = ?",
         (session_id, caller),
     )
+
+
+def trusted_resume(state, caller, offered=False):
+    """Continue without the PIN only on the owner's own phone, and only if the account isn't locked.
+
+    A borrowed phone always asks for the PIN again, so the next person to use it can't get in.
+    """
+    owner = state["resume_owner"] if offered else state["owner"]
+    if owner != caller:
+        return False
+    user = get_user(owner)
+    return bool(user) and user["locked_until"] <= time.time()
 
 
 def masked(phone):
@@ -603,16 +618,38 @@ def handle(caller, text, session_id="", network=""):
         fresh = state and time.time() - state["saved_at"] <= RESUME_SECONDS
         if fresh and state["session_id"] != session_id:
             offer_resume(caller, session_id)
+            if trusted_resume(state, caller):
+                return con(f"Welcome back {masked(state['owner'])}\n1. Continue where you left off\n2. Main menu\n0. Log out")
             return con(f"Welcome back. Enter PIN for {masked(state['owner'])} to continue where you left off:\n0. Start over")
         return con("Welcome to Remote Phone-Book\nEnter your phone number:")
+
+    if state and state["offered_in"] == session_id and trusted_resume(state, caller, offered=True):
+        # Own phone, still within the inactivity window: no PIN, just continue / main menu / log out
+        if parts[0] in ("1", "2"):
+            owner = state["resume_owner"]
+            if len(parts) == 1:
+                log_login(owner, caller, network, session_id, None, resumed=True)
+            start = json.loads(state["resume_from"]) if parts[0] == "1" else []
+            return run_menu(owner, caller, resolve_nav(start + parts[1:]), session_id, state, None)
+        if parts[0] != BACK:
+            return end("Invalid choice. Please dial again.")
+        # Log out: end the active login but keep offered_in, so this session's later inputs
+        # ("0*<phone>*<PIN>...") are still read as "start over" below
+        execute("UPDATE ussd_resume SET resume_owner = NULL, resume_from = NULL, saved_at = 0 WHERE caller = ?", (caller,))
+        state = get_resume(caller)
+        parts = parts[1:]
+        if not parts:
+            return con("Logged out.\nEnter your phone number:")
 
     if state and state["offered_in"] == session_id:
         # This session started with the resume offer: first input is the PIN, or 0 to start over
         if parts[0] != BACK:
             owner = state["resume_owner"]
+            if not owner:  # logged out earlier in this session; only "0 ..." (start over) is valid
+                return end("Invalid choice. Please dial again.")
             mac, error = login(owner, parts[0], session_id, state, caller, network)
             if error:
-                return end(f"{error}\nForgot your PIN? Set a new one in the Phone Book app.")
+                return end(f"{error}\nForgot your PIN? Set a new one in the Remote Phonebook app.")
             path = resolve_nav(json.loads(state["resume_from"]) + parts[1:])
             return run_menu(owner, caller, path, session_id, state, mac)
         parts = parts[1:]
@@ -624,14 +661,14 @@ def handle(caller, text, session_id="", network=""):
         return end(f"Invalid phone number. Use {LOGIN_PHONE_FORMAT}.")
 
     if not get_user(owner):
-        return end(f"{owner} is not registered. Register in the Phone Book app, then dial again.")
+        return end(f"{owner} is not registered. Register in the Remote Phonebook app, then dial again.")
 
     if len(parts) == 1:
         return con("Enter your PIN:")
     mac, error = login(owner, parts[1], session_id, state, caller, network)
     if error:
         # PINs are changed or reset only in the mobile app
-        return end(f"{error}\nForgot your PIN? Set a new one in the Phone Book app.")
+        return end(f"{error}\nForgot your PIN? Set a new one in the Remote Phonebook app.")
     return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state, mac)
 
 
@@ -1222,6 +1259,33 @@ def api_contacts():
         "max_priority": MAX_PRIORITY,
         "show_others": bool(get_user(g.phone)["show_others"]),
     })
+
+
+@app.route("/api/contacts", methods=["POST"])
+@require_auth
+def api_add_contact():
+    body = body_json()
+    name = " ".join(str(body.get("name") or "").split())[:60]
+    phone = normalize_phone(str(body.get("phone") or ""))
+    if not name:
+        return api_error("Enter a name.", 400)
+    if not phone:
+        return api_error("Enter a valid phone number.", 400)
+    existing = find_contact_by_phone(g.phone, phone)
+    if existing:
+        return api_error(f"{phone} is already saved as {existing['name']}.", 409)
+    add_contact(g.phone, name, phone)
+    row = find_contact_by_phone(g.phone, phone)
+    return jsonify({"id": row["id"], "name": row["name"], "phone": row["phone"], "priority": False}), 201
+
+
+@app.route("/api/contacts/<int:contact_id>", methods=["DELETE"])
+@require_auth
+def api_delete_contact(contact_id):
+    if not fetch_one("SELECT id FROM contacts WHERE id = ? AND owner = ?", (contact_id, g.phone)):
+        return api_error("Contact not found.", 404)
+    delete_contact(g.phone, contact_id)
+    return jsonify({"deleted": contact_id})
 
 
 @app.route("/api/contacts/<int:contact_id>/priority", methods=["POST"])
