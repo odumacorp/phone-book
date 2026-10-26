@@ -34,7 +34,8 @@ is rejected rather than repeating the save/send/delete.
 On the search and list screens, reply with the contact's position (1-4) or type any phone number:
 
 ```
-1. Call             -> AT rings the caller, then connects them to the contact (shown only once AT_VOICE_NUMBER is set)
+1. Call             -> AT rings the caller, then connects them to the contact (needs AT_VOICE_NUMBER; until
+                       then it says calling isn't available and offers 2 and 3)
 2. Send SMS         -> 1. Please call me, 2. Type a message (or just type it); no `*`. Every SMS ends with
                        "- <name> (07...)" using the name set in the app (just the number if none)
 3. Copy number      -> shows the number on screen and texts it to the caller (USSD cannot reach the clipboard)

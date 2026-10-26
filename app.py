@@ -922,18 +922,16 @@ def calling_available():
 
 def contact_menu(owner, caller, contact, rest):
     name, phone = contact["name"], contact["phone"]
-    # "1. Call" is only offered once a voice number is set up; the other options keep their numbers
-    options = ("1. Call\n" if calling_available() else "") + "2. Send SMS\n3. Copy number"
     if len(rest) == 0:
         title = name if name == phone else f"{name}\n{phone}"
-        return screen(f"{title}\n{options}")
+        return screen(f"{title}\n1. Call\n2. Send SMS\n3. Copy number")
 
     action = rest[0]
     if action == "1" and not calling_available():
-        # Typed 1 anyway: say so, and offer the options that work. What they pick next is
-        # read as a choice on this contact's menu.
+        # No voice number set up yet: say so, and offer the options that do work. What they
+        # pick next is read as a choice on this contact's menu.
         if len(rest) == 1:
-            return screen(f"Calling isn't available yet.\n{options}")
+            return screen("Calling isn't available yet.\n2. Send SMS\n3. Copy number")
         return contact_menu(owner, caller, contact, rest[1:])
     if len(rest) > (3 if action == "2" else 1):
         return screen(INVALID)
