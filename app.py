@@ -204,6 +204,12 @@ def init_db():
         add_column(db, "contacts", "priority", "INTEGER NOT NULL DEFAULT 0")
         add_column(db, "users", "show_others", "INTEGER NOT NULL DEFAULT 1")
         add_column(db, "users", "name", "TEXT")
+        # App accounts: email (optional) or phone + a password of the user's choosing
+        add_column(db, "users", "email", "TEXT")
+        add_column(db, "users", "password_hash", "TEXT")
+        add_column(db, "users", "pw_failed_attempts", "INTEGER NOT NULL DEFAULT 0")
+        add_column(db, "users", "pw_locked_until", "INTEGER NOT NULL DEFAULT 0")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
         add_column(db, "ussd_resume", "pin_mac", "TEXT")
         db.commit()
     finally:
@@ -277,12 +283,18 @@ def pop_pending_call(user_phone):
     return row["contact_phone"] if time.time() - row["created_at"] <= CALL_TTL else None
 
 
+USER_COLUMNS = (
+    "phone, pin_hash, failed_attempts, locked_until, show_others, name, "
+    "email, password_hash, pw_failed_attempts, pw_locked_until"
+)
+
+
 def get_user(phone, fresh=False):
     """Users are cached for the rest of the request; writes that matter pass fresh=True."""
     cache = g.setdefault("users", {})
     if fresh or phone not in cache:
         cache[phone] = fetch_one(
-            "SELECT phone, pin_hash, failed_attempts, locked_until, show_others, name FROM users WHERE phone = ?",
+            f"SELECT {USER_COLUMNS} FROM users WHERE phone = ?",
             (phone,),
         )
     return cache[phone]
@@ -553,7 +565,7 @@ def handle(caller, text, session_id=""):
             owner = state["resume_owner"]
             mac, error = login(owner, parts[0], session_id, state)
             if error:
-                return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
+                return end(f"{error}\nForgot your PIN? Set a new one in the Phone Book app.")
             path = resolve_nav(json.loads(state["resume_from"]) + parts[1:])
             return run_menu(owner, caller, path, session_id, state, mac)
         parts = parts[1:]
@@ -572,7 +584,7 @@ def handle(caller, text, session_id=""):
     mac, error = login(owner, parts[1], session_id, state)
     if error:
         # PINs are changed or reset only in the mobile app
-        return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
+        return end(f"{error}\nForgot your PIN? Set a new one in the Phone Book app.")
     return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state, mac)
 
 
@@ -797,14 +809,29 @@ def ussd():
 
 
 # ---------------------------------------------------------------- mobile app API
+# The app logs in with email or phone + a password the user chooses. USSD keeps phone + 4-digit PIN
+# (letters are slow on a keypad); both are set when registering in the app.
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PASSWORD_MIN, PASSWORD_MAX = 8, 128
+NO_ACCOUNT = "No account found for this email or phone number. Tap Register to create one."
+NO_PIN_YET = "This number is not registered yet. Tap Register to create your account."
+ALREADY_REGISTERED = "This number is already registered. Log in, or use Forgot password."
+EMAIL_TAKEN = "This email is already used by another account."
+
 
 def serializer():
     return URLSafeTimedSerializer(SECRET_KEY, salt="phonebook-app")
 
 
+def token_version(user):
+    # Changes when the password or PIN changes, which logs out other app sessions
+    secret = f"{user['pin_hash']}|{user['password_hash'] or ''}".encode()
+    return hashlib.sha256(secret).hexdigest()[:16]
+
+
 def make_token(user):
-    # Tied to the current PIN hash, so resetting the PIN logs out old sessions
-    return serializer().dumps({"phone": user["phone"], "v": user["pin_hash"][-12:]})
+    return serializer().dumps({"phone": user["phone"], "v": token_version(user)})
 
 
 def api_error(message, status):
@@ -823,7 +850,7 @@ def require_auth(view):
         except BadSignature:
             return api_error("Please log in again.", 401)
         user = get_user(data.get("phone", ""))
-        if not user or user["pin_hash"][-12:] != data.get("v"):
+        if not user or token_version(user) != data.get("v"):
             return api_error("Please log in again.", 401)
         g.phone = user["phone"]
         return view(*args, **kwargs)
@@ -831,29 +858,36 @@ def require_auth(view):
     return wrapper
 
 
-@app.route("/api/login", methods=["POST"])
-def api_login():
-    if not SECRET_KEY:
-        return api_error("App login is not configured on the server.", 503)
-    body = request.get_json(silent=True) or {}
-    phone = login_phone(str(body.get("phone", "")))
-    pin = str(body.get("pin", ""))
-    if not phone:
-        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
-    if not PIN_RE.match(pin):
-        return api_error("Enter your 4-digit PIN.", 400)
-
-    if not get_user(phone):
-        return api_error(NO_PIN_YET, 401)
-
-    user, error = check_pin(phone, pin)
-    if error:
-        return api_error(error, 429 if error.startswith("Too many") else 401)
-    return jsonify({"token": make_token(user), "phone": phone})
+def clean_email(raw):
+    """Lower-cased email, "" when none was given, or None when it isn't a valid address."""
+    email = str(raw or "").strip().lower()
+    if not email:
+        return ""
+    return email if len(email) <= 254 and EMAIL_RE.match(email) else None
 
 
-NO_PIN_YET = "This number is not registered yet. Tap Register to create your account."
-ALREADY_REGISTERED = "This number is already registered. Log in, or use Forgot PIN."
+def email_owner(email):
+    row = fetch_one("SELECT phone FROM users WHERE email = ?", (email,))
+    return row["phone"] if row else None
+
+
+def find_account(login):
+    """The user for an email address or a phone number (+254... / 0...), or None."""
+    login = str(login or "").strip()
+    if "@" in login:
+        email = clean_email(login)
+        phone = email_owner(email) if email else None
+    else:
+        phone = login_phone(login)
+    return get_user(phone) if phone else None
+
+
+def password_error(password, confirm):
+    if not PASSWORD_MIN <= len(password) <= PASSWORD_MAX:
+        return f"Password must be {PASSWORD_MIN} to {PASSWORD_MAX} characters."
+    if confirm is not None and confirm != password:
+        return "Passwords do not match."
+    return None
 
 
 def pin_error(new_pin, confirm):
@@ -864,27 +898,100 @@ def pin_error(new_pin, confirm):
     return None
 
 
+def check_password(user, password):
+    """Like check_pin, with its own lockout so app guesses can't lock USSD (and vice versa)."""
+    phone = user["phone"]
+    if not user["password_hash"]:
+        return "Set a password first: tap Forgot password."
+    now = int(time.time())
+    if user["pw_locked_until"] > now:
+        minutes = (user["pw_locked_until"] - now + 59) // 60
+        return f"Too many wrong passwords. Try again in {minutes} min, or use Forgot password."
+    if not check_password_hash(user["password_hash"], password):
+        attempts = user["pw_failed_attempts"] + 1
+        locked_until = now + LOCKOUT_SECONDS if attempts >= MAX_PIN_ATTEMPTS else 0
+        execute(
+            "UPDATE users SET pw_failed_attempts = ?, pw_locked_until = ? WHERE phone = ?",
+            (0 if locked_until else attempts, locked_until, phone),
+        )
+        if locked_until:
+            return "Too many wrong passwords. Try again in 15 min, or use Forgot password."
+        return "Wrong email/phone or password."
+    if user["pw_failed_attempts"]:
+        execute("UPDATE users SET pw_failed_attempts = 0 WHERE phone = ?", (phone,))
+    return None
+
+
+def auth_status(error):
+    return 429 if error.startswith("Too many") else 401
+
+
+def set_password(phone, password):
+    execute(
+        "UPDATE users SET password_hash = ?, pw_failed_attempts = 0, pw_locked_until = 0 WHERE phone = ?",
+        (generate_password_hash(password), phone),
+    )
+    return get_user(phone, fresh=True)
+
+
+def logged_in(user):
+    return jsonify({"token": make_token(user), "phone": user["phone"]})
+
+
+def body_json():
+    return request.get_json(silent=True) or {}
+
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    if not SECRET_KEY:
+        return api_error("App login is not configured on the server.", 503)
+    body = body_json()
+    login, password = str(body.get("login", "")).strip(), str(body.get("password", ""))
+    if not login or not password:
+        return api_error("Enter your email or phone number and your password.", 400)
+    if "@" not in login and not login_phone(login):
+        return api_error(f"Enter a valid email, or a phone number as {LOGIN_PHONE_FORMAT}.", 400)
+    user = find_account(login)
+    if not user:
+        return api_error(NO_ACCOUNT, 401)
+    error = check_password(user, password)
+    if error:
+        return api_error(error, auth_status(error))
+    return logged_in(user)
+
+
+@app.route("/api/password/change", methods=["POST"])
+@require_auth
+def api_change_password():
+    body = body_json()
+    current, new = str(body.get("current_password", "")), str(body.get("new_password", ""))
+    error = password_error(new, body.get("confirm_password", new))
+    if error:
+        return api_error(error, 400)
+    error = check_password(get_user(g.phone), current)
+    if error:
+        return api_error("Current password is wrong." if error.startswith("Wrong") else error, auth_status(error))
+    return logged_in(set_password(g.phone, new))
+
+
 @app.route("/api/pin/change", methods=["POST"])
 @require_auth
 def api_change_pin():
-    body = request.get_json(silent=True) or {}
-    current, new_pin = str(body.get("current_pin", "")), str(body.get("new_pin", ""))
+    """New USSD PIN, confirmed with the app password (so a forgotten PIN can be replaced)."""
+    body = body_json()
+    new_pin = str(body.get("new_pin", ""))
     error = pin_error(new_pin, str(body.get("confirm_pin", new_pin)))
     if error:
         return api_error(error, 400)
-    if new_pin == current:
-        return api_error("New PIN must be different from your current PIN.", 400)
-    _user, error = check_pin(g.phone, current)  # wrong current PINs count toward the lockout
+    error = check_password(get_user(g.phone), str(body.get("password", "")))
     if error:
-        if error.startswith("Wrong"):
-            error = "Current PIN is wrong."
-        return api_error(error, 429 if error.startswith("Too many") else 401)
-    user = update_pin(g.phone, new_pin)
-    return jsonify({"token": make_token(user), "phone": g.phone})
+        return api_error("Password is wrong." if error.startswith("Wrong") else error, auth_status(error))
+    return logged_in(update_pin(g.phone, new_pin))
 
 
 # SMS verification codes (stored in pin_resets) prove the user holds the SIM. They are used to
-# register a new number and to reset a forgotten PIN.
+# register a new number and to reset a forgotten password.
 
 def send_code(phone, purpose):
     """Text a fresh 6-digit code. Returns an error message, or None when sent."""
@@ -920,76 +1027,98 @@ def use_code(phone, code):
     return None
 
 
-def code_request(registering):
-    body = request.get_json(silent=True) or {}
-    phone = login_phone(str(body.get("phone", "")))
+def registration_error(body, phone):
+    """Everything about a registration that can be checked before the SMS code is used up."""
     if not phone:
-        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
-    if sms is None:
-        return api_error("SMS service is not available right now.", 503)
-    if registering and get_user(phone):
-        return api_error(ALREADY_REGISTERED, 409)
-    if not registering and not get_user(phone):
-        return api_error(NO_PIN_YET, 404)
-    error = send_code(phone, "verification" if registering else "reset")
-    if error:
-        return api_error(error, 429)
-    return jsonify({"sent": True, "phone": phone})
-
-
-def code_confirm(registering):
-    if not SECRET_KEY:
-        return api_error("App login is not configured on the server.", 503)
-    body = request.get_json(silent=True) or {}
-    phone = login_phone(str(body.get("phone", "")))
-    code, new_pin = str(body.get("code", "")).strip(), str(body.get("new_pin", ""))
-    if not phone:
-        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
-    error = pin_error(new_pin, str(body.get("confirm_pin", new_pin)))
-    if error:
-        return api_error(error, 400)
-    if registering and not clean_name(body.get("name")):
-        return api_error("Enter your name.", 400)  # checked before the one-time code is used up
-    if registering and get_user(phone):
-        return api_error(ALREADY_REGISTERED, 409)
-    failed = use_code(phone, code)
-    if failed:
-        return api_error(*failed)
-    if registering:
-        name = clean_name(body.get("name"))
-        if not name:
-            return api_error("Enter your name.", 400)
-        if not set_pin(phone, new_pin):
-            return api_error(ALREADY_REGISTERED, 409)
-        execute("UPDATE users SET name = ? WHERE phone = ?", (name, phone))
-        user = get_user(phone, fresh=True)
-    else:
-        user = update_pin(phone, new_pin)
-    return jsonify({"token": make_token(user), "phone": phone})
+        return f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400
+    if get_user(phone):
+        return ALREADY_REGISTERED, 409
+    email = clean_email(body.get("email"))
+    if email is None:
+        return "Enter a valid email address, or leave it empty.", 400
+    if email and email_owner(email):
+        return EMAIL_TAKEN, 409
+    return None
 
 
 @app.route("/api/register/request", methods=["POST"])
 def api_register_request():
     """Register, step 1: text a 6-digit code to the new number."""
-    return code_request(registering=True)
+    body = body_json()
+    phone = login_phone(str(body.get("phone", "")))
+    failed = registration_error(body, phone)
+    if failed:
+        return api_error(*failed)
+    if sms is None:
+        return api_error("SMS service is not available right now.", 503)
+    error = send_code(phone, "verification")
+    if error:
+        return api_error(error, 429)
+    return jsonify({"sent": True, "phone": phone})
 
 
 @app.route("/api/register/confirm", methods=["POST"])
 def api_register_confirm():
-    """Register, step 2: code from the SMS + new PIN. Creates the account and logs the user in."""
-    return code_confirm(registering=True)
+    """Register, step 2: SMS code + name, optional email, app password and USSD PIN. Logs the user in."""
+    if not SECRET_KEY:
+        return api_error("App login is not configured on the server.", 503)
+    body = body_json()
+    phone = login_phone(str(body.get("phone", "")))
+    failed = registration_error(body, phone)
+    if failed:
+        return api_error(*failed)
+    name = clean_name(body.get("name"))
+    password, pin = str(body.get("password", "")), str(body.get("pin", ""))
+    error = (
+        (None if name else "Enter your name.")
+        or password_error(password, body.get("confirm_password", password))
+        or pin_error(pin, str(body.get("confirm_pin", pin)))
+    )
+    if error:
+        return api_error(error, 400)
+    failed = use_code(phone, str(body.get("code", "")).strip())
+    if failed:
+        return api_error(*failed)
+    if not set_pin(phone, pin):
+        return api_error(ALREADY_REGISTERED, 409)
+    execute(
+        "UPDATE users SET name = ?, email = ?, password_hash = ? WHERE phone = ?",
+        (name, clean_email(body.get("email")) or None, generate_password_hash(password), phone),
+    )
+    return logged_in(get_user(phone, fresh=True))
 
 
-@app.route("/api/pin/reset/request", methods=["POST"])
+@app.route("/api/password/reset/request", methods=["POST"])
 def api_reset_request():
-    """Forgot PIN, step 1: text a 6-digit code to the number."""
-    return code_request(registering=False)
+    """Forgot password, step 1: text a code to the account's phone (found by email or phone)."""
+    user = find_account(body_json().get("login"))
+    if not user:
+        return api_error(NO_ACCOUNT, 404)
+    if sms is None:
+        return api_error("SMS service is not available right now.", 503)
+    error = send_code(user["phone"], "reset")
+    if error:
+        return api_error(error, 429)
+    return jsonify({"sent": True, "phone": masked(user["phone"])})
 
 
-@app.route("/api/pin/reset/confirm", methods=["POST"])
+@app.route("/api/password/reset/confirm", methods=["POST"])
 def api_reset_confirm():
-    """Forgot PIN, step 2: code from the SMS + new PIN. Clears any lockout and logs the user in."""
-    return code_confirm(registering=False)
+    """Forgot password, step 2: SMS code + new password. Clears the password lockout and logs in."""
+    if not SECRET_KEY:
+        return api_error("App login is not configured on the server.", 503)
+    body = body_json()
+    user = find_account(body.get("login"))
+    if not user:
+        return api_error(NO_ACCOUNT, 404)
+    password = str(body.get("new_password", ""))
+    error = password_error(password, body.get("confirm_password", password))
+    if error:
+        return api_error(error, 400)
+    failed = use_code(user["phone"], str(body.get("code", "")).strip())
+    if failed:
+        return api_error(*failed)
+    return logged_in(set_password(user["phone"], password))
 
 
 @app.route("/api/me", methods=["GET"])
@@ -997,7 +1126,13 @@ def api_reset_confirm():
 def api_me():
     row = fetch_one("SELECT COUNT(*) AS n FROM contacts WHERE owner = ?", (g.phone,))
     user = get_user(g.phone)
-    return jsonify({"phone": g.phone, "contacts": row["n"], "show_others": bool(user["show_others"]), "name": user["name"]})
+    return jsonify({
+        "phone": g.phone,
+        "contacts": row["n"],
+        "show_others": bool(user["show_others"]),
+        "name": user["name"],
+        "email": user["email"],
+    })
 
 
 @app.route("/api/contacts", methods=["GET"])
@@ -1031,10 +1166,16 @@ def api_set_priority(contact_id):
 @app.route("/api/settings", methods=["POST"])
 @require_auth
 def api_settings():
-    """Update show_others and/or name (the name signs the user's SMS)."""
+    """Update show_others, name (signs the user's SMS) and/or email (app login)."""
     body = request.get_json(silent=True) or {}
-    if "show_others" not in body and "name" not in body:
+    if not {"show_others", "name", "email"} & set(body):
         return api_error("Nothing to update.", 400)
+    if "email" in body:
+        email = clean_email(body["email"])
+        if email is None:
+            return api_error("Enter a valid email address, or leave it empty.", 400)
+        if email and email_owner(email) not in (None, g.phone):
+            return api_error(EMAIL_TAKEN, 409)
     if "show_others" in body:
         if not isinstance(body["show_others"], bool):
             return api_error("Expected show_others: true or false.", 400)
@@ -1044,8 +1185,10 @@ def api_settings():
         if not name:
             return api_error("Enter your name.", 400)
         execute("UPDATE users SET name = ? WHERE phone = ?", (name, g.phone))
+    if "email" in body:
+        execute("UPDATE users SET email = ? WHERE phone = ?", (email or None, g.phone))
     user = get_user(g.phone, fresh=True)
-    return jsonify({"show_others": bool(user["show_others"]), "name": user["name"]})
+    return jsonify({"show_others": bool(user["show_others"]), "name": user["name"], "email": user["email"]})
 
 
 @app.route("/api/contacts/sync", methods=["POST"])
