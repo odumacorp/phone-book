@@ -70,6 +70,17 @@ gunicorn -w 2 -b 0.0.0.0:8000 app:app
 Set `DATABASE_URL` to a Postgres connection string (e.g. Neon) in production. Without it,
 contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must be set for app logins.
 
+## Website: https://phone-book.odumacorp.com/
+
+The same Remote Phonebook app, built for the web (Expo web) and served by this server at `/`
+(health check moved to `/health`). It fits any screen from 320 px phones up, centred on tablets
+and computers, and does everything the phone app does. Differences in a browser:
+- **Choose contacts from phone:** Android Chrome opens the phonebook (Contact Picker); other browsers
+  import a `.vcf` contacts file exported from the phone's Contacts app.
+- The login is kept in the browser's local storage; Sessions show the device as e.g. "Chrome on Android (website)".
+
+Rebuild after changing the app: `cd mobile && npm run build:web` (writes `../web/`), then commit `web/`.
+
 ## Mobile app (`mobile/`): Remote Phonebook
 
 An Expo (React Native) app for managing the phone book that USSD uses.
