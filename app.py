@@ -906,20 +906,30 @@ def pick_and_act(owner, caller, rows, selection, rest, first=1):
     return contact_menu(owner, caller, contact, rest)
 
 
+def calling_available():
+    return voice is not None and bool(AT_VOICE_NUMBER)
+
+
 def contact_menu(owner, caller, contact, rest):
     name, phone = contact["name"], contact["phone"]
+    # "1. Call" is only offered once a voice number is set up; the other options keep their numbers
+    options = ("1. Call\n" if calling_available() else "") + "2. Send SMS\n3. Copy number"
     if len(rest) == 0:
         title = name if name == phone else f"{name}\n{phone}"
-        return screen(f"{title}\n1. Call\n2. Send SMS\n3. Copy number")
+        return screen(f"{title}\n{options}")
 
     action = rest[0]
+    if action == "1" and not calling_available():
+        # Typed 1 anyway: say so, and offer the options that work. What they pick next is
+        # read as a choice on this contact's menu.
+        if len(rest) == 1:
+            return screen(f"Calling isn't available yet.\n{options}")
+        return contact_menu(owner, caller, contact, rest[1:])
     if len(rest) > (3 if action == "2" else 1):
         return screen(INVALID)
 
     # Call: Africa's Talking rings the caller, then /voice bridges them to the contact
     if action == "1":
-        if voice is None or not AT_VOICE_NUMBER:
-            return screen("Calling is not available yet. Choose 3 to get the number by SMS.")
         save_pending_call(caller, phone)
         start_call_async(caller)
         return end(f"We are calling you now. Answer to be connected to {name}.")
