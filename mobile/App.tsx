@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -191,7 +192,10 @@ function Main() {
       <StatusBar style="dark" />
       <View style={styles.column}>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Remote Phonebook</Text>
+        <View style={styles.brand}>
+          <Image source={require('./assets/logo.png')} style={styles.logo} accessibilityLabel="Oduma Corp" />
+          <Text style={styles.title}>Remote Phonebook</Text>
+        </View>
         {token && !booting && view !== 'register' && view !== 'reset' ? (
           <Pressable onPress={confirmLogout} hitSlop={10} accessibilityRole="button">
             <Text style={styles.logout}>Log out</Text>
@@ -1395,7 +1399,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F6F7F6', paddingHorizontal: 16, paddingTop: isWeb ? 24 : 80 },
   column: { flex: 1, width: '100%', maxWidth: 640, alignSelf: 'center' }, // centred on tablets and computers
   title: { fontSize: 26, fontWeight: '700', color: COLORS.text, flexShrink: 1 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 12 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
+  logo: { width: 40, height: 40 },
   logout: { color: COLORS.error, fontSize: 16, fontWeight: '600' },
   activeCard: { borderWidth: 2, borderColor: COLORS.primary },
   sessionRow: {
