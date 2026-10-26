@@ -8,7 +8,7 @@ A USSD phone book built on Africa's Talking. Each caller gets their own contact 
 3. My contacts      -> 4 per screen, 9 = more -> pick a contact
 4. Delete contact   -> pick number -> 1 Yes / 2 No
 5. SMS me my contacts (sent with the Africa's Talking SMS API)
-6. Set app PIN      -> 4 digits -> confirm
+6. Set app PIN      -> 4 digits -> confirm (once per number; hidden after)
 ```
 
 On the search and list screens, reply with the contact's position (1-4) or type any phone number:
@@ -64,4 +64,4 @@ API (JSON):
 - `GET /api/me` -> `{phone, contacts}`
 - `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
 
-Send the token as `Authorization: Bearer <token>`. Resetting the PIN logs out existing app sessions.
+Send the token as `Authorization: Bearer <token>`.
