@@ -37,8 +37,9 @@ DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "phoneboo
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 
 USSD_MAX_LEN = 182  # max characters a USSD screen can show
-PAGE_SIZE = 4  # contacts per screen; leaves room for "9. More" and the pick hint
-NAME_MAX = 14  # names are shortened on list screens so a full page + Back/Home fits
+PAGE_SIZE = 4  # contacts per screen; leaves room for "98. More" and the pick hint
+NAME_MAX = 13  # names are shortened on list screens so a full page + Back/Home fits
+MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 140
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
 RESUME_SECONDS = 5 * 60  # redial within this long to continue a timed-out USSD session
@@ -270,12 +271,12 @@ def update_pin(phone, pin):
 PHONE_RE = re.compile(r"^\+?\d{9,15}$")
 PHONE_JUNK_RE = re.compile(r"[\s\-().]")
 PIN_RE = re.compile(r"^\d{4}$")
-LOGIN_PHONE_RE = re.compile(r"^(?:\+254\d{9}|07\d{8})$")
-LOGIN_PHONE_FORMAT = "+254XXXXXXXXX or 07XXXXXXXX"
+LOGIN_PHONE_RE = re.compile(r"^(?:\+254\d{9}|0\d{9})$")
+LOGIN_PHONE_FORMAT = "+254XXXXXXXXX or 0XXXXXXXXX"
 
 
 def login_phone(raw):
-    """The number someone logs in with must be +254XXXXXXXXX or 07XXXXXXXX; returns +254... or None."""
+    """The number someone logs in with must be +254XXXXXXXXX or 0XXXXXXXXX (07.., 01..); returns +254... or None."""
     phone = PHONE_JUNK_RE.sub("", raw or "")
     if not LOGIN_PHONE_RE.match(phone):
         return None
@@ -302,10 +303,25 @@ def end(msg):
     return "END " + msg[: USSD_MAX_LEN - 4]
 
 
-def format_contacts(rows, numbered=False, short=False):
+def label(position):
+    """Number shown for the Nth contact in a list. Numbering continues across pages and skips 98 (More)."""
+    return position if position < int(MORE) else position + 1
+
+
+def position_of(choice, first, count):
+    """Index into a page whose first contact is number `first`, or None if `choice` isn't on it."""
+    if not choice.isdigit() or choice == MORE:
+        return None
+    n = int(choice)
+    position = n if n < int(MORE) else n - 1
+    index = position - first
+    return index if 0 <= index < count else None
+
+
+def format_contacts(rows, numbered=False, short=False, first=1):
     lines = []
-    for i, row in enumerate(rows, 1):
-        prefix = f"{i}. " if numbered else ""
+    for i, row in enumerate(rows, first):
+        prefix = f"{label(i)}. " if numbered else ""
         name = row["name"][:NAME_MAX].rstrip() if short else row["name"]
         lines.append(f"{prefix}{name} {row['phone']}")
     return "\n".join(lines)
@@ -550,15 +566,16 @@ def menu(owner, caller, parts):
         if not rows:
             return screen(none_yet)
         page, i = 0, 0
-        while i < len(rest) and rest[i] == "9" and (page + 1) * PAGE_SIZE < len(rows):
+        while i < len(rest) and rest[i] == MORE and (page + 1) * PAGE_SIZE < len(rows):
             page, i = page + 1, i + 1
         chunk = rows[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+        first = page * PAGE_SIZE + 1
         if i == len(rest):
-            body = format_contacts(chunk, numbered=True, short=True)
+            body = format_contacts(chunk, numbered=True, short=True, first=first)
             if (page + 1) * PAGE_SIZE < len(rows):
-                body += "\n9. More"
+                body += f"\n{MORE}. More"
             return screen(body + "\n" + PICK_HINT)
-        return pick_and_act(owner, caller, chunk, rest[i], rest[i + 1:])
+        return pick_and_act(owner, caller, chunk, rest[i], rest[i + 1:], first)
 
     # 4. Delete: 4 -> pick number -> 1 confirm / 2 cancel
     if choice == "4":
@@ -597,11 +614,12 @@ def menu(owner, caller, parts):
 PICK_HINT = "Reply no. or phone no."
 
 
-def pick_and_act(owner, caller, rows, selection, rest):
-    """Resolve a list position (1-4) or a typed phone number, then run the contact menu."""
+def pick_and_act(owner, caller, rows, selection, rest, first=1):
+    """Resolve a contact number shown on the page or a typed phone number, then run the contact menu."""
     selection = selection.strip()
-    if selection.isdigit() and 1 <= int(selection) <= len(rows):
-        contact = rows[int(selection) - 1]
+    index = position_of(selection, first, len(rows))
+    if index is not None:
+        contact = rows[index]
     else:
         phone = normalize_phone(selection)
         if not phone:

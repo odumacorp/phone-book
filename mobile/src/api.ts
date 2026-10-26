@@ -39,9 +39,9 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string |
 export const loadToken = () => SecureStore.getItemAsync(TOKEN_KEY);
 export const clearToken = () => SecureStore.deleteItemAsync(TOKEN_KEY);
 
-/** Same rule as the server: +254XXXXXXXXX or 07XXXXXXXX (spaces and dashes are ignored). */
-export const PHONE_FORMAT = '+254XXXXXXXXX or 07XXXXXXXX';
-export const isValidPhone = (phone: string) => /^(\+254\d{9}|07\d{8})$/.test(phone.replace(/[\s\-().]/g, ''));
+/** Same rule as the server: +254XXXXXXXXX or 0XXXXXXXXX (spaces and dashes are ignored). */
+export const PHONE_FORMAT = '+254XXXXXXXXX or 0XXXXXXXXX';
+export const isValidPhone = (phone: string) => /^(\+254\d{9}|0\d{9})$/.test(phone.replace(/[\s\-().]/g, ''));
 
 async function saveToken(path: string, body: object, token?: string): Promise<string> {
   const res = await request<{ token: string }>(path, { method: 'POST', body: JSON.stringify(body) }, token);
