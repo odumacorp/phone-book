@@ -1,14 +1,18 @@
 # Phone Book USSD (*384*88041#)
 
-A USSD phone book built on Africa's Talking. Each caller gets their own contact list.
+A USSD phone book built on Africa's Talking. Each phone number has its own contact list,
+reachable from any phone after logging in.
+
+Every session starts with a login: phone number -> 4-digit PIN -> main menu.
+The first time, a number has no PIN; dialling from that same phone creates one (once only).
+Wrong PINs count toward the same lockout as the app (5 tries, then 15 minutes).
 
 ```
 1. Add contact      -> name -> phone number
 2. Search contact   -> part of a name -> pick a contact
 3. My contacts      -> 4 per screen, 9 = more -> pick a contact
 4. Delete contact   -> pick number -> 1 Yes / 2 No
-5. SMS me my contacts (sent with the Africa's Talking SMS API)
-6. Set app PIN      -> 4 digits -> confirm (once per number; hidden after)
+5. SMS me my contacts (sent to the phone in use, with the Africa's Talking SMS API)
 ```
 
 On the search and list screens, reply with the contact's position (1-4) or type any phone number:
@@ -51,7 +55,7 @@ contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must 
 ## Mobile app (`mobile/`)
 
 An Expo (React Native) Android app that uploads the phone's contacts to the user's phone book.
-Users log in with their phone number and the PIN set via USSD option 6.
+Users log in with the same phone number and PIN they use on USSD.
 
 ```bash
 cd mobile && npm install

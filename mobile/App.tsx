@@ -105,7 +105,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => Promise<void> })
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button title="Log in" onPress={submit} busy={busy} disabled={!phone || pin.length !== 4} />
       <Text style={styles.hint}>
-        No PIN yet? Dial {USSD_CODE} and choose 6. Set app PIN.
+        No PIN yet? Dial {USSD_CODE} from this phone, enter your number and create one.
       </Text>
     </KeyboardAvoidingView>
   );

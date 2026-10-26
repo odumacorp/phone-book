@@ -269,23 +269,84 @@ def start_call_async(to):
 
 
 MAIN_MENU = (
-    "Welcome to Remote Phone-Book\n"
+    "Remote Phone-Book\n"
     "1. Add contact\n"
     "2. Search contact\n"
     "3. My contacts\n"
     "4. Delete contact\n"
     "5. SMS me my contacts"
 )
-SET_PIN_ITEM = "\n6. Set app PIN"  # only shown until the number has a PIN
-PIN_ALREADY_SET = "Your app PIN is already set. Use it to log in to the app."
+
+
+# ---------------------------------------------------------------- login
+
+def check_pin(phone, pin):
+    """Verify a PIN with lockout. Returns (user, None) on success or (None, error message)."""
+    user = get_user(phone)
+    if not user:
+        return None, "Wrong phone number or PIN."
+    now = int(time.time())
+    if user["locked_until"] > now:
+        minutes = (user["locked_until"] - now + 59) // 60  # round up
+        return None, f"Too many wrong PINs. Try again in {minutes} min."
+    if not check_password_hash(user["pin_hash"], pin):
+        attempts = user["failed_attempts"] + 1
+        locked_until = now + LOCKOUT_SECONDS if attempts >= MAX_PIN_ATTEMPTS else 0
+        execute(
+            "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE phone = ?",
+            (0 if locked_until else attempts, locked_until, phone),
+        )
+        if locked_until:
+            return None, "Too many wrong PINs. Try again in 15 min."
+        return None, "Wrong phone number or PIN."
+    if user["failed_attempts"]:
+        execute("UPDATE users SET failed_attempts = 0 WHERE phone = ?", (phone,))
+    return user, None
+
+
+def handle(caller, text):
+    """Every session starts with: phone number -> PIN (or first-time PIN setup) -> main menu.
+
+    The number entered decides whose phone book opens, so users can reach their contacts
+    from any phone. SMS replies and calls go to `caller`, the phone actually in use.
+    """
+    parts = text.split("*") if text else []
+    if not parts:
+        return con("Welcome to Remote Phone-Book\nEnter your phone number:")
+
+    owner = normalize_phone(parts[0])
+    if not owner:
+        return end("Invalid phone number. Please dial again.")
+
+    if not get_user(owner):
+        # First time: a PIN can only be created from the phone that owns the number, once
+        if owner != caller:
+            return end(f"{owner} has no PIN yet. Dial from that phone to set one.")
+        if len(parts) == 1:
+            return con("Create a 4-digit PIN for your phone book:")
+        if not PIN_RE.match(parts[1]):
+            return end("PIN must be exactly 4 digits.")
+        if len(parts) == 2:
+            return con("Confirm your PIN:")
+        if parts[2] != parts[1]:
+            return end("PINs do not match. Please dial again.")
+        if not set_pin(owner, parts[1]):
+            return end("A PIN was already set for this number. Please dial again.")
+        return end("PIN set. Dial again and log in with your phone number and PIN.")
+
+    if len(parts) == 1:
+        return con("Enter your PIN:")
+    _user, error = check_pin(owner, parts[1])
+    if error:
+        return end(error)
+    return menu(owner, caller, parts[2:])
 
 
 # ---------------------------------------------------------------- menu logic
 
-def handle(phone_number, text):
-    parts = text.split("*") if text else []
+def menu(owner, caller, parts):
     if not parts:
-        return con(MAIN_MENU + ("" if get_user(phone_number) else SET_PIN_ITEM))
+        return con(MAIN_MENU)
 
     choice, rest = parts[0], parts[1:]
 
@@ -301,7 +362,7 @@ def handle(phone_number, text):
         phone = normalize_phone(rest[1])
         if not phone:
             return end("Invalid phone number. Please try again.")
-        add_contact(phone_number, name, phone)
+        add_contact(owner, name, phone)
         return end(f"Saved {name} - {phone}")
 
     # 2. Search: 2 -> query -> pick contact -> action
@@ -309,16 +370,16 @@ def handle(phone_number, text):
         if len(rest) == 0:
             return con("Enter name to search:")
         query = rest[0].strip()
-        rows = search_contacts(phone_number, query)
+        rows = search_contacts(owner, query)
         if not rows:
             return end(f"No contacts match '{query}'.")
         if len(rest) == 1:
             return con(format_contacts(rows, numbered=True, short=True) + "\n" + PICK_HINT)
-        return pick_and_act(phone_number, rows, rest[1], rest[2:])
+        return pick_and_act(owner, caller, rows, rest[1], rest[2:])
 
     # 3. List, paginated: 3 -> 9 (more) -> 9 ... -> pick contact -> action
     if choice == "3":
-        rows = list_contacts(phone_number)
+        rows = list_contacts(owner)
         if not rows:
             return end("You have no contacts yet.")
         page, i = 0, 0
@@ -330,11 +391,11 @@ def handle(phone_number, text):
             if (page + 1) * PAGE_SIZE < len(rows):
                 body += "\n9. More"
             return con(body + "\n" + PICK_HINT)
-        return pick_and_act(phone_number, chunk, rest[i], rest[i + 1:])
+        return pick_and_act(owner, caller, chunk, rest[i], rest[i + 1:])
 
     # 4. Delete: 4 -> pick number -> 1 confirm / 2 cancel
     if choice == "4":
-        rows = list_contacts(phone_number)[:PAGE_SIZE]
+        rows = list_contacts(owner)[:PAGE_SIZE]
         if not rows:
             return end("You have no contacts to delete.")
         if len(rest) == 0:
@@ -345,35 +406,19 @@ def handle(phone_number, text):
         if len(rest) == 1:
             return con(f"Delete {contact['name']} {contact['phone']}?\n1. Yes\n2. No")
         if rest[1] == "1":
-            delete_contact(phone_number, contact["id"])
+            delete_contact(owner, contact["id"])
             return end(f"{contact['name']} deleted.")
         return end("Cancelled.")
 
-    # 5. SMS full phone book to the caller
+    # 5. SMS full phone book to the phone in use
     if choice == "5":
         if sms is None:
             return end("SMS service is not available right now.")
-        rows = list_contacts(phone_number)
+        rows = list_contacts(owner)
         if not rows:
             return end("You have no contacts yet.")
-        send_sms_async(phone_number, "Your contacts:\n" + format_contacts(rows))
+        send_sms_async(caller, "Your contacts:\n" + format_contacts(rows))
         return end("You will receive your contacts by SMS shortly.")
-
-    # 6. Set the mobile app PIN (once only): 6 -> pin -> confirm
-    if choice == "6":
-        if get_user(phone_number):
-            return end(PIN_ALREADY_SET)
-        if len(rest) == 0:
-            return con("Enter a 4-digit PIN for the Phone Book app:")
-        if not PIN_RE.match(rest[0]):
-            return end("PIN must be exactly 4 digits.")
-        if len(rest) == 1:
-            return con("Confirm your PIN:")
-        if rest[1] != rest[0]:
-            return end("PINs do not match. Please try again.")
-        if not set_pin(phone_number, rest[0]):
-            return end(PIN_ALREADY_SET)
-        return end(f"App PIN set. Log in to the app with {phone_number} and this PIN.")
 
     return end("Invalid choice. Please dial again.")
 
@@ -381,7 +426,7 @@ def handle(phone_number, text):
 PICK_HINT = "Reply no. or a phone no."
 
 
-def pick_and_act(owner, rows, selection, rest):
+def pick_and_act(owner, caller, rows, selection, rest):
     """Resolve a list position (1-4) or a typed phone number, then run the contact menu."""
     selection = selection.strip()
     if selection.isdigit() and 1 <= int(selection) <= len(rows):
@@ -391,10 +436,10 @@ def pick_and_act(owner, rows, selection, rest):
         if not phone:
             return end("Invalid choice. Enter a number from the list or a phone number.")
         contact = find_contact_by_phone(owner, phone) or {"name": phone, "phone": phone}
-    return contact_menu(owner, contact, rest)
+    return contact_menu(owner, caller, contact, rest)
 
 
-def contact_menu(owner, contact, rest):
+def contact_menu(owner, caller, contact, rest):
     name, phone = contact["name"], contact["phone"]
     if len(rest) == 0:
         title = name if name == phone else f"{name}\n{phone}"
@@ -406,8 +451,8 @@ def contact_menu(owner, contact, rest):
     if action == "1":
         if voice is None or not AT_VOICE_NUMBER:
             return end("Calling is not available yet. Choose 3 to get the number by SMS.")
-        save_pending_call(owner, phone)
-        start_call_async(owner)
+        save_pending_call(caller, phone)
+        start_call_async(caller)
         return end(f"We are calling you now. Answer to be connected to {name}.")
 
     if action in ("2", "3") and sms is None:
@@ -425,7 +470,7 @@ def contact_menu(owner, contact, rest):
 
     # Copy number: USSD can't reach the clipboard, so text it to the user to copy/call/save
     if action == "3":
-        send_sms_async(owner, f"{name}: {phone}" if name != phone else phone)
+        send_sms_async(caller, f"{name}: {phone}" if name != phone else phone)
         whose = f"{name}'s number" if name != phone else "The number"
         return end(f"{whose} is on its way by SMS. Open it to copy, call or save it.")
 
@@ -455,15 +500,17 @@ def ussd():
     service_code = request.values.get("serviceCode", "")
     phone_number = request.values.get("phoneNumber", "")
     text = request.values.get("text", "")
-    # Don't log PINs typed in the "Set app PIN" flow
-    logged_text = "6*<pin>" if text.startswith("6*") else text
-    log.info("session=%s code=%s phone=%s text=%r", session_id, service_code, phone_number, logged_text)
+    # The second input is always a PIN (login or first-time setup) - never log it or the confirmation
+    logged = text.split("*")
+    logged[1:3] = ["<pin>"] * len(logged[1:3])
+    log.info("session=%s code=%s phone=%s text=%r", session_id, service_code, phone_number, "*".join(logged))
 
-    if not phone_number:
+    caller = normalize_phone(phone_number)
+    if not caller:
         body = end("Could not identify your phone number.")
     else:
         try:
-            body = handle(phone_number, text)
+            body = handle(caller, text)
         except Exception:
             log.exception("Error handling USSD request")
             body = end("Something went wrong. Please try again.")
@@ -516,28 +563,12 @@ def api_login():
     if not phone or not PIN_RE.match(pin):
         return api_error("Enter your phone number and 4-digit PIN.", 400)
 
-    user = get_user(phone)
-    if not user:
-        return api_error("No PIN set for this number. Dial *384*88041# and choose 6 to set one.", 401)
+    if not get_user(phone):
+        return api_error("No PIN set for this number. Dial *384*88041# from this phone to set one.", 401)
 
-    now = int(time.time())
-    if user["locked_until"] > now:
-        minutes = (user["locked_until"] - now) // 60 + 1
-        return api_error(f"Too many wrong PINs. Try again in {minutes} min.", 429)
-
-    if not check_password_hash(user["pin_hash"], pin):
-        attempts = user["failed_attempts"] + 1
-        locked_until = now + LOCKOUT_SECONDS if attempts >= MAX_PIN_ATTEMPTS else 0
-        execute(
-            "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE phone = ?",
-            (0 if locked_until else attempts, locked_until, phone),
-        )
-        if locked_until:
-            return api_error("Too many wrong PINs. Try again in 15 min.", 429)
-        return api_error("Wrong phone number or PIN.", 401)
-
-    if user["failed_attempts"]:
-        execute("UPDATE users SET failed_attempts = 0 WHERE phone = ?", (phone,))
+    user, error = check_pin(phone, pin)
+    if error:
+        return api_error(error, 429 if error.startswith("Too many") else 401)
     return jsonify({"token": make_token(user), "phone": phone})
 
 
