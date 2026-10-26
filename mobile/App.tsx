@@ -13,16 +13,17 @@ import {
 
 import {
   ApiError,
+  CodeFlow,
   Me,
   PHONE_FORMAT,
   changePin,
   clearToken,
-  confirmPinReset,
+  confirmCode,
   getMe,
   isValidPhone,
   loadToken,
   login,
-  requestPinReset,
+  requestCode,
   syncContacts,
 } from './src/api';
 import { readDeviceContacts } from './src/deviceContacts';
@@ -30,7 +31,7 @@ import { readDeviceContacts } from './src/deviceContacts';
 const USSD_CODE = '*384*88041#';
 const BATCH_SIZE = 1000;
 
-type View_ = 'login' | 'reset' | 'sync' | 'changePin';
+type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
@@ -76,9 +77,21 @@ export default function App() {
 
   let content;
   if (booting) content = <ActivityIndicator size="large" color={COLORS.primary} />;
-  else if (view === 'reset')
-    content = <ResetPinScreen onDone={(t) => loggedIn(t, 'PIN reset. You are logged in.')} onCancel={() => setView('login')} />;
-  else if (!token) content = <LoginScreen onLogin={loggedIn} onForgot={() => setView('reset')} />;
+  else if (view === 'register' || view === 'reset')
+    content = (
+      <CodeScreen
+        key={view}
+        flow={view}
+        onDone={(t) =>
+          loggedIn(t, view === 'register' ? 'Account created. Tap Sync contacts to upload them.' : 'PIN reset. You are logged in.')
+        }
+        onCancel={() => setView('login')}
+      />
+    );
+  else if (!token)
+    content = (
+      <LoginScreen onLogin={loggedIn} onRegister={() => setView('register')} onForgot={() => setView('reset')} />
+    );
   else if (view === 'changePin')
     content = (
       <ChangePinScreen
@@ -112,7 +125,15 @@ export default function App() {
   );
 }
 
-function LoginScreen({ onLogin, onForgot }: { onLogin: (token: string) => Promise<void>; onForgot: () => void }) {
+function LoginScreen({
+  onLogin,
+  onRegister,
+  onForgot,
+}: {
+  onLogin: (token: string) => Promise<void>;
+  onRegister: () => void;
+  onForgot: () => void;
+}) {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
@@ -138,14 +159,23 @@ function LoginScreen({ onLogin, onForgot }: { onLogin: (token: string) => Promis
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button title="Log in" onPress={submit} busy={busy} disabled={!phone || pin.length !== 4} />
       <Link title="Forgot PIN?" onPress={onForgot} disabled={busy} />
-      <Text style={styles.hint}>
-        No PIN yet? Dial {USSD_CODE} from this phone, enter your number and create one.
-      </Text>
+      <Link title="New here? Register your number" onPress={onRegister} disabled={busy} />
     </KeyboardAvoidingView>
   );
 }
 
-function ResetPinScreen({ onDone, onCancel }: { onDone: (token: string) => void; onCancel: () => void }) {
+const CODE_SCREEN_TEXT: Record<CodeFlow, { heading: string; intro: string; button: string }> = {
+  register: {
+    heading: 'Register your number',
+    intro: `We will text a 6-digit code to confirm the number is yours. You will then use it with your PIN here and on ${USSD_CODE}.`,
+    button: 'Create account',
+  },
+  reset: { heading: 'Reset your PIN', intro: 'We will text a 6-digit code to your number.', button: 'Reset PIN' },
+};
+
+/** Register a new number, or reset a forgotten PIN: phone -> SMS code -> new PIN. */
+function CodeScreen({ flow, onDone, onCancel }: { flow: CodeFlow; onDone: (token: string) => void; onCancel: () => void }) {
+  const text = CODE_SCREEN_TEXT[flow];
   const [phone, setPhone] = useState('');
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState('');
@@ -169,29 +199,31 @@ function ResetPinScreen({ onDone, onCancel }: { onDone: (token: string) => void;
   const sendCode = () => {
     if (!isValidPhone(phone)) return setError(`Enter your phone number as ${PHONE_FORMAT}.`);
     run(async () => {
-      await requestPinReset(phone);
+      await requestCode(flow, phone);
       setCodeSent(true);
     });
   };
 
-  const reset = () => {
-    if (pin !== confirm) return setError('New PINs do not match.');
-    run(async () => onDone(await confirmPinReset(phone, code, pin)));
+  const finish = () => {
+    if (pin !== confirm) return setError('PINs do not match.');
+    run(async () => onDone(await confirmCode(flow, phone, code, pin)));
   };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.card}>
-      <Text style={styles.heading}>Reset your PIN</Text>
+      <Text style={styles.heading}>{text.heading}</Text>
       {!codeSent ? (
         <>
-          <Text style={styles.hint}>We will text a 6-digit code to your number.</Text>
+          <Text style={styles.hint}>{text.intro}</Text>
           <PhoneField value={phone} onChange={setPhone} />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button title="Send code" onPress={sendCode} busy={busy} disabled={!phone} />
         </>
       ) : (
         <>
-          <Text style={styles.hint}>Enter the code sent to {phone} and choose a new PIN.</Text>
+          <Text style={styles.hint}>
+            Enter the code sent to {phone} and choose a {flow === 'register' ? '4-digit' : 'new'} PIN.
+          </Text>
           <Text style={styles.label}>6-digit code</Text>
           <TextInput
             style={styles.input}
@@ -202,12 +234,12 @@ function ResetPinScreen({ onDone, onCancel }: { onDone: (token: string) => void;
             autoComplete="sms-otp"
             textContentType="oneTimeCode"
           />
-          <PinField label="New PIN" value={pin} onChange={setPin} />
-          <PinField label="Confirm new PIN" value={confirm} onChange={setConfirm} />
+          <PinField label={flow === 'register' ? 'PIN' : 'New PIN'} value={pin} onChange={setPin} />
+          <PinField label={flow === 'register' ? 'Confirm PIN' : 'Confirm new PIN'} value={confirm} onChange={setConfirm} />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button
-            title="Reset PIN"
-            onPress={reset}
+            title={text.button}
+            onPress={finish}
             busy={busy}
             disabled={code.length !== 6 || pin.length !== 4 || confirm.length !== 4}
           />

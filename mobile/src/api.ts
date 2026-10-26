@@ -53,11 +53,15 @@ export const login = (phone: string, pin: string) => saveToken('/api/login', { p
 export const changePin = (token: string, currentPin: string, newPin: string) =>
   saveToken('/api/pin/change', { current_pin: currentPin, new_pin: newPin }, token);
 
-export const requestPinReset = (phone: string) =>
-  request<{ sent: boolean }>('/api/pin/reset/request', { method: 'POST', body: JSON.stringify({ phone }) });
+/** Register a new number or reset a forgotten PIN: both text a 6-digit code to the number first. */
+export type CodeFlow = 'register' | 'reset';
+const CODE_PATHS: Record<CodeFlow, string> = { register: '/api/register', reset: '/api/pin/reset' };
 
-export const confirmPinReset = (phone: string, code: string, newPin: string) =>
-  saveToken('/api/pin/reset/confirm', { phone, code, new_pin: newPin });
+export const requestCode = (flow: CodeFlow, phone: string) =>
+  request<{ sent: boolean }>(`${CODE_PATHS[flow]}/request`, { method: 'POST', body: JSON.stringify({ phone }) });
+
+export const confirmCode = (flow: CodeFlow, phone: string, code: string, newPin: string) =>
+  saveToken(`${CODE_PATHS[flow]}/confirm`, { phone, code, new_pin: newPin });
 
 export const getMe = (token: string) => request<Me>('/api/me', {}, token);
 

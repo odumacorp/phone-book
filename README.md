@@ -4,7 +4,7 @@ A USSD phone book built on Africa's Talking. Each phone number has its own conta
 reachable from any phone after logging in.
 
 Every session starts with a login: phone number (`+254XXXXXXXXX` or `07XXXXXXXX`) -> 4-digit PIN -> main menu.
-The first time, a number has no PIN; dialling from that same phone creates one (once only).
+Numbers are registered in the mobile app (SMS code + PIN); an unregistered number dialling in is told to register there.
 Wrong PINs count toward the same lockout as the app (5 tries, then 15 minutes).
 PINs are changed or reset only in the mobile app (Change PIN / Forgot PIN), never over USSD.
 
@@ -60,7 +60,7 @@ contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must 
 ## Mobile app (`mobile/`)
 
 An Expo (React Native) Android app that uploads the phone's contacts to the user's phone book.
-Users log in with the same phone number and PIN they use on USSD.
+Users register their number here (6-digit SMS code, then a PIN) and log in with the same number and PIN they use on USSD.
 
 ```bash
 cd mobile && npm install
@@ -69,6 +69,8 @@ npx eas-cli build -p android --profile preview   # installable APK (needs a free
 ```
 
 API (JSON):
+- `POST /api/register/request` `{phone}` -> texts a 6-digit code (valid 10 min, one per minute)
+- `POST /api/register/confirm` `{phone, code, new_pin, confirm_pin}` -> `{token}`; creates the account
 - `POST /api/login` `{phone, pin}` -> `{token}`; 5 wrong PINs lock the number for 15 minutes
 - `GET /api/me` -> `{phone, contacts}`
 - `POST /api/pin/change` `{current_pin, new_pin, confirm_pin}` -> `{token}`; other sessions are logged out
