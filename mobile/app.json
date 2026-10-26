@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Phone Book",
+    "slug": "phone-book",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.odumacorp.phonebook",
+      "permissions": [
+        "android.permission.READ_CONTACTS"
+      ],
+      "blockedPermissions": [
+        "android.permission.WRITE_CONTACTS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Phone Book uploads your contacts so you can reach them by USSD."
+        }
+      ]
+    ]
+  }
+}
