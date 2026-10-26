@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Phone Book",
+    "name": "Remote Phonebook",
     "slug": "phone-book",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -33,7 +33,7 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "Phone Book uploads your contacts so you can reach them by USSD."
+          "contactsPermission": "Remote Phonebook lets you choose contacts to add to your phone book, so you can reach them by USSD."
         }
       ]
     ]

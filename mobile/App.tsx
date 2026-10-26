@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -19,17 +20,21 @@ import {
   Contact,
   Me,
   PASSWORD_MIN,
+  SyncContact,
   UssdLogin,
   PHONE_FORMAT,
+  addContact,
   changePassword,
   changePin,
   clearToken,
+  deleteContact,
   getContacts,
   getLogins,
   getMe,
   isValidPhone,
   loadToken,
   login,
+  normalizePhone,
   register,
   requestPasswordReset,
   requestRegistration,
@@ -44,7 +49,7 @@ import { readDeviceContacts } from './src/deviceContacts';
 const USSD_CODE = '*384*88041#';
 const BATCH_SIZE = 1000;
 
-type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin' | 'changePassword' | 'logins';
+type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin' | 'changePassword' | 'logins' | 'addContact' | 'pickContacts';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
@@ -101,6 +106,10 @@ export default function App() {
   else if (view === 'changePassword')
     content = <ChangePasswordScreen token={token} onDone={(t) => loggedIn(t, 'Password changed.')} onCancel={back} onLogout={logout} />;
   else if (view === 'logins') content = <LoginHistoryScreen token={token} onBack={back} onLogout={logout} />;
+  else if (view === 'addContact')
+    content = <AddContactScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
+  else if (view === 'pickContacts')
+    content = <PickContactsScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
   else if (view === 'changePin')
     content = <ChangePinScreen token={token} onDone={(t) => loggedIn(t, 'USSD PIN changed.')} onCancel={back} onLogout={logout} />;
   else
@@ -118,6 +127,14 @@ export default function App() {
           setNotice('');
           setView('changePassword');
         }}
+        onAddContact={() => {
+          setNotice('');
+          setView('addContact');
+        }}
+        onPickContacts={() => {
+          setNotice('');
+          setView('pickContacts');
+        }}
         onLoginHistory={() => {
           setNotice('');
           setView('logins');
@@ -129,7 +146,7 @@ export default function App() {
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
-      <Text style={styles.title}>Phone Book</Text>
+      <Text style={styles.title}>Remote Phonebook</Text>
       {content}
     </View>
   );
@@ -418,6 +435,7 @@ function ChangePinScreen({
 
 const LOGIN_RESULT: Record<UssdLogin['reason'], string> = {
   ok: 'Logged in',
+  resumed: 'Continued (within 5 min)',
   wrong_pin: 'Wrong PIN',
   locked: 'Blocked: too many wrong PINs',
 };
@@ -508,6 +526,210 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
   );
 }
 
+function AddContactScreen({
+  token,
+  onDone,
+  onCancel,
+  onLogout,
+}: {
+  token: string;
+  onDone: (message: string) => void;
+  onCancel: () => void;
+  onLogout: () => void;
+}) {
+  const [name, setNameText] = useState('');
+  const [phone, setPhone] = useState('');
+  const { busy, error, setError, run } = useForm();
+
+  const submit = () => {
+    if (!name.trim()) return setError('Enter a name.');
+    if (!normalizePhone(phone)) return setError('Enter a valid phone number, e.g. 0712 345 678 or +965 6674 4067.');
+    run(async () => {
+      try {
+        const saved = await addContact(token, name.trim(), phone);
+        onDone(`${saved.name} added.`);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return onLogout();
+        throw e;
+      }
+    });
+  };
+
+  return (
+    <Form>
+      <Text style={styles.heading}>Add contact</Text>
+      <Text style={styles.label}>Name</Text>
+      <TextInput style={styles.input} value={name} onChangeText={setNameText} placeholder="e.g. Mama Mboga" maxLength={60} />
+      <Text style={styles.label}>Phone number</Text>
+      <TextInput
+        style={styles.input}
+        value={phone}
+        onChangeText={setPhone}
+        placeholder="0712 345 678"
+        keyboardType="phone-pad"
+      />
+      <Text style={styles.hint}>Kenyan numbers can start with 0; other countries need the + code.</Text>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button title="Add contact" onPress={submit} busy={busy} disabled={!name.trim() || !phone.trim()} />
+      <Link title="Cancel" onPress={onCancel} disabled={busy} />
+    </Form>
+  );
+}
+
+type DeviceEntry = SyncContact & { key: string; saved: boolean };
+
+/** Choose which of the phone's contacts go into the Remote Phonebook (instead of uploading them all). */
+function PickContactsScreen({
+  token,
+  onDone,
+  onCancel,
+  onLogout,
+}: {
+  token: string;
+  onDone: (message: string) => void;
+  onCancel: () => void;
+  onLogout: () => void;
+}) {
+  const [entries, setEntries] = useState<DeviceEntry[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState('');
+  const { busy, error, setError, run } = useForm();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [device, saved] = await Promise.all([readDeviceContacts(), getContacts(token)]);
+        if (device === null) {
+          setEntries([]);
+          return setError('Contacts permission is needed. Allow it in Settings → Apps → Remote Phonebook.');
+        }
+        const savedPhones = new Set(saved.contacts.map((c) => c.phone));
+        const seen = new Set<string>();
+        const list: DeviceEntry[] = [];
+        for (const c of device) {
+          const key = normalizePhone(c.phone);
+          if (!key || seen.has(key)) continue; // skip invalid numbers and duplicates
+          seen.add(key);
+          list.push({ ...c, key, saved: savedPhones.has(key) });
+        }
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setEntries(list);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return onLogout();
+        setEntries([]);
+        setError(e instanceof Error ? e.message : 'Could not read your contacts.');
+      }
+    })();
+  }, [token]);
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = entries ?? [];
+    return q ? list.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)) : list;
+  }, [entries, query]);
+  const addable = shown.filter((c) => !c.saved);
+
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const upload = () =>
+    run(async () => {
+      const chosen = (entries ?? []).filter((c) => selected.has(c.key));
+      let added = 0;
+      for (let i = 0; i < chosen.length; i += BATCH_SIZE) {
+        setStatus(`Adding ${Math.min(i + BATCH_SIZE, chosen.length)} of ${chosen.length}…`);
+        const batch = chosen.slice(i, i + BATCH_SIZE).map(({ name, phone }) => ({ name, phone }));
+        added += (await syncContacts(token, batch)).added;
+      }
+      onDone(`${added} contact${added === 1 ? '' : 's'} added.`);
+    });
+
+  return (
+    <View style={styles.list}>
+      <FlatList
+        style={styles.list}
+        data={shown}
+        keyExtractor={(c) => c.key}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={
+          <>
+            <View style={styles.card}>
+              <Text style={styles.heading}>Choose contacts from your phone</Text>
+              <Text style={styles.hint}>
+                Tick the contacts to add to your Remote Phonebook. Ones already added are marked.
+              </Text>
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <Link title="Cancel" onPress={onCancel} disabled={busy} />
+            </View>
+            <TextInput
+              style={[styles.input, styles.search]}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search your phone's contacts"
+              autoCorrect={false}
+            />
+            {addable.length ? (
+              <View style={styles.linkRow}>
+                <Link
+                  title={`Select all${query ? ' shown' : ''} (${addable.length})`}
+                  onPress={() => setSelected((prev) => new Set([...prev, ...addable.map((c) => c.key)]))}
+                />
+                <Link title="Clear" onPress={() => setSelected(new Set())} />
+              </View>
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          entries === null ? (
+            <ActivityIndicator color={COLORS.primary} />
+          ) : (
+            <Text style={styles.hint}>{query ? 'No contacts match.' : 'No contacts with phone numbers on this phone.'}</Text>
+          )
+        }
+        renderItem={({ item }) => {
+          const on = selected.has(item.key);
+          return (
+            <Pressable
+              style={styles.row}
+              onPress={() => !item.saved && toggle(item.key)}
+              disabled={item.saved || busy}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: item.saved || on, disabled: item.saved }}
+            >
+              <View style={styles.rowText}>
+                <Text style={[styles.rowName, item.saved && styles.muted]} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Text style={styles.rowPhone}>{item.phone}</Text>
+              </View>
+              {item.saved ? (
+                <Text style={styles.savedTag}>Added</Text>
+              ) : (
+                <View style={[styles.checkbox, on && styles.checkboxOn]}>{on ? <Text style={styles.checkmark}>✓</Text> : null}</View>
+              )}
+            </Pressable>
+          );
+        }}
+      />
+      <View style={styles.footer}>
+        {status ? <Text style={styles.status}>{status}</Text> : null}
+        <Button
+          title={selected.size ? `Add ${selected.size} contact${selected.size === 1 ? '' : 's'}` : 'Select contacts to add'}
+          onPress={upload}
+          busy={busy}
+          disabled={!selected.size}
+        />
+      </View>
+    </View>
+  );
+}
+
 /** Home: sync, the USSD visibility switch, and the synced phone book with priority stars. */
 function SyncScreen({
   token,
@@ -516,6 +738,8 @@ function SyncScreen({
   notice,
   onChangePin,
   onChangePassword,
+  onAddContact,
+  onPickContacts,
   onLoginHistory,
   onLogout,
 }: {
@@ -525,6 +749,8 @@ function SyncScreen({
   notice: string;
   onChangePin: () => void;
   onChangePassword: () => void;
+  onAddContact: () => void;
+  onPickContacts: () => void;
   onLoginHistory: () => void;
   onLogout: () => void;
 }) {
@@ -583,7 +809,7 @@ function SyncScreen({
       const device = await readDeviceContacts();
       if (device === null) {
         setStatus('');
-        setError('Contacts permission is needed. Allow it in Settings → Apps → Phone Book.');
+        setError('Contacts permission is needed. Allow it in Settings → Apps → Remote Phonebook.');
         return;
       }
       let added = 0;
@@ -620,6 +846,25 @@ function SyncScreen({
       failed(e, 'Could not update the contact.');
     }
   };
+
+  const confirmRemove = (contact: Contact) =>
+    Alert.alert(contact.name, `${contact.phone}\n\nRemove from your Remote Phonebook? It stays on your phone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setError('');
+          try {
+            await deleteContact(token, contact.id);
+            setContacts((list) => list && list.filter((c) => c.id !== contact.id));
+            setStatus(`${contact.name} removed.`);
+          } catch (e) {
+            failed(e, 'Could not remove the contact.');
+          }
+        },
+      },
+    ]);
 
   const toggleShowOthers = async (value: boolean) => {
     setShowOthersState(value);
@@ -658,7 +903,11 @@ function SyncScreen({
           />
           {name.trim() && name.trim() !== savedName ? <Link title="Save" onPress={saveName} /> : null}
         </View>
-        <Button title="Sync contacts" onPress={sync} busy={busy} />
+        <Button title="Choose contacts from phone" onPress={onPickContacts} disabled={busy} />
+        <View style={styles.buttonRow}>
+          <SecondaryButton title="Add contact" onPress={onAddContact} disabled={busy} />
+          <SecondaryButton title="Sync all" onPress={sync} busy={busy} />
+        </View>
         {status ? <Text style={styles.status}>{status}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <View style={styles.switchRow}>
@@ -682,7 +931,7 @@ function SyncScreen({
       <Text style={styles.sectionTitle}>
         Your contacts{contacts ? ` (${contacts.length})` : ''} · ★ {priorityCount}/{maxPriority} priority
       </Text>
-      <Text style={styles.hint}>Tap ☆ to pick up to {maxPriority} priority contacts.</Text>
+      <Text style={styles.hint}>Tap ☆ to pick up to {maxPriority} priority contacts. Tap a contact to remove it.</Text>
       <TextInput
         style={[styles.input, styles.search]}
         value={query}
@@ -705,18 +954,18 @@ function SyncScreen({
           <ActivityIndicator color={COLORS.primary} />
         ) : (
           <Text style={styles.hint}>
-            {query ? 'No contacts match.' : 'No contacts yet. Tap Sync contacts to upload your phone\'s contacts.'}
+            {query ? 'No contacts match.' : 'No contacts yet. Choose some from your phone, or add one.'}
           </Text>
         )
       }
       renderItem={({ item }) => (
         <View style={styles.row}>
-          <View style={styles.rowText}>
+          <Pressable style={styles.rowText} onPress={() => confirmRemove(item)} accessibilityHint="Remove this contact">
             <Text style={styles.rowName} numberOfLines={1}>
               {item.name}
             </Text>
             <Text style={styles.rowPhone}>{item.phone}</Text>
-          </View>
+          </Pressable>
           <Pressable
             onPress={() => togglePriority(item)}
             hitSlop={12}
@@ -852,6 +1101,25 @@ function Button({
   );
 }
 
+function SecondaryButton({
+  title,
+  onPress,
+  busy,
+  disabled,
+}: {
+  title: string;
+  onPress: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+}) {
+  const off = busy || disabled;
+  return (
+    <Pressable style={[styles.secondary, off && styles.buttonOff]} onPress={onPress} disabled={off}>
+      {busy ? <ActivityIndicator color={COLORS.primary} /> : <Text style={styles.secondaryText}>{title}</Text>}
+    </Pressable>
+  );
+}
+
 function Link({ title, onPress, disabled }: { title: string; onPress: () => void; disabled?: boolean }) {
   return (
     <Pressable onPress={onPress} disabled={disabled}>
@@ -896,6 +1164,31 @@ const styles = StyleSheet.create({
   nameInput: { flex: 1 },
   showLink: { color: COLORS.primary, fontSize: 15 },
   spacer: { height: 16 },
+  buttonRow: { flexDirection: 'row', gap: 12 },
+  secondary: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  secondaryText: { color: COLORS.primary, fontSize: 16, fontWeight: '600' },
+  muted: { color: COLORS.muted },
+  savedTag: { fontSize: 13, color: COLORS.muted },
+  checkbox: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  checkmark: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  footer: { paddingTop: 8, paddingBottom: 24, backgroundColor: '#F6F7F6' },
   warn: { color: COLORS.error },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
   dotOk: { backgroundColor: COLORS.primary },
