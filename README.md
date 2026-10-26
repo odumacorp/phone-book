@@ -31,8 +31,8 @@ On the search and list screens, reply with the contact's position (1-4) or type 
 
 ```
 1. Call             -> AT rings the caller, then connects them to the contact (needs AT_VOICE_NUMBER)
-2. Send SMS         -> quick replies (1. Please call me 2. I'm on my way 3. I'll call you later), 4 or just type
-                       a message (no `*`); sent to the contact as "<message> - from <caller>"
+2. Send SMS         -> 1. Please call me, 2. Type a message (or just type it); no `*`. Every SMS ends with
+                       "- <name> (07...)" using the name set in the app (just the number if none)
 3. Copy number      -> the number is texted to the caller, who can copy, call or save it
 ```
 
@@ -80,7 +80,7 @@ npx eas-cli build -p android --profile preview   # installable APK (needs a free
 
 API (JSON):
 - `POST /api/register/request` `{phone}` -> texts a 6-digit code (valid 10 min, one per minute)
-- `POST /api/register/confirm` `{phone, code, new_pin, confirm_pin}` -> `{token}`; creates the account
+- `POST /api/register/confirm` `{phone, code, new_pin, confirm_pin, name}` -> `{token}`; creates the account
 - `POST /api/login` `{phone, pin}` -> `{token}`; 5 wrong PINs lock the number for 15 minutes
 - `GET /api/me` -> `{phone, contacts}`
 - `POST /api/pin/change` `{current_pin, new_pin, confirm_pin}` -> `{token}`; other sessions are logged out
@@ -88,7 +88,7 @@ API (JSON):
 - `POST /api/pin/reset/confirm` `{phone, code, new_pin, confirm_pin}` -> `{token}`; 5 wrong codes burn it; clears any lockout
 - `GET /api/contacts` -> `{contacts: [{id, name, phone, priority}], max_priority, show_others}` (priority first)
 - `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
-- `POST /api/settings` `{show_others: true|false}`; when false, USSD lists/search/delete/SMS-me show only priority contacts
+- `POST /api/settings` `{show_others?: true|false, name?: string}`; name signs the user's SMS; when show_others is false, USSD lists/search/delete/SMS-me show only priority contacts
 - `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
 
 Send the token as `Authorization: Bearer <token>`.

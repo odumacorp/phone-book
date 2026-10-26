@@ -28,6 +28,7 @@ import {
   loadToken,
   login,
   requestCode,
+  setName,
   setPriority,
   setShowOthers,
   syncContacts,
@@ -183,6 +184,7 @@ const CODE_SCREEN_TEXT: Record<CodeFlow, { heading: string; intro: string; butto
 function CodeScreen({ flow, onDone, onCancel }: { flow: CodeFlow; onDone: (token: string) => void; onCancel: () => void }) {
   const text = CODE_SCREEN_TEXT[flow];
   const [phone, setPhone] = useState('');
+  const [name, setNameText] = useState('');
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState('');
   const [pin, setPin] = useState('');
@@ -203,6 +205,7 @@ function CodeScreen({ flow, onDone, onCancel }: { flow: CodeFlow; onDone: (token
   };
 
   const sendCode = () => {
+    if (flow === 'register' && !name.trim()) return setError('Enter your name.');
     if (!isValidPhone(phone)) return setError(`Enter your phone number as ${PHONE_FORMAT}.`);
     run(async () => {
       await requestCode(flow, phone);
@@ -212,7 +215,7 @@ function CodeScreen({ flow, onDone, onCancel }: { flow: CodeFlow; onDone: (token
 
   const finish = () => {
     if (pin !== confirm) return setError('PINs do not match.');
-    run(async () => onDone(await confirmCode(flow, phone, code, pin)));
+    run(async () => onDone(await confirmCode(flow, phone, code, pin, flow === 'register' ? name : undefined)));
   };
 
   return (
@@ -221,9 +224,28 @@ function CodeScreen({ flow, onDone, onCancel }: { flow: CodeFlow; onDone: (token
       {!codeSent ? (
         <>
           <Text style={styles.hint}>{text.intro}</Text>
+          {flow === 'register' ? (
+            <>
+              <Text style={styles.label}>Your name</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setNameText}
+                placeholder="e.g. Austin"
+                autoComplete="name"
+                maxLength={30}
+              />
+              <Text style={styles.hint}>Added to the end of every SMS you send from {USSD_CODE}.</Text>
+            </>
+          ) : null}
           <PhoneField value={phone} onChange={setPhone} />
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Button title="Send code" onPress={sendCode} busy={busy} disabled={!phone} />
+          <Button
+            title="Send code"
+            onPress={sendCode}
+            busy={busy}
+            disabled={!phone || (flow === 'register' && !name.trim())}
+          />
         </>
       ) : (
         <>
@@ -330,6 +352,25 @@ function SyncScreen({
   const [maxPriority, setMaxPriority] = useState(5);
   const [showOthers, setShowOthersState] = useState(true);
   const [query, setQuery] = useState('');
+  const [name, setNameText] = useState(me?.name ?? '');
+  const [savedName, setSavedName] = useState(me?.name ?? '');
+
+  useEffect(() => {
+    setNameText(me?.name ?? '');
+    setSavedName(me?.name ?? '');
+  }, [me?.name]);
+
+  const saveName = async () => {
+    setError('');
+    try {
+      const res = await setName(token, name);
+      setNameText(res.name);
+      setSavedName(res.name);
+      setStatus('Name saved.');
+    } catch (e) {
+      failed(e, 'Could not save your name.');
+    }
+  };
 
   const failed = (e: unknown, fallback: string) => {
     if (e instanceof ApiError && e.status === 401) return onLogout();
@@ -421,6 +462,18 @@ function SyncScreen({
       <View style={styles.card}>
         <Text style={styles.label}>Logged in as</Text>
         <Text style={styles.value}>{me?.phone ?? '…'}</Text>
+        <Text style={styles.label}>Your name (signs your SMS)</Text>
+        <View style={styles.nameRow}>
+          <TextInput
+            style={[styles.input, styles.nameInput]}
+            value={name}
+            onChangeText={setNameText}
+            placeholder="Add your name"
+            autoComplete="name"
+            maxLength={30}
+          />
+          {name.trim() && name.trim() !== savedName ? <Link title="Save" onPress={saveName} /> : null}
+        </View>
         <Button title="Sync contacts" onPress={sync} busy={busy} />
         {status ? <Text style={styles.status}>{status}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -583,6 +636,8 @@ const styles = StyleSheet.create({
   hint: { color: COLORS.muted, fontSize: 13, marginTop: 12 },
   link: { color: COLORS.primary, fontSize: 15, marginTop: 16, textAlign: 'center' },
   linkRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  nameInput: { flex: 1 },
   list: { flex: 1 },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
   switchText: { flex: 1 },

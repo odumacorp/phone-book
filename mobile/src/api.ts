@@ -6,7 +6,7 @@ const TOKEN_KEY = 'phonebook.token';
 
 export type SyncContact = { name: string; phone: string };
 export type SyncResult = { added: number; skipped: number; total: number };
-export type Me = { phone: string; contacts: number; show_others: boolean };
+export type Me = { phone: string; contacts: number; show_others: boolean; name: string | null };
 export type Contact = { id: number; name: string; phone: string; priority: boolean };
 export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean };
 
@@ -62,8 +62,9 @@ const CODE_PATHS: Record<CodeFlow, string> = { register: '/api/register', reset:
 export const requestCode = (flow: CodeFlow, phone: string) =>
   request<{ sent: boolean }>(`${CODE_PATHS[flow]}/request`, { method: 'POST', body: JSON.stringify({ phone }) });
 
-export const confirmCode = (flow: CodeFlow, phone: string, code: string, newPin: string) =>
-  saveToken(`${CODE_PATHS[flow]}/confirm`, { phone, code, new_pin: newPin });
+/** `name` is required when registering; it signs the SMS the user sends from USSD. */
+export const confirmCode = (flow: CodeFlow, phone: string, code: string, newPin: string, name?: string) =>
+  saveToken(`${CODE_PATHS[flow]}/confirm`, { phone, code, new_pin: newPin, name });
 
 export const getMe = (token: string) => request<Me>('/api/me', {}, token);
 
@@ -73,6 +74,9 @@ export const setPriority = (token: string, id: number, priority: boolean) =>
   request<{ priority: boolean }>(`/api/contacts/${id}/priority`, { method: 'POST', body: JSON.stringify({ priority }) }, token);
 
 /** Whether non-priority contacts appear on USSD (*384*88041#). */
+export const setName = (token: string, name: string) =>
+  request<{ name: string }>('/api/settings', { method: 'POST', body: JSON.stringify({ name }) }, token);
+
 export const setShowOthers = (token: string, showOthers: boolean) =>
   request<{ show_others: boolean }>('/api/settings', { method: 'POST', body: JSON.stringify({ show_others: showOthers }) }, token);
 
