@@ -16,6 +16,7 @@ import threading
 import time
 import logging
 from functools import wraps
+from xml.sax.saxutils import quoteattr
 
 from dotenv import load_dotenv
 from flask import Flask, request, Response, g, jsonify
@@ -27,13 +28,17 @@ load_dotenv()
 AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
 AT_API_KEY = os.getenv("AT_API_KEY", "")
 AT_SENDER_ID = os.getenv("AT_SENDER_ID") or None
+AT_VOICE_NUMBER = os.getenv("AT_VOICE_NUMBER") or None  # AT virtual number used for "Call"
 DATABASE_URL = os.getenv("DATABASE_URL")  # Postgres (Neon pooled); falls back to SQLite when unset
 DATABASE_URL_UNPOOLED = os.getenv("DATABASE_URL_UNPOOLED") or DATABASE_URL  # direct, for schema setup
 DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "phonebook.db"))
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 
 USSD_MAX_LEN = 182  # max characters a USSD screen can show
-PAGE_SIZE = 5
+PAGE_SIZE = 4  # contacts per screen; leaves room for "9. More" and the pick hint
+NAME_MAX = 15  # names are shortened on list screens so a full page fits
+SMS_MAX = 140
+CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
 
 TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
@@ -46,11 +51,13 @@ log = logging.getLogger("ussd")
 app = Flask(__name__)
 
 sms = None
+voice = None
 if AT_API_KEY:
     import africastalking
 
     africastalking.initialize(AT_USERNAME, AT_API_KEY)
     sms = africastalking.SMS
+    voice = africastalking.Voice
 else:
     log.warning("AT_API_KEY not set - SMS features are disabled")
 
@@ -122,6 +129,11 @@ def init_db():
                failed_attempts INTEGER NOT NULL DEFAULT 0,
                locked_until INTEGER NOT NULL DEFAULT 0
            )""",
+        """CREATE TABLE IF NOT EXISTS pending_calls (
+               user_phone TEXT PRIMARY KEY,
+               contact_phone TEXT NOT NULL,
+               created_at INTEGER NOT NULL
+           )""",
     ]
     db = connect(DATABASE_URL_UNPOOLED)
     try:
@@ -156,6 +168,31 @@ def add_contact(owner, name, phone):
 
 def delete_contact(owner, contact_id):
     execute("DELETE FROM contacts WHERE id = ? AND owner = ?", (contact_id, owner))
+
+
+def find_contact_by_phone(owner, phone):
+    return fetch_one(
+        "SELECT id, name, phone FROM contacts WHERE owner = ? AND phone = ? ORDER BY id LIMIT 1",
+        (owner, phone),
+    )
+
+
+def save_pending_call(user_phone, contact_phone):
+    db = get_db()
+    db.execute(sql("DELETE FROM pending_calls WHERE user_phone = ?"), (user_phone,))
+    db.execute(
+        sql("INSERT INTO pending_calls (user_phone, contact_phone, created_at) VALUES (?, ?, ?)"),
+        (user_phone, contact_phone, int(time.time())),
+    )
+    db.commit()
+
+
+def pop_pending_call(user_phone):
+    row = fetch_one("SELECT contact_phone, created_at FROM pending_calls WHERE user_phone = ?", (user_phone,))
+    if not row:
+        return None
+    execute("DELETE FROM pending_calls WHERE user_phone = ?", (user_phone,))
+    return row["contact_phone"] if time.time() - row["created_at"] <= CALL_TTL else None
 
 
 def get_user(phone):
@@ -203,11 +240,12 @@ def end(msg):
     return "END " + msg[: USSD_MAX_LEN - 4]
 
 
-def format_contacts(rows, numbered=False):
+def format_contacts(rows, numbered=False, short=False):
     lines = []
     for i, row in enumerate(rows, 1):
         prefix = f"{i}. " if numbered else ""
-        lines.append(f"{prefix}{row['name']} {row['phone']}")
+        name = row["name"][:NAME_MAX].rstrip() if short else row["name"]
+        lines.append(f"{prefix}{name} {row['phone']}")
     return "\n".join(lines)
 
 
@@ -222,8 +260,19 @@ def send_sms_async(to, message):
     threading.Thread(target=_send, daemon=True).start()
 
 
+def start_call_async(to):
+    def _call():
+        try:
+            resp = voice.call(callFrom=AT_VOICE_NUMBER, callTo=[to])
+            log.info("Call to %s started: %s", to, resp)
+        except Exception:
+            log.exception("Call to %s failed", to)
+
+    threading.Thread(target=_call, daemon=True).start()
+
+
 MAIN_MENU = (
-    "Welcome to Phone Book\n"
+    "Welcome to Remote Phone-Book\n"
     "1. Add contact\n"
     "2. Search contact\n"
     "3. My contacts\n"
@@ -257,7 +306,7 @@ def handle(phone_number, text):
         add_contact(phone_number, name, phone)
         return end(f"Saved {name} - {phone}")
 
-    # 2. Search: 2 -> query
+    # 2. Search: 2 -> query -> pick contact -> action
     if choice == "2":
         if len(rest) == 0:
             return con("Enter name to search:")
@@ -265,31 +314,33 @@ def handle(phone_number, text):
         rows = search_contacts(phone_number, query)
         if not rows:
             return end(f"No contacts match '{query}'.")
-        return end(format_contacts(rows))
+        if len(rest) == 1:
+            return con(format_contacts(rows, numbered=True, short=True) + "\n" + PICK_HINT)
+        return pick_and_act(phone_number, rows, rest[1], rest[2:])
 
-    # 3. List, paginated: 3 -> 9 (more) -> 9 ...
+    # 3. List, paginated: 3 -> 9 (more) -> 9 ... -> pick contact -> action
     if choice == "3":
         rows = list_contacts(phone_number)
         if not rows:
             return end("You have no contacts yet.")
-        if any(p != "9" for p in rest):
-            return end("Invalid choice.")
-        page = len(rest)
+        page, i = 0, 0
+        while i < len(rest) and rest[i] == "9" and (page + 1) * PAGE_SIZE < len(rows):
+            page, i = page + 1, i + 1
         chunk = rows[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-        if not chunk:
-            return end("No more contacts.")
-        body = format_contacts(chunk)
-        if (page + 1) * PAGE_SIZE < len(rows):
-            return con(body + "\n9. More")
-        return end(body)
+        if i == len(rest):
+            body = format_contacts(chunk, numbered=True, short=True)
+            if (page + 1) * PAGE_SIZE < len(rows):
+                body += "\n9. More"
+            return con(body + "\n" + PICK_HINT)
+        return pick_and_act(phone_number, chunk, rest[i], rest[i + 1:])
 
     # 4. Delete: 4 -> pick number -> 1 confirm / 2 cancel
     if choice == "4":
-        rows = list_contacts(phone_number)[:PAGE_SIZE * 2]
+        rows = list_contacts(phone_number)[:PAGE_SIZE]
         if not rows:
             return end("You have no contacts to delete.")
         if len(rest) == 0:
-            return con("Select contact to delete:\n" + format_contacts(rows, numbered=True))
+            return con("Select contact to delete:\n" + format_contacts(rows, numbered=True, short=True))
         if not rest[0].isdigit() or not 1 <= int(rest[0]) <= len(rows):
             return end("Invalid selection.")
         contact = rows[int(rest[0]) - 1]
@@ -324,6 +375,77 @@ def handle(phone_number, text):
         return end(f"App PIN set. Log in to the app with {phone_number} and this PIN.")
 
     return end("Invalid choice. Please dial again.")
+
+
+PICK_HINT = "Reply no. or a phone no."
+
+
+def pick_and_act(owner, rows, selection, rest):
+    """Resolve a list position (1-4) or a typed phone number, then run the contact menu."""
+    selection = selection.strip()
+    if selection.isdigit() and 1 <= int(selection) <= len(rows):
+        contact = rows[int(selection) - 1]
+    else:
+        phone = normalize_phone(selection)
+        if not phone:
+            return end("Invalid choice. Enter a number from the list or a phone number.")
+        contact = find_contact_by_phone(owner, phone) or {"name": phone, "phone": phone}
+    return contact_menu(owner, contact, rest)
+
+
+def contact_menu(owner, contact, rest):
+    name, phone = contact["name"], contact["phone"]
+    if len(rest) == 0:
+        title = name if name == phone else f"{name}\n{phone}"
+        return con(f"{title}\n1. Call\n2. Send SMS\n3. Copy number")
+
+    action = rest[0]
+
+    # Call: Africa's Talking rings the caller, then /voice bridges them to the contact
+    if action == "1":
+        if voice is None or not AT_VOICE_NUMBER:
+            return end("Calling is not available yet. Choose 3 to get the number by SMS.")
+        save_pending_call(owner, phone)
+        start_call_async(owner)
+        return end(f"We are calling you now. Answer to be connected to {name}.")
+
+    if action in ("2", "3") and sms is None:
+        return end("SMS service is not available right now.")
+
+    # Send SMS: user types the message; it is sent to the contact
+    if action == "2":
+        if len(rest) == 1:
+            return con(f"Type your message to {name}:")
+        message = "*".join(rest[1:]).strip()[:SMS_MAX]  # the message itself may contain "*"
+        if not message:
+            return end("Message cannot be empty.")
+        send_sms_async(phone, f"{message}\n- from {owner}")
+        return end(f"Message sent to {name}.")
+
+    # Copy number: USSD can't reach the clipboard, so text it to the user to copy/call/save
+    if action == "3":
+        send_sms_async(owner, f"{name}: {phone}" if name != phone else phone)
+        whose = f"{name}'s number" if name != phone else "The number"
+        return end(f"{whose} is on its way by SMS. Open it to copy, call or save it.")
+
+    return end("Invalid choice.")
+
+
+@app.route("/voice", methods=["POST"])
+def voice_callback():
+    """Africa's Talking voice callback: when the caller answers, dial the contact they picked."""
+    if request.values.get("isActive") != "1":
+        return Response("", mimetype="text/plain")
+    contact_phone = None
+    for number in (request.values.get("destinationNumber"), request.values.get("callerNumber")):
+        if number and not contact_phone:
+            contact_phone = pop_pending_call(number)
+    if contact_phone:
+        body = f"<Dial phoneNumbers={quoteattr(contact_phone)} />"
+    else:
+        body = "<Say>Sorry, this call could not be connected.</Say>"
+    xml = f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>'
+    return Response(xml, mimetype="application/xml")
 
 
 @app.route("/ussd", methods=["POST"])
