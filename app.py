@@ -1733,9 +1733,20 @@ def website_assets(filename):
     return response
 
 
-@app.route("/favicon.ico", methods=["GET"])
-def favicon():
-    return send_from_directory(WEB_DIR, "favicon.ico")
+@app.route("/assets/<path:filename>", methods=["GET"])
+def website_images(filename):
+    """Images bundled into the website (e.g. the logo in the header); names change with their content."""
+    response = send_from_directory(os.path.join(WEB_DIR, "assets"), filename)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
+
+@app.route("/<any('favicon.ico', 'favicon.png', 'apple-touch-icon.png'):filename>", methods=["GET"])
+def website_icons(filename):
+    """The Oduma Corp icon: browser tab and iPhone home screen."""
+    response = send_from_directory(WEB_DIR, filename)
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 init_db()
