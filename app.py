@@ -358,21 +358,8 @@ def check_pin(phone, pin):
     return user, None
 
 
-def new_pin_flow(inputs, prompt, done):
-    """First-time PIN setup: new PIN -> confirm. Calls done(pin) at the end."""
-    if len(inputs) == 0:
-        return con(prompt)
-    if not PIN_RE.match(inputs[0]):
-        return end("PIN must be exactly 4 digits.")
-    if len(inputs) == 1:
-        return con("Confirm your PIN:")
-    if inputs[1] != inputs[0]:
-        return end("PINs do not match. Please dial again.")
-    return done(inputs[0])
-
-
 def handle(caller, text):
-    """Every session starts with: phone number -> PIN (or first-time PIN setup) -> main menu.
+    """Every session starts with: phone number -> PIN -> main menu (numbers register in the app).
 
     The number entered decides whose phone book opens, so users can reach their contacts
     from any phone. SMS replies and calls go to `caller`, the phone actually in use.
@@ -386,16 +373,7 @@ def handle(caller, text):
         return end(f"Invalid phone number. Use {LOGIN_PHONE_FORMAT}.")
 
     if not get_user(owner):
-        # First time: a PIN can only be created from the phone that owns the number, once
-        if owner != caller:
-            return end(f"{owner} has no PIN yet. Dial from that phone to set one.")
-
-        def create(pin):
-            if not set_pin(owner, pin):
-                return end("A PIN was already set for this number. Please dial again.")
-            return end("PIN set. Dial again and log in with your phone number and PIN.")
-
-        return new_pin_flow(parts[1:], "Create a 4-digit PIN for your phone book:", create)
+        return end(f"{owner} is not registered. Register in the Phone Book app, then dial again.")
 
     if len(parts) == 1:
         return con("Enter your PIN:")
@@ -647,14 +625,15 @@ def api_login():
     return jsonify({"token": make_token(user), "phone": phone})
 
 
-NO_PIN_YET = "No PIN set for this number. Dial *384*88041# from this phone to create one."
+NO_PIN_YET = "This number is not registered yet. Tap Register to create your account."
+ALREADY_REGISTERED = "This number is already registered. Log in, or use Forgot PIN."
 
 
 def pin_error(new_pin, confirm):
     if not PIN_RE.match(new_pin):
-        return "New PIN must be exactly 4 digits."
+        return "PIN must be exactly 4 digits."
     if confirm is not None and confirm != new_pin:
-        return "New PINs do not match."
+        return "PINs do not match."
     return None
 
 
@@ -677,23 +656,15 @@ def api_change_pin():
     return jsonify({"token": make_token(user), "phone": g.phone})
 
 
-@app.route("/api/pin/reset/request", methods=["POST"])
-def api_reset_request():
-    """Forgot PIN, step 1: text a 6-digit code to the number (proves the user has that SIM)."""
-    body = request.get_json(silent=True) or {}
-    phone = login_phone(str(body.get("phone", "")))
-    if not phone:
-        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
-    if sms is None:
-        return api_error("SMS service is not available right now.", 503)
-    if not get_user(phone):
-        return api_error(NO_PIN_YET, 404)
+# SMS verification codes (stored in pin_resets) prove the user holds the SIM. They are used to
+# register a new number and to reset a forgotten PIN.
 
+def send_code(phone, purpose):
+    """Text a fresh 6-digit code. Returns an error message, or None when sent."""
     now = int(time.time())
     row = fetch_one("SELECT sent_at FROM pin_resets WHERE phone = ?", (phone,))
     if row and now - row["sent_at"] < RESET_RESEND_SECONDS:
-        return api_error("A code was just sent. Wait a minute before asking for another.", 429)
-
+        return "A code was just sent. Wait a minute before asking for another."
     code = f"{secrets.randbelow(10 ** 6):06d}"
     db = get_db()
     db.execute(sql("DELETE FROM pin_resets WHERE phone = ?"), (phone,))
@@ -702,13 +673,44 @@ def api_reset_request():
         (phone, generate_password_hash(code), now + RESET_CODE_TTL, now),
     )
     db.commit()
-    send_sms_async(phone, f"Your Remote Phone-Book reset code is {code}. It expires in 10 minutes.")
+    send_sms_async(phone, f"Your Remote Phone-Book {purpose} code is {code}. It expires in 10 minutes.")
+    return None
+
+
+def use_code(phone, code):
+    """Check a code; it can be used once. Returns (error message, status) or None when valid."""
+    row = fetch_one("SELECT code_hash, expires_at, attempts FROM pin_resets WHERE phone = ?", (phone,))
+    if not row or row["expires_at"] < time.time():
+        return "This code has expired. Ask for a new one.", 400
+    if not check_password_hash(row["code_hash"], code):
+        attempts = row["attempts"] + 1
+        if attempts >= MAX_RESET_ATTEMPTS:
+            execute("DELETE FROM pin_resets WHERE phone = ?", (phone,))
+            return "Too many wrong codes. Ask for a new one.", 429
+        execute("UPDATE pin_resets SET attempts = ? WHERE phone = ?", (attempts, phone))
+        return "Wrong code.", 401
+    execute("DELETE FROM pin_resets WHERE phone = ?", (phone,))
+    return None
+
+
+def code_request(registering):
+    body = request.get_json(silent=True) or {}
+    phone = login_phone(str(body.get("phone", "")))
+    if not phone:
+        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
+    if sms is None:
+        return api_error("SMS service is not available right now.", 503)
+    if registering and get_user(phone):
+        return api_error(ALREADY_REGISTERED, 409)
+    if not registering and not get_user(phone):
+        return api_error(NO_PIN_YET, 404)
+    error = send_code(phone, "verification" if registering else "reset")
+    if error:
+        return api_error(error, 429)
     return jsonify({"sent": True, "phone": phone})
 
 
-@app.route("/api/pin/reset/confirm", methods=["POST"])
-def api_reset_confirm():
-    """Forgot PIN, step 2: code from the SMS + new PIN. Logs the user in."""
+def code_confirm(registering):
     if not SECRET_KEY:
         return api_error("App login is not configured on the server.", 503)
     body = request.get_json(silent=True) or {}
@@ -719,21 +721,42 @@ def api_reset_confirm():
     error = pin_error(new_pin, str(body.get("confirm_pin", new_pin)))
     if error:
         return api_error(error, 400)
-
-    row = fetch_one("SELECT code_hash, expires_at, attempts FROM pin_resets WHERE phone = ?", (phone,))
-    if not row or row["expires_at"] < time.time():
-        return api_error("This code has expired. Ask for a new one.", 400)
-    if not check_password_hash(row["code_hash"], code):
-        attempts = row["attempts"] + 1
-        if attempts >= MAX_RESET_ATTEMPTS:
-            execute("DELETE FROM pin_resets WHERE phone = ?", (phone,))
-            return api_error("Too many wrong codes. Ask for a new one.", 429)
-        execute("UPDATE pin_resets SET attempts = ? WHERE phone = ?", (attempts, phone))
-        return api_error("Wrong code.", 401)
-
-    execute("DELETE FROM pin_resets WHERE phone = ?", (phone,))
-    user = update_pin(phone, new_pin)
+    if registering and get_user(phone):
+        return api_error(ALREADY_REGISTERED, 409)
+    failed = use_code(phone, code)
+    if failed:
+        return api_error(*failed)
+    if registering:
+        if not set_pin(phone, new_pin):
+            return api_error(ALREADY_REGISTERED, 409)
+        user = get_user(phone)
+    else:
+        user = update_pin(phone, new_pin)
     return jsonify({"token": make_token(user), "phone": phone})
+
+
+@app.route("/api/register/request", methods=["POST"])
+def api_register_request():
+    """Register, step 1: text a 6-digit code to the new number."""
+    return code_request(registering=True)
+
+
+@app.route("/api/register/confirm", methods=["POST"])
+def api_register_confirm():
+    """Register, step 2: code from the SMS + new PIN. Creates the account and logs the user in."""
+    return code_confirm(registering=True)
+
+
+@app.route("/api/pin/reset/request", methods=["POST"])
+def api_reset_request():
+    """Forgot PIN, step 1: text a 6-digit code to the number."""
+    return code_request(registering=False)
+
+
+@app.route("/api/pin/reset/confirm", methods=["POST"])
+def api_reset_confirm():
+    """Forgot PIN, step 2: code from the SMS + new PIN. Clears any lockout and logs the user in."""
+    return code_confirm(registering=False)
 
 
 @app.route("/api/me", methods=["GET"])
