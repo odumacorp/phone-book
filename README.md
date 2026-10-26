@@ -6,7 +6,11 @@ reachable from any phone after logging in.
 Every session starts with a login: phone number (`+254XXXXXXXXX` or `07XXXXXXXX`) -> 4-digit PIN -> main menu.
 The first time, a number has no PIN; dialling from that same phone creates one (once only).
 Wrong PINs count toward the same lockout as the app (5 tries, then 15 minutes).
-PINs can't be changed over USSD: users change or reset them in the mobile app.
+Forgot PIN: choose `99` on the PIN screen (only works when dialling from that number), or reset it in the app.
+
+After login, every screen offers `0. Back` and `00. Home`, and results (saved, sent, deleted)
+keep the session open instead of ending it. Actions only run once: input typed after a result
+is rejected rather than repeating the save/send/delete.
 
 ```
 1. Add contact      -> name -> phone number
@@ -14,13 +18,14 @@ PINs can't be changed over USSD: users change or reset them in the mobile app.
 3. My contacts      -> 4 per screen, 9 = more -> pick a contact
 4. Delete contact   -> pick number -> 1 Yes / 2 No
 5. SMS me my contacts (sent to the phone in use, with the Africa's Talking SMS API)
+6. Change PIN       -> new PIN -> confirm (ends the session)
 ```
 
 On the search and list screens, reply with the contact's position (1-4) or type any phone number:
 
 ```
 1. Call             -> AT rings the caller, then connects them to the contact (needs AT_VOICE_NUMBER)
-2. Send SMS         -> type a message; sent to the contact as "<message> - from <caller>"
+2. Send SMS         -> type a message (no `*`); sent to the contact as "<message> - from <caller>"
 3. Copy number      -> the number is texted to the caller, who can copy, call or save it
 ```
 
