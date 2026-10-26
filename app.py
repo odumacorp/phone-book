@@ -11,6 +11,9 @@ uploads the device's contacts to /api/contacts/sync.
 """
 import os
 import re
+import atexit
+import hashlib
+import hmac
 import secrets
 import sqlite3
 import threading
@@ -72,6 +75,7 @@ else:
 if DATABASE_URL:
     import psycopg
     from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
 
 if not SECRET_KEY:
     log.warning("SECRET_KEY not set - mobile app login is disabled")
@@ -88,16 +92,45 @@ def connect(url=None):
     return db
 
 
+_pool = None
+_pool_lock = threading.Lock()
+
+
+def pool():
+    """Reuse Postgres connections across requests: opening one to Neon costs several round trips.
+
+    Created on first use so each gunicorn worker gets its own (pools don't survive fork).
+    """
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = ConnectionPool(
+                DATABASE_URL,
+                min_size=1,
+                max_size=4,
+                max_idle=240,  # Neon may close idle connections; drop ours first
+                check=ConnectionPool.check_connection,  # replace connections Neon closed while idle
+                kwargs={"row_factory": dict_row, "prepare_threshold": None},
+                open=True,
+            )
+            atexit.register(_pool.close)
+    return _pool
+
+
 def get_db():
     if "db" not in g:
-        g.db = connect()
+        g.db = pool().getconn() if DATABASE_URL else connect()
     return g.db
 
 
 @app.teardown_appcontext
 def close_db(_exc):
     db = g.pop("db", None)
-    if db is not None:
+    if db is None:
+        return
+    if DATABASE_URL:
+        pool().putconn(db)  # rolls back anything uncommitted
+    else:
         db.close()
 
 
@@ -170,6 +203,7 @@ def init_db():
         # Columns added after launch; existing databases get them on the next start
         add_column(db, "contacts", "priority", "INTEGER NOT NULL DEFAULT 0")
         add_column(db, "users", "show_others", "INTEGER NOT NULL DEFAULT 1")
+        add_column(db, "ussd_resume", "pin_mac", "TEXT")
         db.commit()
     finally:
         db.close()
@@ -242,18 +276,23 @@ def pop_pending_call(user_phone):
     return row["contact_phone"] if time.time() - row["created_at"] <= CALL_TTL else None
 
 
-def get_user(phone):
-    return fetch_one(
-        "SELECT phone, pin_hash, failed_attempts, locked_until, show_others FROM users WHERE phone = ?",
-        (phone,),
-    )
+def get_user(phone, fresh=False):
+    """Users are cached for the rest of the request; writes that matter pass fresh=True."""
+    cache = g.setdefault("users", {})
+    if fresh or phone not in cache:
+        cache[phone] = fetch_one(
+            "SELECT phone, pin_hash, failed_attempts, locked_until, show_others FROM users WHERE phone = ?",
+            (phone,),
+        )
+    return cache[phone]
 
 
 def set_pin(phone, pin):
     """A PIN can be set only once; returns False if this number already has one."""
-    if get_user(phone):
+    if get_user(phone, fresh=True):
         return False
     execute("INSERT INTO users (phone, pin_hash) VALUES (?, ?)", (phone, generate_password_hash(pin)))
+    get_user(phone, fresh=True)
     return True
 
 
@@ -263,7 +302,7 @@ def update_pin(phone, pin):
         "UPDATE users SET pin_hash = ?, failed_attempts = 0, locked_until = 0 WHERE phone = ?",
         (generate_password_hash(pin), phone),
     )
-    return get_user(phone)
+    return get_user(phone, fresh=True)
 
 
 # ---------------------------------------------------------------- helpers
@@ -421,33 +460,52 @@ def check_pin(phone, pin):
 
 def get_resume(caller):
     return fetch_one(
-        "SELECT owner, path, saved_at, session_id, offered_in, resume_owner, resume_from "
+        "SELECT owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, pin_mac "
         "FROM ussd_resume WHERE caller = ?",
         (caller,),
     )
 
 
-def save_resume(caller, owner, path, session_id, state):
+def save_resume(caller, owner, path, session_id, state, mac):
     keep = state is not None and state["offered_in"] == session_id
-    values = (
-        owner,
-        json.dumps(path),
-        int(time.time()),
-        session_id,
-        session_id if keep else None,
-        state["resume_owner"] if keep else None,
-        state["resume_from"] if keep else None,
-    )
-    db = get_db()
-    db.execute(sql("DELETE FROM ussd_resume WHERE caller = ?"), (caller,))
-    db.execute(
-        sql(
-            "INSERT INTO ussd_resume (owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, caller) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    execute(
+        "INSERT INTO ussd_resume (caller, owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, pin_mac) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (caller) DO UPDATE SET owner = excluded.owner, path = excluded.path, saved_at = excluded.saved_at, "
+        "session_id = excluded.session_id, offered_in = excluded.offered_in, resume_owner = excluded.resume_owner, "
+        "resume_from = excluded.resume_from, pin_mac = excluded.pin_mac",
+        (
+            caller,
+            owner,
+            json.dumps(path),
+            int(time.time()),
+            session_id,
+            session_id if keep else None,
+            state["resume_owner"] if keep else None,
+            state["resume_from"] if keep else None,
+            mac,
         ),
-        values + (caller,),
     )
-    db.commit()
+
+
+def session_mac(session_id, owner, pin):
+    """Proof that this PIN already passed the (deliberately slow) check earlier in this USSD session."""
+    if not SECRET_KEY or not session_id:
+        return None
+    msg = f"{session_id}|{owner}|{pin}".encode()
+    return hmac.new(SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def login(owner, pin, session_id, state):
+    """check_pin, but only the first time in a session: every screen resends the PIN."""
+    mac = session_mac(session_id, owner, pin)
+    if mac and state and state["session_id"] == session_id and state["owner"] == owner and state["pin_mac"]:
+        user = get_user(owner)
+        unlocked = user and user["locked_until"] <= time.time()  # a lockout still applies mid-session
+        if unlocked and hmac.compare_digest(state["pin_mac"], mac):
+            return mac, None
+    _user, error = check_pin(owner, pin)
+    return mac, error
 
 
 def offer_resume(caller, session_id):
@@ -461,12 +519,12 @@ def masked(phone):
     return "0" + phone[4:7] + "***" + phone[-3:] if phone.startswith("+254") else phone
 
 
-def run_menu(owner, caller, path, session_id, state):
+def run_menu(owner, caller, path, session_id, state, mac):
     """Show a menu screen and remember it for resuming (never a path that just ran an action)."""
     g.action_done = False
     body = menu(owner, caller, path)
     if body.startswith("CON "):
-        save_resume(caller, owner, [] if g.action_done else path, session_id, state)
+        save_resume(caller, owner, [] if g.action_done else path, session_id, state, mac)
     else:
         execute("DELETE FROM ussd_resume WHERE caller = ?", (caller,))
     return body
@@ -492,11 +550,11 @@ def handle(caller, text, session_id=""):
         # This session started with the resume offer: first input is the PIN, or 0 to start over
         if parts[0] != BACK:
             owner = state["resume_owner"]
-            _user, error = check_pin(owner, parts[0])
+            mac, error = login(owner, parts[0], session_id, state)
             if error:
                 return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
             path = resolve_nav(json.loads(state["resume_from"]) + parts[1:])
-            return run_menu(owner, caller, path, session_id, state)
+            return run_menu(owner, caller, path, session_id, state, mac)
         parts = parts[1:]
         if not parts:
             return con("Enter your phone number:")
@@ -510,11 +568,11 @@ def handle(caller, text, session_id=""):
 
     if len(parts) == 1:
         return con("Enter your PIN:")
-    _user, error = check_pin(owner, parts[1])
+    mac, error = login(owner, parts[1], session_id, state)
     if error:
         # PINs are changed or reset only in the mobile app
         return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
-    return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state)
+    return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state, mac)
 
 
 # ---------------------------------------------------------------- menu logic
@@ -612,6 +670,8 @@ def menu(owner, caller, parts):
 
 
 PICK_HINT = "Reply no. or phone no."
+QUICK_REPLIES = {"1": "Please call me.", "2": "I'm on my way.", "3": "I'll call you later."}
+TYPE_OWN = "4"
 
 
 def pick_and_act(owner, caller, rows, selection, rest, first=1):
@@ -635,7 +695,7 @@ def contact_menu(owner, caller, contact, rest):
         return screen(f"{title}\n1. Call\n2. Send SMS\n3. Copy number")
 
     action = rest[0]
-    if len(rest) > (2 if action == "2" else 1):
+    if len(rest) > (3 if action == "2" else 1):
         return screen(INVALID)
 
     # Call: Africa's Talking rings the caller, then /voice bridges them to the contact
@@ -649,11 +709,21 @@ def contact_menu(owner, caller, contact, rest):
     if action in ("2", "3") and sms is None:
         return screen("SMS service is not available right now.")
 
-    # Send SMS: user types the message; it is sent to the contact
+    # Send SMS: pick a quick reply (no typing, so the session doesn't time out), or type one
     if action == "2":
         if len(rest) == 1:
-            return screen(f"Type your message to {name}:")
-        message = rest[1].strip()[:SMS_MAX]
+            replies = "\n".join(f"{n}. {text}" for n, text in QUICK_REPLIES.items())
+            return screen(f"SMS {name}:\n{replies}\n{TYPE_OWN}. Type a message\nOr just type it now")
+        choice = rest[1].strip()
+        if choice == TYPE_OWN:
+            if len(rest) == 2:
+                return screen(f"Type your message to {name}:")
+            message = rest[2].strip()
+        elif len(rest) > 2:
+            return screen(INVALID)
+        else:
+            message = QUICK_REPLIES.get(choice, choice)  # anything else is the message itself
+        message = message[:SMS_MAX]
         if not message:
             return screen("Message cannot be empty.")
         send_sms_async(phone, f"{message}\n- from {owner}")
@@ -940,6 +1010,7 @@ def api_settings():
     if not isinstance(body.get("show_others"), bool):
         return api_error("Expected show_others: true or false.", 400)
     execute("UPDATE users SET show_others = ? WHERE phone = ?", (int(body["show_others"]), g.phone))
+    get_user(g.phone, fresh=True)
     return jsonify({"show_others": body["show_others"]})
 
 
