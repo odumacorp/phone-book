@@ -77,6 +77,8 @@ An Expo (React Native) app that uploads the phone's contacts to the user's phone
   forgotten PIN can simply be replaced).
 - Wrong passwords lock the app login for 15 minutes after 5 tries, separately from the USSD PIN lockout.
 - Emails aren't verified (the server can't send email yet); they are only a login name and must be unique.
+- **USSD logins:** a separate screen lists every USSD login attempt on the account: the phone that dialled
+  (the user's own or another), its network, the time, and whether it succeeded.
 - After syncing, the app lists the phone book; users star up to 5 priority contacts (shown first everywhere)
   and choose whether their other contacts appear on USSD.
 
@@ -95,6 +97,8 @@ API (JSON):
 - `POST /api/password/change` `{current_password, new_password, confirm_password?}` -> `{token}`; other sessions logged out
 - `POST /api/pin/change` `{password, new_pin, confirm_pin?}` -> `{token}`; the USSD PIN
 - `GET /api/me` -> `{phone, contacts, name, email, show_others}`
+- `GET /api/logins?limit=` -> `{logins: [{at, phone, own_phone, network, success, reason}], keep_days}`: USSD login
+  attempts on this account (one per session; reason ok / wrong_pin / locked), newest first, kept 90 days
 - `GET /api/contacts` -> `{contacts: [{id, name, phone, priority}], max_priority, show_others}` (priority first)
 - `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
 - `POST /api/settings` `{show_others?, name?, email?}`; name signs the user's SMS; email ("" removes it) is a login;

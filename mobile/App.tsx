@@ -19,11 +19,13 @@ import {
   Contact,
   Me,
   PASSWORD_MIN,
+  UssdLogin,
   PHONE_FORMAT,
   changePassword,
   changePin,
   clearToken,
   getContacts,
+  getLogins,
   getMe,
   isValidPhone,
   loadToken,
@@ -42,7 +44,7 @@ import { readDeviceContacts } from './src/deviceContacts';
 const USSD_CODE = '*384*88041#';
 const BATCH_SIZE = 1000;
 
-type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin' | 'changePassword';
+type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin' | 'changePassword' | 'logins';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
@@ -98,6 +100,7 @@ export default function App() {
     content = <LoginScreen onLogin={loggedIn} onRegister={() => setView('register')} onForgot={() => setView('reset')} />;
   else if (view === 'changePassword')
     content = <ChangePasswordScreen token={token} onDone={(t) => loggedIn(t, 'Password changed.')} onCancel={back} onLogout={logout} />;
+  else if (view === 'logins') content = <LoginHistoryScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'changePin')
     content = <ChangePinScreen token={token} onDone={(t) => loggedIn(t, 'USSD PIN changed.')} onCancel={back} onLogout={logout} />;
   else
@@ -114,6 +117,10 @@ export default function App() {
         onChangePassword={() => {
           setNotice('');
           setView('changePassword');
+        }}
+        onLoginHistory={() => {
+          setNotice('');
+          setView('logins');
         }}
         onLogout={logout}
       />
@@ -409,6 +416,98 @@ function ChangePinScreen({
   );
 }
 
+const LOGIN_RESULT: Record<UssdLogin['reason'], string> = {
+  ok: 'Logged in',
+  wrong_pin: 'Wrong PIN',
+  locked: 'Blocked: too many wrong PINs',
+};
+
+/** USSD login history: which phones logged in to this phone book over USSD, and failed attempts. */
+function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+  const [logins, setLogins] = useState<UssdLogin[] | null>(null);
+  const [keepDays, setKeepDays] = useState(90);
+  const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const res = await getLogins(token);
+      setLogins(res.logins);
+      setKeepDays(res.keep_days);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onLogout();
+      setError(e instanceof Error ? e.message : 'Could not load your login history.');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const failures = logins?.filter((l) => !l.success).length ?? 0;
+  const otherPhones = new Set(logins?.filter((l) => l.success && !l.own_phone).map((l) => l.phone)).size;
+
+  return (
+    <FlatList
+      style={styles.list}
+      data={logins ?? []}
+      keyExtractor={(l, i) => `${l.at}-${i}`}
+      refreshing={refreshing}
+      onRefresh={async () => {
+        setRefreshing(true);
+        await load();
+        setRefreshing(false);
+      }}
+      ListHeaderComponent={
+        <>
+          <View style={styles.card}>
+            <Text style={styles.heading}>USSD logins</Text>
+            <Text style={styles.hint}>
+              Every time someone logs in to your phone book by dialling {USSD_CODE}, or tries to. Kept for {keepDays} days.
+              Pull down to refresh.
+            </Text>
+            {logins && logins.length ? (
+              <Text style={[styles.status, failures ? styles.warn : null]}>
+                {failures ? `${failures} failed attempt${failures === 1 ? '' : 's'}. ` : 'No failed attempts. '}
+                {otherPhones ? `Logged in from ${otherPhones} other phone${otherPhones === 1 ? '' : 's'}.` : ''}
+              </Text>
+            ) : null}
+            {failures ? (
+              <Text style={styles.hint}>Not you? Change your USSD PIN from the home screen.</Text>
+            ) : null}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <Link title="Back" onPress={onBack} />
+          </View>
+          <View style={styles.spacer} />
+        </>
+      }
+      ListEmptyComponent={
+        logins === null ? (
+          <ActivityIndicator color={COLORS.primary} />
+        ) : (
+          <Text style={styles.hint}>No USSD logins yet.</Text>
+        )
+      }
+      renderItem={({ item }) => (
+        <View style={styles.row}>
+          <View style={[styles.dot, item.success ? styles.dotOk : styles.dotBad]} />
+          <View style={styles.rowText}>
+            <Text style={styles.rowName}>
+              {item.phone}
+              {item.own_phone ? '  (your phone)' : '  (another phone)'}
+            </Text>
+            <Text style={styles.rowPhone}>
+              {new Date(item.at * 1000).toLocaleString()} · {item.network}
+            </Text>
+          </View>
+          <Text style={[styles.result, item.success ? styles.resultOk : styles.resultBad]}>{LOGIN_RESULT[item.reason]}</Text>
+        </View>
+      )}
+    />
+  );
+}
+
 /** Home: sync, the USSD visibility switch, and the synced phone book with priority stars. */
 function SyncScreen({
   token,
@@ -417,6 +516,7 @@ function SyncScreen({
   notice,
   onChangePin,
   onChangePassword,
+  onLoginHistory,
   onLogout,
 }: {
   token: string;
@@ -425,6 +525,7 @@ function SyncScreen({
   notice: string;
   onChangePin: () => void;
   onChangePassword: () => void;
+  onLoginHistory: () => void;
   onLogout: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -572,6 +673,7 @@ function SyncScreen({
           <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
         </View>
         <View style={styles.linkRow}>
+          <Link title="USSD logins" onPress={onLoginHistory} disabled={busy} />
           <Link title="Change password" onPress={onChangePassword} disabled={busy} />
           <Link title="Change USSD PIN" onPress={onChangePin} disabled={busy} />
           <Link title="Log out" onPress={onLogout} disabled={busy} />
@@ -789,10 +891,18 @@ const styles = StyleSheet.create({
   error: { color: COLORS.error, marginTop: 8 },
   hint: { color: COLORS.muted, fontSize: 13, marginTop: 12 },
   link: { color: COLORS.primary, fontSize: 15, marginTop: 16, textAlign: 'center' },
-  linkRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  linkRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', columnGap: 16 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   nameInput: { flex: 1 },
   showLink: { color: COLORS.primary, fontSize: 15 },
+  spacer: { height: 16 },
+  warn: { color: COLORS.error },
+  dot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
+  dotOk: { backgroundColor: COLORS.primary },
+  dotBad: { backgroundColor: COLORS.error },
+  result: { fontSize: 13, maxWidth: 110, textAlign: 'right' },
+  resultOk: { color: COLORS.primary },
+  resultBad: { color: COLORS.error, fontWeight: '600' },
   formScroll: { paddingBottom: 40 },
   list: { flex: 1 },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
