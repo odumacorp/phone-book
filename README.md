@@ -81,7 +81,8 @@ An Expo (React Native) app for managing the phone book that USSD uses.
   forgotten PIN can simply be replaced).
 - Wrong passwords lock the app login for 15 minutes after 5 tries, separately from the USSD PIN lockout.
 - Emails aren't verified (the server can't send email yet); they are only a login name and must be unique.
-- **USSD logins:** a separate screen lists every USSD login attempt on the account: the phone that dialled
+- **Log out** (top bar): this device, or everywhere (all app logins and any USSD session).
+- **USSD logins:** shows the active USSD session with a "Log out USSD session" button, and lists every USSD login attempt on the account: the phone that dialled
   (the user's own or another), its network, the time, and whether it succeeded.
 - **Contacts:** choose which phone contacts to add (checkboxes, search, select all; already-added ones are
   marked), add one by hand, sync all at once, or tap a contact to remove it.
@@ -103,6 +104,10 @@ API (JSON):
 - `POST /api/password/change` `{current_password, new_password, confirm_password?}` -> `{token}`; other sessions logged out
 - `POST /api/pin/change` `{password, new_pin, confirm_pin?}` -> `{token}`; the USSD PIN
 - `GET /api/me` -> `{phone, contacts, name, email, show_others}`
+- `GET /api/ussd/sessions` -> `{sessions: [{phone, own_phone, last_active, expires_at}], timeout_seconds}`
+- `POST /api/ussd/logout` -> ends the account's USSD sessions: an open one stops on its next screen
+  ("You were logged out from the Remote Phonebook app") and the next dial needs a full login
+- `POST /api/logout` `{everywhere?}` -> revokes this device's token, or (everywhere) every app login + USSD
 - `GET /api/logins?limit=` -> `{logins: [{at, phone, own_phone, network, success, reason}], keep_days}`: USSD login
   attempts on this account (one per session; reason ok / wrong_pin / locked), newest first, kept 90 days
 - `GET /api/contacts` -> `{contacts: [{id, name, phone, priority}], max_priority, show_others}` (priority first)
