@@ -41,12 +41,12 @@ SECRET_KEY = os.getenv("SECRET_KEY", "")
 
 USSD_MAX_LEN = 182  # max characters a USSD screen can show
 PAGE_SIZE = 4  # contacts per screen; leaves room for "98. More" and the pick hint
-NAME_MAX = 13  # names are shortened on list screens so a full page + Back/Home fits
+NAME_MAX = 11  # names are shortened on list screens so a full page + the Back/Home/Logout line fits
 MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 160  # one SMS
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
 SESSION_HISTORY_DAYS = 30  # ended app/USSD sessions shown in the app
-RESUME_SECONDS = 2 * 60  # a USSD login stays active this long after the last screen (inactivity timeout)
+RESUME_SECONDS = 60  # a USSD login stays active this long after the last screen (inactivity timeout)
 
 TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
@@ -456,10 +456,11 @@ MAIN_MENU = (
     "3. My contacts\n"
     "4. Delete contact\n"
     "5. SMS me my contacts\n"
-    "Or type a name to search"
+    "Or type a name to search\n"
+    "000. Log out"
 )
-BACK, HOME = "0", "00"
-NAV = "0. Back  00. Home"
+BACK, HOME, LOGOUT = "0", "00", "000"
+NAV = "0.Back 00.Home 000.Logout"  # on every screen after login
 
 
 def screen(msg):
@@ -469,9 +470,14 @@ def screen(msg):
 
 
 def resolve_nav(inputs):
-    """Apply 0 (back one step) and 00 (home) to the inputs typed after logging in."""
+    """Apply 0 (back one step) and 00 (home) to the inputs typed after logging in.
+
+    Returns None if 000 (log out) was typed.
+    """
     path = []
     for value in inputs:
+        if value == LOGOUT:
+            return None
         if value == HOME:
             path = []
         elif value == BACK:
@@ -677,6 +683,10 @@ def current_login(owner, caller, network, session_id, state):
 
 def run_menu(owner, caller, path, session_id, state, mac, login_id):
     """Show a menu screen and remember it for resuming (never a path that just ran an action)."""
+    if path is None:  # 000: log out
+        execute("DELETE FROM ussd_resume WHERE caller = ?", (caller,))
+        end_ussd_login(login_id, "logged out on USSD")
+        return end("You are logged out of Remote Phone-Book. Dial again to log in.")
     g.action_done = False
     body = menu(owner, caller, path)
     if body.startswith("CON "):
