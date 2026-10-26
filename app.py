@@ -45,6 +45,7 @@ NAME_MAX = 13  # names are shortened on list screens so a full page + Back/Home 
 MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 160  # one SMS
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
+SESSION_HISTORY_DAYS = 30  # ended app/USSD sessions shown in the app
 RESUME_SECONDS = 2 * 60  # a USSD login stays active this long after the last screen (inactivity timeout)
 
 TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
@@ -198,6 +199,28 @@ def init_db():
                created_at INTEGER NOT NULL
            )""",
         "CREATE INDEX IF NOT EXISTS idx_login_logs_owner ON login_logs(owner, created_at)",
+        """CREATE TABLE IF NOT EXISTS app_sessions (
+               jti TEXT PRIMARY KEY,
+               owner TEXT NOT NULL,
+               device TEXT,
+               version TEXT NOT NULL,
+               created_at INTEGER NOT NULL,
+               last_seen INTEGER NOT NULL,
+               ended_at INTEGER,
+               end_reason TEXT
+           )""",
+        f"""CREATE TABLE IF NOT EXISTS ussd_sessions (
+               id {id_col},
+               owner TEXT NOT NULL,
+               caller TEXT NOT NULL,
+               network TEXT,
+               started_at INTEGER NOT NULL,
+               last_active INTEGER NOT NULL,
+               ended_at INTEGER,
+               end_reason TEXT
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_ussd_sessions_owner ON ussd_sessions(owner, started_at)",
+        "CREATE INDEX IF NOT EXISTS idx_app_sessions_owner ON app_sessions(owner)",
         """CREATE TABLE IF NOT EXISTS revoked_tokens (
                jti TEXT PRIMARY KEY,
                expires_at INTEGER NOT NULL
@@ -228,6 +251,7 @@ def init_db():
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
         add_column(db, "ussd_resume", "pin_mac", "TEXT")
         add_column(db, "ussd_resume", "logged_out", "INTEGER NOT NULL DEFAULT 0")  # ended from the app
+        add_column(db, "ussd_resume", "login_id", "INTEGER")  # the ussd_sessions row of this login
         db.commit()
     finally:
         db.close()
@@ -333,6 +357,10 @@ def update_pin(phone, pin):
         (generate_password_hash(pin), phone),
     )
     execute("DELETE FROM ussd_resume WHERE owner = ? OR resume_owner = ?", (phone, phone))  # end active USSD logins
+    execute(
+        "UPDATE ussd_sessions SET ended_at = ?, end_reason = 'PIN changed' WHERE owner = ? AND ended_at IS NULL",
+        (int(time.time()), phone),
+    )
     return get_user(phone, fresh=True)
 
 
@@ -491,20 +519,22 @@ def check_pin(phone, pin):
 
 def get_resume(caller):
     return fetch_one(
-        "SELECT owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, pin_mac, logged_out "
+        "SELECT owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, pin_mac, logged_out, login_id "
         "FROM ussd_resume WHERE caller = ?",
         (caller,),
     )
 
 
-def save_resume(caller, owner, path, session_id, state, mac):
+def save_resume(caller, owner, path, session_id, state, mac, login_id):
     keep = state is not None and state["offered_in"] == session_id
+    now = int(time.time())
+    execute("UPDATE ussd_sessions SET last_active = ? WHERE id = ?", (now, login_id))
     execute(
-        "INSERT INTO ussd_resume (caller, owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, pin_mac, logged_out) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
+        "INSERT INTO ussd_resume (caller, owner, path, saved_at, session_id, offered_in, resume_owner, resume_from, pin_mac, "
+        "logged_out, login_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?) "
         "ON CONFLICT (caller) DO UPDATE SET owner = excluded.owner, path = excluded.path, saved_at = excluded.saved_at, "
         "session_id = excluded.session_id, offered_in = excluded.offered_in, resume_owner = excluded.resume_owner, "
-        "resume_from = excluded.resume_from, pin_mac = excluded.pin_mac, logged_out = 0",
+        "resume_from = excluded.resume_from, pin_mac = excluded.pin_mac, logged_out = 0, login_id = excluded.login_id",
         (
             caller,
             owner,
@@ -515,6 +545,7 @@ def save_resume(caller, owner, path, session_id, state, mac):
             state["resume_owner"] if keep else None,
             state["resume_from"] if keep else None,
             mac,
+            login_id,
         ),
     )
 
@@ -600,14 +631,59 @@ def masked(phone):
     return "0" + phone[4:7] + "***" + phone[-3:] if phone.startswith("+254") else phone
 
 
-def run_menu(owner, caller, path, session_id, state, mac):
+# ---- USSD session history: one ussd_sessions row per login (a resume continues the same one)
+
+def start_ussd_login(owner, caller, network, state):
+    """A fresh phone-number + PIN login. Any login still open on this phone is ended first."""
+    if state and state["login_id"]:
+        end_ussd_login(state["login_id"], "new login")
+    now = int(time.time())
+    db = get_db()
+    cur = db.cursor()
+    query = (
+        "INSERT INTO ussd_sessions (owner, caller, network, started_at, last_active) VALUES (?, ?, ?, ?, ?)"
+        + (" RETURNING id" if DATABASE_URL else "")
+    )
+    cur.execute(sql(query), (owner, caller, network or None, now, now))
+    login_id = cur.fetchone()["id"] if DATABASE_URL else cur.lastrowid
+    db.commit()
+    return login_id
+
+
+def end_ussd_login(login_id, reason):
+    if login_id:
+        execute(
+            "UPDATE ussd_sessions SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL",
+            (int(time.time()), reason, login_id),
+        )
+
+
+def close_idle_ussd_logins():
+    """Logins idle past RESUME_SECONDS ended when they expired, not when we noticed."""
+    execute(
+        "UPDATE ussd_sessions SET ended_at = last_active + ?, end_reason = 'timed out' "
+        "WHERE ended_at IS NULL AND last_active < ?",
+        (RESUME_SECONDS, int(time.time()) - RESUME_SECONDS),
+    )
+
+
+def current_login(owner, caller, network, session_id, state):
+    """The ussd_sessions row this request belongs to: the same one while this network session
+    (or a resume of it) goes on, otherwise a new login."""
+    if state and state["login_id"] and state["owner"] == owner and session_id in (state["session_id"], state["offered_in"]):
+        return state["login_id"]
+    return start_ussd_login(owner, caller, network, state)
+
+
+def run_menu(owner, caller, path, session_id, state, mac, login_id):
     """Show a menu screen and remember it for resuming (never a path that just ran an action)."""
     g.action_done = False
     body = menu(owner, caller, path)
     if body.startswith("CON "):
-        save_resume(caller, owner, [] if g.action_done else path, session_id, state, mac)
+        save_resume(caller, owner, [] if g.action_done else path, session_id, state, mac, login_id)
     else:
         execute("DELETE FROM ussd_resume WHERE caller = ?", (caller,))
+        end_ussd_login(login_id, "session ended")
     return body
 
 
@@ -638,6 +714,7 @@ def handle(caller, text, session_id="", network=""):
         # Logged-in state that went RESUME_SECONDS without activity is a logout: delete it (and any
         # other expired ones) so nothing about the old login stays usable
         expired = state and state["saved_at"] and not fresh
+        close_idle_ussd_logins()
         execute("DELETE FROM ussd_resume WHERE saved_at < ?", (int(time.time()) - RESUME_SECONDS,))
         if expired:
             minutes = RESUME_SECONDS // 60
@@ -654,11 +731,13 @@ def handle(caller, text, session_id="", network=""):
             if len(parts) == 1:
                 log_login(owner, caller, network, session_id, None, resumed=True)
             start = json.loads(state["resume_from"]) if parts[0] == "1" else []
-            return run_menu(owner, caller, resolve_nav(start + parts[1:]), session_id, state, None)
+            login_id = current_login(owner, caller, network, session_id, state)
+            return run_menu(owner, caller, resolve_nav(start + parts[1:]), session_id, state, None, login_id)
         if parts[0] != BACK:
             return end("Invalid choice. Please dial again.")
         # Log out: end the active login but keep offered_in, so this session's later inputs
         # ("0*<phone>*<PIN>...") are still read as "start over" below
+        end_ussd_login(state["login_id"], "logged out on USSD")
         execute("UPDATE ussd_resume SET resume_owner = NULL, resume_from = NULL, saved_at = 0 WHERE caller = ?", (caller,))
         state = get_resume(caller)
         parts = parts[1:]
@@ -675,7 +754,8 @@ def handle(caller, text, session_id="", network=""):
             if error:
                 return end(f"{error}\nForgot your PIN? Set a new one in the Remote Phonebook app.")
             path = resolve_nav(json.loads(state["resume_from"]) + parts[1:])
-            return run_menu(owner, caller, path, session_id, state, mac)
+            login_id = current_login(owner, caller, network, session_id, state)
+            return run_menu(owner, caller, path, session_id, state, mac, login_id)
         parts = parts[1:]
         if not parts:
             return con("Enter your phone number:")
@@ -693,7 +773,8 @@ def handle(caller, text, session_id="", network=""):
     if error:
         # PINs are changed or reset only in the mobile app
         return end(f"{error}\nForgot your PIN? Set a new one in the Remote Phonebook app.")
-    return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state, mac)
+    login_id = current_login(owner, caller, network, session_id, state)
+    return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state, mac, login_id)
 
 
 # ---------------------------------------------------------------- menu logic
@@ -939,9 +1020,48 @@ def token_version(user):
     return hashlib.sha256(secret).hexdigest()[:16]
 
 
-def make_token(user):
-    # jti identifies this login, so logging out can revoke just this device
-    return serializer().dumps({"phone": user["phone"], "v": token_version(user), "jti": secrets.token_urlsafe(12)})
+def make_token(user, keep_session=None):
+    """A new app login. Its jti identifies the session so it can be listed and logged out on its own.
+
+    keep_session: the jti of this device's session when its password/PIN just changed, so it
+    carries on as the same session instead of showing up as a new login.
+    """
+    version, now = token_version(user), int(time.time())
+    kept = keep_session and fetch_one(
+        "SELECT 1 AS x FROM app_sessions WHERE jti = ? AND owner = ? AND ended_at IS NULL", (keep_session, user["phone"])
+    )
+    if kept:
+        jti = keep_session
+        execute("UPDATE app_sessions SET version = ?, last_seen = ? WHERE jti = ?", (version, now, jti))
+    else:
+        jti = secrets.token_urlsafe(12)
+        device = " ".join(request.headers.get("X-Device-Name", "").split())[:60] or "Unknown device"
+        execute(
+            "INSERT INTO app_sessions (jti, owner, device, version, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)",
+            (jti, user["phone"], device, version, now, now),
+        )
+    # A changed password or PIN logs out the other devices: record when and why
+    execute(
+        "UPDATE app_sessions SET ended_at = ?, end_reason = 'password or PIN changed' "
+        "WHERE owner = ? AND ended_at IS NULL AND version <> ?",
+        (now, user["phone"], version),
+    )
+    return serializer().dumps({"phone": user["phone"], "v": version, "jti": jti})
+
+
+def revoke_app_session(owner, jti, reason):
+    now = int(time.time())
+    execute(
+        "UPDATE app_sessions SET ended_at = ?, end_reason = ? WHERE jti = ? AND owner = ? AND ended_at IS NULL",
+        (now, reason, jti, owner),
+    )
+    db = get_db()
+    db.execute(sql("DELETE FROM revoked_tokens WHERE expires_at < ?"), (now,))
+    db.execute(
+        sql("INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING"),
+        (jti, now + TOKEN_MAX_AGE),
+    )
+    db.commit()
 
 
 def api_error(message, status):
@@ -965,6 +1085,9 @@ def require_auth(view):
         jti = data.get("jti")
         if jti and fetch_one("SELECT 1 AS x FROM revoked_tokens WHERE jti = ?", (jti,)):
             return api_error("Please log in again.", 401)
+        if jti:
+            now = int(time.time())  # "last active", written at most once a minute
+            execute("UPDATE app_sessions SET last_seen = ? WHERE jti = ? AND last_seen < ?", (now, jti, now - 60))
         g.jti = jti
         g.phone = user["phone"]
         return view(*args, **kwargs)
@@ -1048,8 +1171,9 @@ def set_password(phone, password):
     return get_user(phone, fresh=True)
 
 
-def logged_in(user):
-    return jsonify({"token": make_token(user), "phone": user["phone"]})
+def logged_in(user, same_session=False):
+    keep = getattr(g, "jti", None) if same_session else None
+    return jsonify({"token": make_token(user, keep), "phone": user["phone"]})
 
 
 def body_json():
@@ -1084,12 +1208,21 @@ def active_ussd_sessions(owner):
     )
 
 
-def end_ussd_sessions(owner):
-    """Log out USSD from the app: the open session ends on its next screen, and no PIN-free continue."""
+def end_ussd_sessions(owner, caller=None, reason="logged out from the app"):
+    """Log out USSD from the app: the open session ends on its next screen, and no PIN-free continue.
+
+    All of the account's USSD sessions, or only the one on `caller`.
+    """
+    only = " AND caller = ?" if caller else ""
+    extra = (caller,) if caller else ()
     execute(
         "UPDATE ussd_resume SET logged_out = 1, resume_owner = NULL, resume_from = NULL, pin_mac = NULL "
-        "WHERE (owner = ? OR resume_owner = ?) AND logged_out = 0",
-        (owner, owner),
+        f"WHERE (owner = ? OR resume_owner = ?) AND logged_out = 0{only}",
+        (owner, owner) + extra,
+    )
+    execute(
+        f"UPDATE ussd_sessions SET ended_at = ?, end_reason = ? WHERE owner = ? AND ended_at IS NULL{only}",
+        (int(time.time()), reason, owner) + extra,
     )
 
 
@@ -1114,28 +1247,124 @@ def api_ussd_sessions():
 @app.route("/api/ussd/logout", methods=["POST"])
 @require_auth
 def api_ussd_logout():
+    """End all of this account's USSD sessions."""
+    close_idle_ussd_logins()
     count = len(active_ussd_sessions(g.phone))
     end_ussd_sessions(g.phone)
     return jsonify({"logged_out": count})
+
+
+def session_times(started, ended, now):
+    return {
+        "logged_in": started,
+        "logged_out": ended,
+        "duration_seconds": (ended or now) - started,
+        "active": ended is None,
+    }
+
+
+@app.route("/api/sessions", methods=["GET"])
+@require_auth
+def api_sessions():
+    """App devices and USSD logins on this account: active ones, then ended ones from the last
+    SESSION_HISTORY_DAYS, with login time, logout time and duration."""
+    now = int(time.time())
+    since = now - SESSION_HISTORY_DAYS * 86400
+    version = token_version(get_user(g.phone))
+    # Expired or out-of-date app sessions end lazily (their tokens already stopped working)
+    execute(
+        "UPDATE app_sessions SET ended_at = created_at + ?, end_reason = 'expired' WHERE owner = ? AND ended_at IS NULL AND created_at < ?",
+        (TOKEN_MAX_AGE, g.phone, now - TOKEN_MAX_AGE),
+    )
+    execute(
+        "UPDATE app_sessions SET ended_at = ?, end_reason = 'password or PIN changed' "
+        "WHERE owner = ? AND ended_at IS NULL AND version <> ?",
+        (now, g.phone, version),
+    )
+    close_idle_ussd_logins()
+    app_rows = fetch_all(
+        "SELECT jti, device, created_at, last_seen, ended_at, end_reason FROM app_sessions "
+        "WHERE owner = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY created_at DESC LIMIT 50",
+        (g.phone, since),
+    )
+    ussd_rows = fetch_all(
+        "SELECT id, caller, network, started_at, last_active, ended_at, end_reason FROM ussd_sessions "
+        "WHERE owner = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at DESC LIMIT 50",
+        (g.phone, since),
+    )
+    active_first = lambda item: not item["active"]
+    return jsonify({
+        "app": sorted(
+            (
+                {
+                    "id": r["jti"],
+                    "device": r["device"],
+                    "current": r["jti"] == g.jti,
+                    "last_active": r["last_seen"],
+                    "end_reason": r["end_reason"],
+                    **session_times(r["created_at"], r["ended_at"], now),
+                }
+                for r in app_rows
+            ),
+            key=active_first,
+        ),
+        "ussd": sorted(
+            (
+                {
+                    "id": r["id"],
+                    "phone": local_number(r["caller"]),
+                    "own_phone": r["caller"] == g.phone,
+                    "network": NETWORKS.get(r["network"] or "", r["network"] or "Unknown network"),
+                    "last_active": r["last_active"],
+                    "expires_at": None if r["ended_at"] else r["last_active"] + RESUME_SECONDS,
+                    "end_reason": r["end_reason"],
+                    **session_times(r["started_at"], r["ended_at"], now),
+                }
+                for r in ussd_rows
+            ),
+            key=active_first,
+        ),
+        "ussd_timeout_seconds": RESUME_SECONDS,
+        "history_days": SESSION_HISTORY_DAYS,
+    })
+
+
+@app.route("/api/sessions/app/<session_id>/logout", methods=["POST"])
+@require_auth
+def api_logout_app_session(session_id):
+    row = fetch_one("SELECT ended_at FROM app_sessions WHERE jti = ? AND owner = ?", (session_id, g.phone))
+    if not row or row["ended_at"]:
+        return api_error("That session has already ended.", 404)
+    current = session_id == g.jti
+    revoke_app_session(g.phone, session_id, "logged out" if current else "logged out from another device")
+    return jsonify({"logged_out": session_id, "current": current})
+
+
+@app.route("/api/sessions/ussd/<int:login_id>/logout", methods=["POST"])
+@require_auth
+def api_logout_ussd_session(login_id):
+    close_idle_ussd_logins()
+    row = fetch_one("SELECT caller, ended_at FROM ussd_sessions WHERE id = ? AND owner = ?", (login_id, g.phone))
+    if not row or row["ended_at"]:
+        return api_error("That USSD session has already ended.", 404)
+    end_ussd_sessions(g.phone, row["caller"])
+    return jsonify({"logged_out": login_id})
 
 
 @app.route("/api/logout", methods=["POST"])
 @require_auth
 def api_logout():
     """Log out this device, or everywhere: every app login plus any active USSD login."""
-    now = int(time.time())
     if body_json().get("everywhere"):
         execute("UPDATE users SET token_epoch = token_epoch + 1 WHERE phone = ?", (g.phone,))
-        end_ussd_sessions(g.phone)
+        execute(
+            "UPDATE app_sessions SET ended_at = ?, end_reason = 'logged out everywhere' WHERE owner = ? AND ended_at IS NULL",
+            (int(time.time()), g.phone),
+        )
+        end_ussd_sessions(g.phone, reason="logged out everywhere")
         return jsonify({"logged_out": "everywhere"})
     if g.jti:
-        db = get_db()
-        db.execute(sql("DELETE FROM revoked_tokens WHERE expires_at < ?"), (now,))
-        db.execute(
-            sql("INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING"),
-            (g.jti, now + TOKEN_MAX_AGE),
-        )
-        db.commit()
+        revoke_app_session(g.phone, g.jti, "logged out")
     return jsonify({"logged_out": "this device"})
 
 
@@ -1150,7 +1379,7 @@ def api_change_password():
     error = check_password(get_user(g.phone), current)
     if error:
         return api_error("Current password is wrong." if error.startswith("Wrong") else error, auth_status(error))
-    return logged_in(set_password(g.phone, new))
+    return logged_in(set_password(g.phone, new), same_session=True)
 
 
 @app.route("/api/pin/change", methods=["POST"])
@@ -1165,7 +1394,7 @@ def api_change_pin():
     error = check_password(get_user(g.phone), str(body.get("password", "")))
     if error:
         return api_error("Password is wrong." if error.startswith("Wrong") else error, auth_status(error))
-    return logged_in(update_pin(g.phone, new_pin))
+    return logged_in(update_pin(g.phone, new_pin), same_session=True)
 
 
 # SMS verification codes (stored in pin_resets) prove the user holds the SIM. They are used to
