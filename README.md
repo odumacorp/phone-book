@@ -8,6 +8,7 @@ A USSD phone book built on Africa's Talking. Each caller gets their own contact 
 3. My contacts      -> 5 per screen, 9 = more
 4. Delete contact   -> pick number -> 1 Yes / 2 No
 5. SMS me my contacts (sent with the Africa's Talking SMS API)
+6. Set app PIN      -> 4 digits -> confirm
 ```
 
 ## Run locally
@@ -33,4 +34,23 @@ ngrok http 8000             # gives you a public https URL
 gunicorn -w 2 -b 0.0.0.0:8000 app:app
 ```
 
-Contacts are stored in SQLite (`phonebook.db`); set `DB_PATH` to change where.
+Set `DATABASE_URL` to a Postgres connection string (e.g. Neon) in production. Without it,
+contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must be set for app logins.
+
+## Mobile app (`mobile/`)
+
+An Expo (React Native) Android app that uploads the phone's contacts to the user's phone book.
+Users log in with their phone number and the PIN set via USSD option 6.
+
+```bash
+cd mobile && npm install
+npx expo start                                   # run in Expo Go / emulator
+npx eas-cli build -p android --profile preview   # installable APK (needs a free expo.dev account)
+```
+
+API (JSON):
+- `POST /api/login` `{phone, pin}` -> `{token}`; 5 wrong PINs lock the number for 15 minutes
+- `GET /api/me` -> `{phone, contacts}`
+- `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
+
+Send the token as `Authorization: Bearer <token>`. Resetting the PIN logs out existing app sessions.
