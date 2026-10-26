@@ -20,7 +20,6 @@ load_dotenv()
 AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
 AT_API_KEY = os.getenv("AT_API_KEY", "")
 AT_SENDER_ID = os.getenv("AT_SENDER_ID") or None
-SERVICE_CODE = os.getenv("USSD_SERVICE_CODE", "*384*88041#")
 DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "phonebook.db"))
 
 USSD_MAX_LEN = 182  # max characters a USSD screen can show
@@ -240,9 +239,7 @@ def ussd():
     text = request.values.get("text", "")
     log.info("session=%s code=%s phone=%s text=%r", session_id, service_code, phone_number, text)
 
-    if SERVICE_CODE and service_code and service_code != SERVICE_CODE:
-        body = end("Unknown service.")
-    elif not phone_number:
+    if not phone_number:
         body = end("Could not identify your phone number.")
     else:
         try:
