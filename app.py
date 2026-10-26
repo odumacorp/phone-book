@@ -45,6 +45,7 @@ TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
 LOCKOUT_SECONDS = 15 * 60
 MAX_SYNC_CONTACTS = 5000
+MAX_PRIORITY = 5  # top contacts the user pins in the app
 RESET_CODE_TTL = 10 * 60  # forgot-PIN SMS code lifetime
 RESET_RESEND_SECONDS = 60
 MAX_RESET_ATTEMPTS = 5
@@ -153,24 +154,44 @@ def init_db():
             db.execute("SELECT pg_advisory_xact_lock(88041)")
         for statement in statements:
             db.execute(statement)
+        # Columns added after launch; existing databases get them on the next start
+        add_column(db, "contacts", "priority", "INTEGER NOT NULL DEFAULT 0")
+        add_column(db, "users", "show_others", "INTEGER NOT NULL DEFAULT 1")
         db.commit()
     finally:
         db.close()
 
 
-def list_contacts(owner):
+def add_column(db, table, column, definition):
+    if DATABASE_URL:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
+    elif column not in [row[1] for row in db.execute(f"PRAGMA table_info({table})")]:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+CONTACT_ORDER = "ORDER BY priority DESC, LOWER(name), id"  # priority contacts first
+
+
+def list_contacts(owner, priority_only=False):
+    only = " AND priority = 1" if priority_only else ""
     return fetch_all(
-        "SELECT id, name, phone FROM contacts WHERE owner = ? ORDER BY LOWER(name), id",
+        f"SELECT id, name, phone, priority FROM contacts WHERE owner = ?{only} {CONTACT_ORDER}",
         (owner,),
     )
 
 
-def search_contacts(owner, query):
+def search_contacts(owner, query, priority_only=False):
+    only = " AND priority = 1" if priority_only else ""
     return fetch_all(
-        "SELECT id, name, phone FROM contacts WHERE owner = ? AND LOWER(name) LIKE LOWER(?) "
-        "ORDER BY LOWER(name), id LIMIT ?",
+        f"SELECT id, name, phone, priority FROM contacts WHERE owner = ? AND LOWER(name) LIKE LOWER(?){only} "
+        f"{CONTACT_ORDER} LIMIT ?",
         (owner, f"%{query}%", PAGE_SIZE),
     )
+
+
+def priority_only(owner):
+    """USSD shows only priority contacts when the user turned off "show other contacts" in the app."""
+    return not get_user(owner)["show_others"]
 
 
 def add_contact(owner, name, phone):
@@ -208,7 +229,7 @@ def pop_pending_call(user_phone):
 
 def get_user(phone):
     return fetch_one(
-        "SELECT phone, pin_hash, failed_attempts, locked_until FROM users WHERE phone = ?",
+        "SELECT phone, pin_hash, failed_attempts, locked_until, show_others FROM users WHERE phone = ?",
         (phone,),
     )
 
@@ -330,6 +351,7 @@ def resolve_nav(inputs):
 
 
 INVALID = "Invalid choice."
+NO_PRIORITY = "No priority contacts yet. Choose up to 5 in the Phone Book app."
 
 
 # ---------------------------------------------------------------- login
@@ -393,6 +415,8 @@ def menu(owner, caller, parts):
         return con(MAIN_MENU)
 
     choice, rest = parts[0], parts[1:]
+    only = priority_only(owner)
+    none_yet = NO_PRIORITY if only else "You have no contacts yet."
 
     # 1. Add contact: 1 -> name -> phone
     if choice == "1":
@@ -416,7 +440,7 @@ def menu(owner, caller, parts):
         if len(rest) == 0:
             return screen("Enter name to search:")
         query = rest[0].strip()
-        rows = search_contacts(owner, query)
+        rows = search_contacts(owner, query, only)
         if not rows:
             return screen(f"No contacts match '{query}'.")
         if len(rest) == 1:
@@ -425,9 +449,9 @@ def menu(owner, caller, parts):
 
     # 3. List, paginated: 3 -> 9 (more) -> 9 ... -> pick contact -> action
     if choice == "3":
-        rows = list_contacts(owner)
+        rows = list_contacts(owner, only)
         if not rows:
-            return screen("You have no contacts yet.")
+            return screen(none_yet)
         page, i = 0, 0
         while i < len(rest) and rest[i] == "9" and (page + 1) * PAGE_SIZE < len(rows):
             page, i = page + 1, i + 1
@@ -441,9 +465,9 @@ def menu(owner, caller, parts):
 
     # 4. Delete: 4 -> pick number -> 1 confirm / 2 cancel
     if choice == "4":
-        rows = list_contacts(owner)[:PAGE_SIZE]
+        rows = list_contacts(owner, only)[:PAGE_SIZE]
         if not rows:
-            return screen("You have no contacts to delete.")
+            return screen(none_yet)
         if len(rest) == 0:
             return screen("Select contact to delete:\n" + format_contacts(rows, numbered=True, short=True))
         if not rest[0].isdigit() or not 1 <= int(rest[0]) <= len(rows):
@@ -464,9 +488,9 @@ def menu(owner, caller, parts):
             return screen(INVALID)
         if sms is None:
             return screen("SMS service is not available right now.")
-        rows = list_contacts(owner)
+        rows = list_contacts(owner, only)
         if not rows:
-            return screen("You have no contacts yet.")
+            return screen(none_yet)
         send_sms_async(caller, "Your contacts:\n" + format_contacts(rows))
         return screen("You will receive your contacts by SMS shortly.")
 
@@ -763,7 +787,45 @@ def api_reset_confirm():
 @require_auth
 def api_me():
     row = fetch_one("SELECT COUNT(*) AS n FROM contacts WHERE owner = ?", (g.phone,))
-    return jsonify({"phone": g.phone, "contacts": row["n"]})
+    return jsonify({"phone": g.phone, "contacts": row["n"], "show_others": bool(get_user(g.phone)["show_others"])})
+
+
+@app.route("/api/contacts", methods=["GET"])
+@require_auth
+def api_contacts():
+    rows = list_contacts(g.phone)
+    return jsonify({
+        "contacts": [
+            {"id": r["id"], "name": r["name"], "phone": r["phone"], "priority": bool(r["priority"])} for r in rows
+        ],
+        "max_priority": MAX_PRIORITY,
+        "show_others": bool(get_user(g.phone)["show_others"]),
+    })
+
+
+@app.route("/api/contacts/<int:contact_id>/priority", methods=["POST"])
+@require_auth
+def api_set_priority(contact_id):
+    want = bool((request.get_json(silent=True) or {}).get("priority"))
+    contact = fetch_one("SELECT priority FROM contacts WHERE id = ? AND owner = ?", (contact_id, g.phone))
+    if not contact:
+        return api_error("Contact not found.", 404)
+    if want and not contact["priority"]:
+        row = fetch_one("SELECT COUNT(*) AS n FROM contacts WHERE owner = ? AND priority = 1", (g.phone,))
+        if row["n"] >= MAX_PRIORITY:
+            return api_error(f"You can have up to {MAX_PRIORITY} priority contacts. Remove one first.", 409)
+    execute("UPDATE contacts SET priority = ? WHERE id = ? AND owner = ?", (int(want), contact_id, g.phone))
+    return jsonify({"id": contact_id, "priority": want})
+
+
+@app.route("/api/settings", methods=["POST"])
+@require_auth
+def api_settings():
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body.get("show_others"), bool):
+        return api_error("Expected show_others: true or false.", 400)
+    execute("UPDATE users SET show_others = ? WHERE phone = ?", (int(body["show_others"]), g.phone))
+    return jsonify({"show_others": body["show_others"]})
 
 
 @app.route("/api/contacts/sync", methods=["POST"])

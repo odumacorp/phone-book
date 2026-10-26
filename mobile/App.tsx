@@ -1,11 +1,13 @@
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -14,16 +16,20 @@ import {
 import {
   ApiError,
   CodeFlow,
+  Contact,
   Me,
   PHONE_FORMAT,
   changePin,
   clearToken,
   confirmCode,
+  getContacts,
   getMe,
   isValidPhone,
   loadToken,
   login,
   requestCode,
+  setPriority,
+  setShowOthers,
   syncContacts,
 } from './src/api';
 import { readDeviceContacts } from './src/deviceContacts';
@@ -301,6 +307,7 @@ function ChangePinScreen({
   );
 }
 
+/** Home: sync, the USSD visibility switch, and the synced phone book with priority stars. */
 function SyncScreen({
   token,
   me,
@@ -319,49 +326,169 @@ function SyncScreen({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(notice);
   const [error, setError] = useState('');
+  const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const [maxPriority, setMaxPriority] = useState(5);
+  const [showOthers, setShowOthersState] = useState(true);
+  const [query, setQuery] = useState('');
+
+  const failed = (e: unknown, fallback: string) => {
+    if (e instanceof ApiError && e.status === 401) return onLogout();
+    setError(e instanceof Error ? e.message : fallback);
+  };
+
+  const loadContacts = useCallback(async () => {
+    try {
+      const list = await getContacts(token);
+      setContacts(list.contacts);
+      setMaxPriority(list.max_priority);
+      setShowOthersState(list.show_others);
+    } catch (e) {
+      failed(e, 'Could not load your contacts.');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    loadContacts();
+  }, [loadContacts]);
 
   const sync = async () => {
     setBusy(true);
     setError('');
     setStatus('Reading your contacts…');
     try {
-      const contacts = await readDeviceContacts();
-      if (contacts === null) {
+      const device = await readDeviceContacts();
+      if (device === null) {
         setStatus('');
         setError('Contacts permission is needed. Allow it in Settings → Apps → Phone Book.');
         return;
       }
       let added = 0;
-      for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
-        setStatus(`Uploading ${Math.min(i + BATCH_SIZE, contacts.length)} of ${contacts.length}…`);
-        added += (await syncContacts(token, contacts.slice(i, i + BATCH_SIZE))).added;
+      for (let i = 0; i < device.length; i += BATCH_SIZE) {
+        setStatus(`Uploading ${Math.min(i + BATCH_SIZE, device.length)} of ${device.length}…`);
+        added += (await syncContacts(token, device.slice(i, i + BATCH_SIZE))).added;
       }
       setMe(await getMe(token));
+      await loadContacts();
       setStatus(added ? `Done. ${added} new contact${added === 1 ? '' : 's'} uploaded.` : 'Done. Everything was already synced.');
     } catch (e) {
       setStatus('');
-      if (e instanceof ApiError && e.status === 401) return onLogout();
-      setError(e instanceof Error ? e.message : 'Sync failed.');
+      failed(e, 'Sync failed.');
     } finally {
       setBusy(false);
     }
   };
 
-  return (
-    <View style={styles.card}>
-      <Text style={styles.label}>Logged in as</Text>
-      <Text style={styles.value}>{me?.phone ?? '…'}</Text>
-      <Text style={styles.label}>Contacts in your phone book</Text>
-      <Text style={styles.value}>{me ? me.contacts : '…'}</Text>
-      <Button title="Sync contacts" onPress={sync} busy={busy} />
-      {status ? <Text style={styles.status}>{status}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Text style={styles.hint}>
-        Synced contacts are available any time by dialling {USSD_CODE}, even without internet.
+  const priorityCount = contacts?.filter((c) => c.priority).length ?? 0;
+
+  const togglePriority = async (contact: Contact) => {
+    const want = !contact.priority;
+    if (want && priorityCount >= maxPriority) {
+      return setError(`You can have up to ${maxPriority} priority contacts. Remove one first.`);
+    }
+    setError('');
+    const update = (priority: boolean) =>
+      setContacts((list) => list && list.map((c) => (c.id === contact.id ? { ...c, priority } : c)));
+    update(want); // optimistic; undone if the server refuses
+    try {
+      await setPriority(token, contact.id, want);
+    } catch (e) {
+      update(!want);
+      failed(e, 'Could not update the contact.');
+    }
+  };
+
+  const toggleShowOthers = async (value: boolean) => {
+    setShowOthersState(value);
+    setError('');
+    try {
+      await setShowOthers(token, value);
+    } catch (e) {
+      setShowOthersState(!value);
+      failed(e, 'Could not save the setting.');
+    }
+  };
+
+  const visible = useMemo(() => {
+    const sorted = [...(contacts ?? [])].sort(
+      (a, b) => Number(b.priority) - Number(a.priority) || a.name.localeCompare(b.name),
+    );
+    const q = query.trim().toLowerCase();
+    return q ? sorted.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)) : sorted;
+  }, [contacts, query]);
+
+  const header = (
+    <>
+      <View style={styles.card}>
+        <Text style={styles.label}>Logged in as</Text>
+        <Text style={styles.value}>{me?.phone ?? '…'}</Text>
+        <Button title="Sync contacts" onPress={sync} busy={busy} />
+        {status ? <Text style={styles.status}>{status}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <View style={styles.switchRow}>
+          <View style={styles.switchText}>
+            <Text style={styles.switchLabel}>Show other contacts on USSD</Text>
+            <Text style={styles.hint}>
+              {showOthers
+                ? `${USSD_CODE} shows all your contacts, priority ones first.`
+                : `${USSD_CODE} shows only your ${maxPriority} priority contacts.`}
+            </Text>
+          </View>
+          <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
+        </View>
+        <View style={styles.linkRow}>
+          <Link title="Change PIN" onPress={onChangePin} disabled={busy} />
+          <Link title="Log out" onPress={onLogout} disabled={busy} />
+        </View>
+      </View>
+      <Text style={styles.sectionTitle}>
+        Your contacts{contacts ? ` (${contacts.length})` : ''} · ★ {priorityCount}/{maxPriority} priority
       </Text>
-      <Link title="Change PIN" onPress={onChangePin} disabled={busy} />
-      <Link title="Log out" onPress={onLogout} disabled={busy} />
-    </View>
+      <Text style={styles.hint}>Tap ☆ to pick up to {maxPriority} priority contacts.</Text>
+      <TextInput
+        style={[styles.input, styles.search]}
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Search name or number"
+        autoCorrect={false}
+      />
+    </>
+  );
+
+  return (
+    <FlatList
+      style={styles.list}
+      data={visible}
+      keyExtractor={(c) => String(c.id)}
+      ListHeaderComponent={header}
+      keyboardShouldPersistTaps="handled"
+      ListEmptyComponent={
+        contacts === null ? (
+          <ActivityIndicator color={COLORS.primary} />
+        ) : (
+          <Text style={styles.hint}>
+            {query ? 'No contacts match.' : 'No contacts yet. Tap Sync contacts to upload your phone\'s contacts.'}
+          </Text>
+        )
+      }
+      renderItem={({ item }) => (
+        <View style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.rowPhone}>{item.phone}</Text>
+          </View>
+          <Pressable
+            onPress={() => togglePriority(item)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={item.priority ? `Remove ${item.name} from priority` : `Make ${item.name} a priority`}
+          >
+            <Text style={[styles.star, item.priority && styles.starOn]}>{item.priority ? '★' : '☆'}</Text>
+          </Pressable>
+        </View>
+      )}
+    />
   );
 }
 
@@ -455,4 +582,25 @@ const styles = StyleSheet.create({
   error: { color: COLORS.error, marginTop: 8 },
   hint: { color: COLORS.muted, fontSize: 13, marginTop: 12 },
   link: { color: COLORS.primary, fontSize: 15, marginTop: 16, textAlign: 'center' },
+  linkRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  list: { flex: 1 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
+  switchText: { flex: 1 },
+  switchLabel: { fontSize: 16, color: COLORS.text, fontWeight: '500' },
+  sectionTitle: { fontSize: 17, fontWeight: '600', color: COLORS.text, marginTop: 24 },
+  search: { marginTop: 12, marginBottom: 8, backgroundColor: '#fff' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+  },
+  rowText: { flex: 1, marginRight: 12 },
+  rowName: { fontSize: 16, color: COLORS.text },
+  rowPhone: { fontSize: 14, color: COLORS.muted, marginTop: 2 },
+  star: { fontSize: 26, color: COLORS.muted },
+  starOn: { color: '#D99A00' },
 });
