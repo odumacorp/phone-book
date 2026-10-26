@@ -43,7 +43,7 @@ USSD_MAX_LEN = 182  # max characters a USSD screen can show
 PAGE_SIZE = 4  # contacts per screen; leaves room for "98. More" and the pick hint
 NAME_MAX = 13  # names are shortened on list screens so a full page + Back/Home fits
 MORE = "98"  # next page on the contact list (contact numbers skip 98)
-SMS_MAX = 140
+SMS_MAX = 160  # one SMS
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
 RESUME_SECONDS = 5 * 60  # redial within this long to continue a timed-out USSD session
 
@@ -203,6 +203,7 @@ def init_db():
         # Columns added after launch; existing databases get them on the next start
         add_column(db, "contacts", "priority", "INTEGER NOT NULL DEFAULT 0")
         add_column(db, "users", "show_others", "INTEGER NOT NULL DEFAULT 1")
+        add_column(db, "users", "name", "TEXT")
         add_column(db, "ussd_resume", "pin_mac", "TEXT")
         db.commit()
     finally:
@@ -281,7 +282,7 @@ def get_user(phone, fresh=False):
     cache = g.setdefault("users", {})
     if fresh or phone not in cache:
         cache[phone] = fetch_one(
-            "SELECT phone, pin_hash, failed_attempts, locked_until, show_others FROM users WHERE phone = ?",
+            "SELECT phone, pin_hash, failed_attempts, locked_until, show_others, name FROM users WHERE phone = ?",
             (phone,),
         )
     return cache[phone]
@@ -670,8 +671,24 @@ def menu(owner, caller, parts):
 
 
 PICK_HINT = "Reply no. or phone no."
-QUICK_REPLIES = {"1": "Please call me.", "2": "I'm on my way.", "3": "I'll call you later."}
-TYPE_OWN = "4"
+QUICK_REPLIES = {"1": "Please call me."}
+TYPE_OWN = "2"
+NAME_MAX_LEN = 30
+
+
+def clean_name(raw):
+    return " ".join(str(raw or "").split())[:NAME_MAX_LEN]
+
+
+def local_number(phone):
+    return "0" + phone[4:] if phone.startswith("+254") else phone
+
+
+def signature(owner):
+    """Added to every SMS a user sends: it arrives from our sender ID, so say who it's from and how to reply."""
+    user = get_user(owner)
+    name = user["name"] if user else None
+    return f"- {name} ({local_number(owner)})" if name else f"- {local_number(owner)}"
 
 
 def pick_and_act(owner, caller, rows, selection, rest, first=1):
@@ -723,10 +740,11 @@ def contact_menu(owner, caller, contact, rest):
             return screen(INVALID)
         else:
             message = QUICK_REPLIES.get(choice, choice)  # anything else is the message itself
-        message = message[:SMS_MAX]
+        sign = signature(owner)
+        message = message[: SMS_MAX - len(sign) - 1]  # message + signature fit in one SMS
         if not message:
             return screen("Message cannot be empty.")
-        send_sms_async(phone, f"{message}\n- from {owner}")
+        send_sms_async(phone, f"{message}\n{sign}")
         return screen(f"Message sent to {name}.")
 
     # Copy number: USSD can't reach the clipboard, so text it to the user to copy/call/save
@@ -930,15 +948,21 @@ def code_confirm(registering):
     error = pin_error(new_pin, str(body.get("confirm_pin", new_pin)))
     if error:
         return api_error(error, 400)
+    if registering and not clean_name(body.get("name")):
+        return api_error("Enter your name.", 400)  # checked before the one-time code is used up
     if registering and get_user(phone):
         return api_error(ALREADY_REGISTERED, 409)
     failed = use_code(phone, code)
     if failed:
         return api_error(*failed)
     if registering:
+        name = clean_name(body.get("name"))
+        if not name:
+            return api_error("Enter your name.", 400)
         if not set_pin(phone, new_pin):
             return api_error(ALREADY_REGISTERED, 409)
-        user = get_user(phone)
+        execute("UPDATE users SET name = ? WHERE phone = ?", (name, phone))
+        user = get_user(phone, fresh=True)
     else:
         user = update_pin(phone, new_pin)
     return jsonify({"token": make_token(user), "phone": phone})
@@ -972,7 +996,8 @@ def api_reset_confirm():
 @require_auth
 def api_me():
     row = fetch_one("SELECT COUNT(*) AS n FROM contacts WHERE owner = ?", (g.phone,))
-    return jsonify({"phone": g.phone, "contacts": row["n"], "show_others": bool(get_user(g.phone)["show_others"])})
+    user = get_user(g.phone)
+    return jsonify({"phone": g.phone, "contacts": row["n"], "show_others": bool(user["show_others"]), "name": user["name"]})
 
 
 @app.route("/api/contacts", methods=["GET"])
@@ -1006,12 +1031,21 @@ def api_set_priority(contact_id):
 @app.route("/api/settings", methods=["POST"])
 @require_auth
 def api_settings():
+    """Update show_others and/or name (the name signs the user's SMS)."""
     body = request.get_json(silent=True) or {}
-    if not isinstance(body.get("show_others"), bool):
-        return api_error("Expected show_others: true or false.", 400)
-    execute("UPDATE users SET show_others = ? WHERE phone = ?", (int(body["show_others"]), g.phone))
-    get_user(g.phone, fresh=True)
-    return jsonify({"show_others": body["show_others"]})
+    if "show_others" not in body and "name" not in body:
+        return api_error("Nothing to update.", 400)
+    if "show_others" in body:
+        if not isinstance(body["show_others"], bool):
+            return api_error("Expected show_others: true or false.", 400)
+        execute("UPDATE users SET show_others = ? WHERE phone = ?", (int(body["show_others"]), g.phone))
+    if "name" in body:
+        name = clean_name(body["name"])
+        if not name:
+            return api_error("Enter your name.", 400)
+        execute("UPDATE users SET name = ? WHERE phone = ?", (name, g.phone))
+    user = get_user(g.phone, fresh=True)
+    return jsonify({"show_others": bool(user["show_others"]), "name": user["name"]})
 
 
 @app.route("/api/contacts/sync", methods=["POST"])
