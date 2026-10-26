@@ -6,7 +6,9 @@ const TOKEN_KEY = 'phonebook.token';
 
 export type SyncContact = { name: string; phone: string };
 export type SyncResult = { added: number; skipped: number; total: number };
-export type Me = { phone: string; contacts: number };
+export type Me = { phone: string; contacts: number; show_others: boolean };
+export type Contact = { id: number; name: string; phone: string; priority: boolean };
+export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean };
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -64,6 +66,15 @@ export const confirmCode = (flow: CodeFlow, phone: string, code: string, newPin:
   saveToken(`${CODE_PATHS[flow]}/confirm`, { phone, code, new_pin: newPin });
 
 export const getMe = (token: string) => request<Me>('/api/me', {}, token);
+
+export const getContacts = (token: string) => request<ContactList>('/api/contacts', {}, token);
+
+export const setPriority = (token: string, id: number, priority: boolean) =>
+  request<{ priority: boolean }>(`/api/contacts/${id}/priority`, { method: 'POST', body: JSON.stringify({ priority }) }, token);
+
+/** Whether non-priority contacts appear on USSD (*384*88041#). */
+export const setShowOthers = (token: string, showOthers: boolean) =>
+  request<{ show_others: boolean }>('/api/settings', { method: 'POST', body: JSON.stringify({ show_others: showOthers }) }, token);
 
 export const syncContacts = (token: string, contacts: SyncContact[]) =>
   request<SyncResult>('/api/contacts/sync', { method: 'POST', body: JSON.stringify({ contacts }) }, token);

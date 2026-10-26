@@ -61,6 +61,8 @@ contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must 
 
 An Expo (React Native) Android app that uploads the phone's contacts to the user's phone book.
 Users register their number here (6-digit SMS code, then a PIN) and log in with the same number and PIN they use on USSD.
+After syncing, the app lists the phone book; users star up to 5 priority contacts (shown first everywhere)
+and choose whether their other contacts appear on USSD.
 
 ```bash
 cd mobile && npm install
@@ -76,6 +78,9 @@ API (JSON):
 - `POST /api/pin/change` `{current_pin, new_pin, confirm_pin}` -> `{token}`; other sessions are logged out
 - `POST /api/pin/reset/request` `{phone}` -> texts a 6-digit code (valid 10 min, one per minute)
 - `POST /api/pin/reset/confirm` `{phone, code, new_pin, confirm_pin}` -> `{token}`; 5 wrong codes burn it; clears any lockout
+- `GET /api/contacts` -> `{contacts: [{id, name, phone, priority}], max_priority, show_others}` (priority first)
+- `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
+- `POST /api/settings` `{show_others: true|false}`; when false, USSD lists/search/delete/SMS-me show only priority contacts
 - `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
 
 Send the token as `Authorization: Bearer <token>`.
