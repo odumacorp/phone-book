@@ -15,6 +15,8 @@ services:
         sync: false
       - key: AT_SENDER_ID
         sync: false
+      - key: AT_VOICE_NUMBER
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: SECRET_KEY

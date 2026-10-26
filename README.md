@@ -4,12 +4,23 @@ A USSD phone book built on Africa's Talking. Each caller gets their own contact 
 
 ```
 1. Add contact      -> name -> phone number
-2. Search contact   -> part of a name
-3. My contacts      -> 5 per screen, 9 = more
+2. Search contact   -> part of a name -> pick a contact
+3. My contacts      -> 4 per screen, 9 = more -> pick a contact
 4. Delete contact   -> pick number -> 1 Yes / 2 No
 5. SMS me my contacts (sent with the Africa's Talking SMS API)
 6. Set app PIN      -> 4 digits -> confirm
 ```
+
+On the search and list screens, reply with the contact's position (1-4) or type any phone number:
+
+```
+1. Call             -> AT rings the caller, then connects them to the contact (needs AT_VOICE_NUMBER)
+2. Send SMS         -> type a message; sent to the contact as "<message> - from <caller>"
+3. Copy number      -> the number is texted to the caller, who can copy, call or save it
+```
+
+For calls, buy a voice number in Africa's Talking (Voice -> Phone Numbers), set it as `AT_VOICE_NUMBER`,
+and set that number's callback URL to `https://<your-public-host>/voice`.
 
 ## Run locally
 
