@@ -27,7 +27,8 @@ load_dotenv()
 AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
 AT_API_KEY = os.getenv("AT_API_KEY", "")
 AT_SENDER_ID = os.getenv("AT_SENDER_ID") or None
-DATABASE_URL = os.getenv("DATABASE_URL")  # Postgres; falls back to SQLite when unset
+DATABASE_URL = os.getenv("DATABASE_URL")  # Postgres (Neon pooled); falls back to SQLite when unset
+DATABASE_URL_UNPOOLED = os.getenv("DATABASE_URL_UNPOOLED") or DATABASE_URL  # direct, for schema setup
 DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "phonebook.db"))
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 
@@ -63,9 +64,10 @@ if not SECRET_KEY:
 
 # ---------------------------------------------------------------- database
 
-def connect():
+def connect(url=None):
     if DATABASE_URL:
-        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        # prepare_threshold=None: no server-side prepared statements through Neon's PgBouncer pooler
+        return psycopg.connect(url or DATABASE_URL, row_factory=dict_row, prepare_threshold=None)
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     return db
@@ -121,8 +123,11 @@ def init_db():
                locked_until INTEGER NOT NULL DEFAULT 0
            )""",
     ]
-    db = connect()
+    db = connect(DATABASE_URL_UNPOOLED)
     try:
+        if DATABASE_URL:
+            # gunicorn workers start together; concurrent CREATE TABLE IF NOT EXISTS can collide
+            db.execute("SELECT pg_advisory_xact_lock(88041)")
         for statement in statements:
             db.execute(statement)
         db.commit()
