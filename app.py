@@ -304,12 +304,10 @@ MAIN_MENU = (
     "2. Search contact\n"
     "3. My contacts\n"
     "4. Delete contact\n"
-    "5. SMS me my contacts\n"
-    "6. Change PIN"
+    "5. SMS me my contacts"
 )
 BACK, HOME = "0", "00"
 NAV = "0. Back  00. Home"
-FORGOT_PIN = "99"
 
 
 def screen(msg):
@@ -361,7 +359,7 @@ def check_pin(phone, pin):
 
 
 def new_pin_flow(inputs, prompt, done):
-    """Shared by first-time setup and forgot-PIN: new PIN -> confirm. Calls done(pin) at the end."""
+    """First-time PIN setup: new PIN -> confirm. Calls done(pin) at the end."""
     if len(inputs) == 0:
         return con(prompt)
     if not PIN_RE.match(inputs[0]):
@@ -400,22 +398,11 @@ def handle(caller, text):
         return new_pin_flow(parts[1:], "Create a 4-digit PIN for your phone book:", create)
 
     if len(parts) == 1:
-        return con(f"Enter your PIN:\n{FORGOT_PIN}. Forgot PIN")
-
-    # Forgot PIN: dialling from the number itself proves ownership (no old PIN needed)
-    if parts[1] == FORGOT_PIN:
-        if owner != caller:
-            return end(f"To reset the PIN for {owner}, dial from that phone or use the Phone Book app.")
-
-        def reset(pin):
-            update_pin(owner, pin)
-            return end("PIN reset. Dial again and log in with your new PIN.")
-
-        return new_pin_flow(parts[2:], "Enter a new 4-digit PIN:", reset)
-
+        return con("Enter your PIN:")
     _user, error = check_pin(owner, parts[1])
     if error:
-        return end(f"{error}\nForgot it? Dial again and choose {FORGOT_PIN}, or use the app.")
+        # PINs are changed or reset only in the mobile app
+        return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
     return menu(owner, caller, resolve_nav(parts[2:]))
 
 
@@ -504,23 +491,6 @@ def menu(owner, caller, parts):
             return screen("You have no contacts yet.")
         send_sms_async(caller, "Your contacts:\n" + format_contacts(rows))
         return screen("You will receive your contacts by SMS shortly.")
-
-    # 6. Change PIN: 6 -> new PIN -> confirm. Ends the session (this session logged in with the old PIN)
-    if choice == "6":
-        if len(rest) == 0:
-            return screen("Enter a new 4-digit PIN:")
-        if not PIN_RE.match(rest[0]):
-            return screen("PIN must be exactly 4 digits.")
-        if check_password_hash(get_user(owner)["pin_hash"], rest[0]):
-            return screen("New PIN must be different from your current PIN.")
-        if len(rest) == 1:
-            return screen("Confirm new PIN:")
-        if len(rest) > 2:
-            return screen(INVALID)
-        if rest[1] != rest[0]:
-            return screen("PINs do not match.")
-        update_pin(owner, rest[0])
-        return end("PIN changed. Use your new PIN next time you dial or open the app.")
 
     return screen(INVALID)
 
