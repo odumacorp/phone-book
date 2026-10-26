@@ -187,6 +187,17 @@ def init_db():
                resume_owner TEXT,
                resume_from TEXT
            )""",
+        f"""CREATE TABLE IF NOT EXISTS login_logs (
+               id {id_col},
+               owner TEXT NOT NULL,
+               caller TEXT NOT NULL,
+               network TEXT,
+               session_id TEXT,
+               success INTEGER NOT NULL,
+               reason TEXT,
+               created_at INTEGER NOT NULL
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_login_logs_owner ON login_logs(owner, created_at)",
         """CREATE TABLE IF NOT EXISTS pending_calls (
                user_phone TEXT PRIMARY KEY,
                contact_phone TEXT NOT NULL,
@@ -509,7 +520,7 @@ def session_mac(session_id, owner, pin):
     return hmac.new(SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
 
 
-def login(owner, pin, session_id, state):
+def login(owner, pin, session_id, state, caller, network):
     """check_pin, but only the first time in a session: every screen resends the PIN."""
     mac = session_mac(session_id, owner, pin)
     if mac and state and state["session_id"] == session_id and state["owner"] == owner and state["pin_mac"]:
@@ -518,7 +529,43 @@ def login(owner, pin, session_id, state):
         if unlocked and hmac.compare_digest(state["pin_mac"], mac):
             return mac, None
     _user, error = check_pin(owner, pin)
+    log_login(owner, caller, network, session_id, error)
     return mac, error
+
+
+# ---------------------------------------------------------------- USSD login history
+# One row per login attempt (not per screen), shown in the app. USSD only tells us the dialling
+# number and its network, so that's what identifies the device.
+
+LOGIN_LOG_DAYS = 90
+NETWORKS = {"63902": "Safaricom", "63903": "Airtel", "63907": "Telkom", "99999": "Sandbox"}
+
+
+def log_login(owner, caller, network, session_id, error):
+    success = error is None
+    if success and session_id and fetch_one(
+        "SELECT 1 AS x FROM login_logs WHERE owner = ? AND session_id = ? AND success = 1", (owner, session_id)
+    ):
+        return  # already logged this session (only happens without SECRET_KEY, when every screen re-checks)
+    if success:
+        reason = "ok"
+    elif error.startswith("Too many"):
+        reason = "locked"
+    else:
+        reason = "wrong_pin"
+    now = int(time.time())
+    db = get_db()
+    db.execute(
+        sql(
+            "INSERT INTO login_logs (owner, caller, network, session_id, success, reason, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ),
+        (owner, caller, network or None, session_id or None, int(success), reason, now),
+    )
+    db.execute(
+        sql("DELETE FROM login_logs WHERE owner = ? AND created_at < ?"), (owner, now - LOGIN_LOG_DAYS * 86400)
+    )
+    db.commit()
 
 
 def offer_resume(caller, session_id):
@@ -543,7 +590,7 @@ def run_menu(owner, caller, path, session_id, state, mac):
     return body
 
 
-def handle(caller, text, session_id=""):
+def handle(caller, text, session_id="", network=""):
     """Every session starts with: phone number -> PIN -> main menu (numbers register in the app).
 
     The number entered decides whose phone book opens, so users can reach their contacts
@@ -563,7 +610,7 @@ def handle(caller, text, session_id=""):
         # This session started with the resume offer: first input is the PIN, or 0 to start over
         if parts[0] != BACK:
             owner = state["resume_owner"]
-            mac, error = login(owner, parts[0], session_id, state)
+            mac, error = login(owner, parts[0], session_id, state, caller, network)
             if error:
                 return end(f"{error}\nForgot your PIN? Set a new one in the Phone Book app.")
             path = resolve_nav(json.loads(state["resume_from"]) + parts[1:])
@@ -581,7 +628,7 @@ def handle(caller, text, session_id=""):
 
     if len(parts) == 1:
         return con("Enter your PIN:")
-    mac, error = login(owner, parts[1], session_id, state)
+    mac, error = login(owner, parts[1], session_id, state, caller, network)
     if error:
         # PINs are changed or reset only in the mobile app
         return end(f"{error}\nForgot your PIN? Set a new one in the Phone Book app.")
@@ -800,7 +847,7 @@ def ussd():
         body = end("Could not identify your phone number.")
     else:
         try:
-            body = handle(caller, text, session_id)
+            body = handle(caller, text, session_id, request.values.get("networkCode", ""))
         except Exception:
             log.exception("Error handling USSD request")
             body = end("Something went wrong. Please try again.")
@@ -1132,6 +1179,35 @@ def api_me():
         "show_others": bool(user["show_others"]),
         "name": user["name"],
         "email": user["email"],
+    })
+
+
+@app.route("/api/logins", methods=["GET"])
+@require_auth
+def api_logins():
+    """USSD login history for this account, newest first."""
+    try:
+        limit = max(1, min(int(request.args.get("limit", 100)), 200))
+    except ValueError:
+        limit = 100
+    rows = fetch_all(
+        "SELECT caller, network, success, reason, created_at FROM login_logs WHERE owner = ? "
+        "ORDER BY created_at DESC, id DESC LIMIT ?",
+        (g.phone, limit),
+    )
+    return jsonify({
+        "logins": [
+            {
+                "at": r["created_at"],
+                "phone": local_number(r["caller"]),
+                "own_phone": r["caller"] == g.phone,
+                "network": NETWORKS.get(r["network"] or "", r["network"] or "Unknown network"),
+                "success": bool(r["success"]),
+                "reason": r["reason"],
+            }
+            for r in rows
+        ],
+        "keep_days": LOGIN_LOG_DAYS,
     })
 
 

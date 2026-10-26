@@ -9,6 +9,14 @@ export type SyncResult = { added: number; skipped: number; total: number };
 export type Me = { phone: string; contacts: number; show_others: boolean; name: string | null; email: string | null };
 export type Contact = { id: number; name: string; phone: string; priority: boolean };
 export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean };
+export type UssdLogin = {
+  at: number; // unix seconds
+  phone: string; // the phone that dialled
+  own_phone: boolean;
+  network: string;
+  success: boolean;
+  reason: 'ok' | 'wrong_pin' | 'locked';
+};
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -86,6 +94,9 @@ export const changePin = (token: string, password: string, newPin: string) =>
 export const PASSWORD_MIN = 8;
 
 export const getMe = (token: string) => request<Me>('/api/me', {}, token);
+
+/** USSD login attempts on this account, newest first (kept for `keep_days`). */
+export const getLogins = (token: string) => request<{ logins: UssdLogin[]; keep_days: number }>('/api/logins', {}, token);
 
 export const getContacts = (token: string) => request<ContactList>('/api/contacts', {}, token);
 
