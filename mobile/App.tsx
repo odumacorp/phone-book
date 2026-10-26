@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -15,19 +16,22 @@ import {
 
 import {
   ApiError,
-  CodeFlow,
   Contact,
   Me,
+  PASSWORD_MIN,
   PHONE_FORMAT,
+  changePassword,
   changePin,
   clearToken,
-  confirmCode,
   getContacts,
   getMe,
   isValidPhone,
   loadToken,
   login,
-  requestCode,
+  register,
+  requestPasswordReset,
+  requestRegistration,
+  resetPassword,
   setName,
   setPriority,
   setShowOthers,
@@ -38,7 +42,7 @@ import { readDeviceContacts } from './src/deviceContacts';
 const USSD_CODE = '*384*88041#';
 const BATCH_SIZE = 1000;
 
-type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin';
+type View_ = 'login' | 'register' | 'reset' | 'sync' | 'changePin' | 'changePassword';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
@@ -82,32 +86,20 @@ export default function App() {
     setView('login');
   };
 
+  const back = () => setView(token ? 'sync' : 'login');
+
   let content;
   if (booting) content = <ActivityIndicator size="large" color={COLORS.primary} />;
-  else if (view === 'register' || view === 'reset')
-    content = (
-      <CodeScreen
-        key={view}
-        flow={view}
-        onDone={(t) =>
-          loggedIn(t, view === 'register' ? 'Account created. Tap Sync contacts to upload them.' : 'PIN reset. You are logged in.')
-        }
-        onCancel={() => setView('login')}
-      />
-    );
+  else if (view === 'register')
+    content = <RegisterScreen onDone={(t) => loggedIn(t, 'Account created. Tap Sync contacts to upload them.')} onCancel={back} />;
+  else if (view === 'reset')
+    content = <ResetPasswordScreen onDone={(t) => loggedIn(t, 'Password reset. You are logged in.')} onCancel={back} />;
   else if (!token)
-    content = (
-      <LoginScreen onLogin={loggedIn} onRegister={() => setView('register')} onForgot={() => setView('reset')} />
-    );
+    content = <LoginScreen onLogin={loggedIn} onRegister={() => setView('register')} onForgot={() => setView('reset')} />;
+  else if (view === 'changePassword')
+    content = <ChangePasswordScreen token={token} onDone={(t) => loggedIn(t, 'Password changed.')} onCancel={back} onLogout={logout} />;
   else if (view === 'changePin')
-    content = (
-      <ChangePinScreen
-        token={token}
-        onDone={(t) => loggedIn(t, 'PIN changed.')}
-        onCancel={() => setView('sync')}
-        onLogout={logout}
-      />
-    );
+    content = <ChangePinScreen token={token} onDone={(t) => loggedIn(t, 'USSD PIN changed.')} onCancel={back} onLogout={logout} />;
   else
     content = (
       <SyncScreen
@@ -118,6 +110,10 @@ export default function App() {
         onChangePin={() => {
           setNotice('');
           setView('changePin');
+        }}
+        onChangePassword={() => {
+          setNotice('');
+          setView('changePassword');
         }}
         onLogout={logout}
       />
@@ -132,66 +128,10 @@ export default function App() {
   );
 }
 
-function LoginScreen({
-  onLogin,
-  onRegister,
-  onForgot,
-}: {
-  onLogin: (token: string) => Promise<void>;
-  onRegister: () => void;
-  onForgot: () => void;
-}) {
-  const [phone, setPhone] = useState('');
-  const [pin, setPin] = useState('');
+/** Runs a form action with a busy flag and shows its error message. */
+function useForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
-  const submit = async () => {
-    if (!isValidPhone(phone)) return setError(`Enter your phone number as ${PHONE_FORMAT}.`);
-    setBusy(true);
-    setError('');
-    try {
-      await onLogin(await login(phone, pin));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Login failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.card}>
-      <PhoneField value={phone} onChange={setPhone} />
-      <PinField label="4-digit PIN" value={pin} onChange={setPin} />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button title="Log in" onPress={submit} busy={busy} disabled={!phone || pin.length !== 4} />
-      <Link title="Forgot PIN?" onPress={onForgot} disabled={busy} />
-      <Link title="New here? Register your number" onPress={onRegister} disabled={busy} />
-    </KeyboardAvoidingView>
-  );
-}
-
-const CODE_SCREEN_TEXT: Record<CodeFlow, { heading: string; intro: string; button: string }> = {
-  register: {
-    heading: 'Register your number',
-    intro: `We will text a 6-digit code to confirm the number is yours. You will then use it with your PIN here and on ${USSD_CODE}.`,
-    button: 'Create account',
-  },
-  reset: { heading: 'Reset your PIN', intro: 'We will text a 6-digit code to your number.', button: 'Reset PIN' },
-};
-
-/** Register a new number, or reset a forgotten PIN: phone -> SMS code -> new PIN. */
-function CodeScreen({ flow, onDone, onCancel }: { flow: CodeFlow; onDone: (token: string) => void; onCancel: () => void }) {
-  const text = CODE_SCREEN_TEXT[flow];
-  const [phone, setPhone] = useState('');
-  const [name, setNameText] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const [code, setCode] = useState('');
-  const [pin, setPin] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError('');
@@ -203,79 +143,227 @@ function CodeScreen({ flow, onDone, onCancel }: { flow: CodeFlow; onDone: (token
       setBusy(false);
     }
   };
+  return { busy, error, setError, run };
+}
+
+/** Scrollable card for forms, so long ones stay usable with the keyboard open. */
+function Form({ children }: { children: React.ReactNode }) {
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.list}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.formScroll}>
+        <View style={styles.card}>{children}</View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const isEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim());
+
+function LoginScreen({
+  onLogin,
+  onRegister,
+  onForgot,
+}: {
+  onLogin: (token: string) => Promise<void>;
+  onRegister: () => void;
+  onForgot: () => void;
+}) {
+  const [account, setAccount] = useState('');
+  const [password, setPassword] = useState('');
+  const { busy, error, setError, run } = useForm();
+
+  const submit = () => {
+    if (!isEmail(account) && !isValidPhone(account))
+      return setError(`Enter your email, or your phone number as ${PHONE_FORMAT}.`);
+    run(async () => onLogin(await login(account.trim(), password)));
+  };
+
+  return (
+    <Form>
+      <AccountField value={account} onChange={setAccount} />
+      <PasswordField label="Password" value={password} onChange={setPassword} />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button title="Log in" onPress={submit} busy={busy} disabled={!account.trim() || !password} />
+      <Link title="Forgot password?" onPress={onForgot} disabled={busy} />
+      <Link title="New here? Create an account" onPress={onRegister} disabled={busy} />
+    </Form>
+  );
+}
+
+/** Register: name, phone (+ optional email) -> SMS code -> password and USSD PIN. */
+function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void; onCancel: () => void }) {
+  const [name, setNameText] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const { busy, error, setError, run } = useForm();
 
   const sendCode = () => {
-    if (flow === 'register' && !name.trim()) return setError('Enter your name.');
+    if (!name.trim()) return setError('Enter your name.');
     if (!isValidPhone(phone)) return setError(`Enter your phone number as ${PHONE_FORMAT}.`);
+    if (email.trim() && !isEmail(email)) return setError('Enter a valid email address, or leave it empty.');
     run(async () => {
-      await requestCode(flow, phone);
+      await requestRegistration(phone, email.trim());
       setCodeSent(true);
     });
   };
 
   const finish = () => {
-    if (pin !== confirm) return setError('PINs do not match.');
-    run(async () => onDone(await confirmCode(flow, phone, code, pin, flow === 'register' ? name : undefined)));
+    if (password.length < PASSWORD_MIN) return setError(`Password must be at least ${PASSWORD_MIN} characters.`);
+    if (password !== confirmPassword) return setError('Passwords do not match.');
+    if (pin !== confirmPin) return setError('PINs do not match.');
+    run(async () => onDone(await register({ phone, code, name: name.trim(), email: email.trim(), password, pin })));
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.card}>
-      <Text style={styles.heading}>{text.heading}</Text>
+    <Form>
+      <Text style={styles.heading}>Create an account</Text>
       {!codeSent ? (
         <>
-          <Text style={styles.hint}>{text.intro}</Text>
-          {flow === 'register' ? (
-            <>
-              <Text style={styles.label}>Your name</Text>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setNameText}
-                placeholder="e.g. Austin"
-                autoComplete="name"
-                maxLength={30}
-              />
-              <Text style={styles.hint}>Added to the end of every SMS you send from {USSD_CODE}.</Text>
-            </>
-          ) : null}
-          <PhoneField value={phone} onChange={setPhone} />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Button
-            title="Send code"
-            onPress={sendCode}
-            busy={busy}
-            disabled={!phone || (flow === 'register' && !name.trim())}
+          <Text style={styles.label}>Your name</Text>
+          <TextInput
+            style={styles.input}
+            value={name}
+            onChangeText={setNameText}
+            placeholder="e.g. Austin"
+            autoComplete="name"
+            maxLength={30}
           />
+          <Text style={styles.hint}>Added to the end of every SMS you send from {USSD_CODE}.</Text>
+          <PhoneField value={phone} onChange={setPhone} />
+          <Text style={styles.hint}>We will text a 6-digit code to confirm it is yours.</Text>
+          <Text style={styles.label}>Email (optional)</Text>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoComplete="email"
+            autoCorrect={false}
+          />
+          <Text style={styles.hint}>Lets you log in with your email instead of your phone number.</Text>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Button title="Send code" onPress={sendCode} busy={busy} disabled={!name.trim() || !phone} />
         </>
       ) : (
         <>
-          <Text style={styles.hint}>
-            Enter the code sent to {phone} and choose a {flow === 'register' ? '4-digit' : 'new'} PIN.
-          </Text>
-          <Text style={styles.label}>6-digit code</Text>
-          <TextInput
-            style={styles.input}
-            value={code}
-            onChangeText={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))}
-            placeholder="123456"
-            keyboardType="number-pad"
-            autoComplete="sms-otp"
-            textContentType="oneTimeCode"
-          />
-          <PinField label={flow === 'register' ? 'PIN' : 'New PIN'} value={pin} onChange={setPin} />
-          <PinField label={flow === 'register' ? 'Confirm PIN' : 'Confirm new PIN'} value={confirm} onChange={setConfirm} />
+          <Text style={styles.hint}>Enter the code sent to {phone}.</Text>
+          <CodeField value={code} onChange={setCode} />
+          <PasswordField label={`Password (at least ${PASSWORD_MIN} characters)`} value={password} onChange={setPassword} isNew />
+          <PasswordField label="Confirm password" value={confirmPassword} onChange={setConfirmPassword} isNew />
+          <Text style={styles.hint}>For logging in to this app.</Text>
+          <PinField label="4-digit USSD PIN" value={pin} onChange={setPin} />
+          <PinField label="Confirm USSD PIN" value={confirmPin} onChange={setConfirmPin} />
+          <Text style={styles.hint}>For dialling {USSD_CODE}, where you log in with your phone number and this PIN.</Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button
-            title={text.button}
+            title="Create account"
             onPress={finish}
             busy={busy}
-            disabled={code.length !== 6 || pin.length !== 4 || confirm.length !== 4}
+            disabled={code.length !== 6 || !password || !confirmPassword || pin.length !== 4 || confirmPin.length !== 4}
           />
           <Link title="Send a new code" onPress={sendCode} disabled={busy} />
         </>
       )}
       <Link title="Back to log in" onPress={onCancel} disabled={busy} />
-    </KeyboardAvoidingView>
+    </Form>
+  );
+}
+
+/** Forgot password: email or phone -> SMS code to the account's phone -> new password. */
+function ResetPasswordScreen({ onDone, onCancel }: { onDone: (token: string) => void; onCancel: () => void }) {
+  const [account, setAccount] = useState('');
+  const [sentTo, setSentTo] = useState('');
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const { busy, error, setError, run } = useForm();
+
+  const sendCode = () => {
+    if (!isEmail(account) && !isValidPhone(account))
+      return setError(`Enter your email, or your phone number as ${PHONE_FORMAT}.`);
+    run(async () => setSentTo((await requestPasswordReset(account.trim())).phone));
+  };
+
+  const finish = () => {
+    if (password.length < PASSWORD_MIN) return setError(`Password must be at least ${PASSWORD_MIN} characters.`);
+    if (password !== confirm) return setError('Passwords do not match.');
+    run(async () => onDone(await resetPassword(account.trim(), code, password)));
+  };
+
+  return (
+    <Form>
+      <Text style={styles.heading}>Reset your password</Text>
+      {!sentTo ? (
+        <>
+          <Text style={styles.hint}>We will text a 6-digit code to the phone number on your account.</Text>
+          <AccountField value={account} onChange={setAccount} />
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Button title="Send code" onPress={sendCode} busy={busy} disabled={!account.trim()} />
+        </>
+      ) : (
+        <>
+          <Text style={styles.hint}>Enter the code sent to {sentTo} and choose a new password.</Text>
+          <CodeField value={code} onChange={setCode} />
+          <PasswordField label={`New password (at least ${PASSWORD_MIN} characters)`} value={password} onChange={setPassword} isNew />
+          <PasswordField label="Confirm new password" value={confirm} onChange={setConfirm} isNew />
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Button title="Reset password" onPress={finish} busy={busy} disabled={code.length !== 6 || !password || !confirm} />
+          <Link title="Send a new code" onPress={sendCode} disabled={busy} />
+        </>
+      )}
+      <Link title="Back" onPress={onCancel} disabled={busy} />
+    </Form>
+  );
+}
+
+function ChangePasswordScreen({
+  token,
+  onDone,
+  onCancel,
+  onLogout,
+}: {
+  token: string;
+  onDone: (token: string) => void;
+  onCancel: () => void;
+  onLogout: () => void;
+}) {
+  const [current, setCurrent] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const { busy, error, setError, run } = useForm();
+
+  const submit = () => {
+    if (password.length < PASSWORD_MIN) return setError(`Password must be at least ${PASSWORD_MIN} characters.`);
+    if (password !== confirm) return setError('New passwords do not match.');
+    run(async () => {
+      try {
+        onDone(await changePassword(token, current, password));
+      } catch (e) {
+        if (e instanceof ApiError && e.message.startsWith('Please log in')) return onLogout();
+        throw e;
+      }
+    });
+  };
+
+  return (
+    <Form>
+      <Text style={styles.heading}>Change password</Text>
+      <PasswordField label="Current password" value={current} onChange={setCurrent} />
+      <PasswordField label={`New password (at least ${PASSWORD_MIN} characters)`} value={password} onChange={setPassword} isNew />
+      <PasswordField label="Confirm new password" value={confirm} onChange={setConfirm} isNew />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button title="Change password" onPress={submit} busy={busy} disabled={!current || !password || !confirm} />
+      <Text style={styles.hint}>Other devices will be logged out.</Text>
+      <Link title="Cancel" onPress={onCancel} disabled={busy} />
+    </Form>
   );
 }
 
@@ -290,42 +378,34 @@ function ChangePinScreen({
   onCancel: () => void;
   onLogout: () => void;
 }) {
-  const [current, setCurrent] = useState('');
+  const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const { busy, error, setError, run } = useForm();
 
-  const submit = async () => {
-    if (pin !== confirm) return setError('New PINs do not match.');
-    setBusy(true);
-    setError('');
-    try {
-      onDone(await changePin(token, current, pin));
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401 && e.message.startsWith('Please log in')) return onLogout();
-      setError(e instanceof Error ? e.message : 'Could not change PIN.');
-    } finally {
-      setBusy(false);
-    }
+  const submit = () => {
+    if (pin !== confirm) return setError('PINs do not match.');
+    run(async () => {
+      try {
+        onDone(await changePin(token, password, pin));
+      } catch (e) {
+        if (e instanceof ApiError && e.message.startsWith('Please log in')) return onLogout();
+        throw e;
+      }
+    });
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.card}>
-      <Text style={styles.heading}>Change PIN</Text>
-      <PinField label="Current PIN" value={current} onChange={setCurrent} />
+    <Form>
+      <Text style={styles.heading}>Change USSD PIN</Text>
+      <Text style={styles.hint}>The PIN you use when dialling {USSD_CODE}. Forgot it? Just set a new one here.</Text>
+      <PasswordField label="Your app password" value={password} onChange={setPassword} />
       <PinField label="New PIN" value={pin} onChange={setPin} />
       <PinField label="Confirm new PIN" value={confirm} onChange={setConfirm} />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button
-        title="Change PIN"
-        onPress={submit}
-        busy={busy}
-        disabled={current.length !== 4 || pin.length !== 4 || confirm.length !== 4}
-      />
-      <Text style={styles.hint}>Your new PIN works on USSD ({USSD_CODE}) too. Other devices will be logged out.</Text>
+      <Button title="Change PIN" onPress={submit} busy={busy} disabled={!password || pin.length !== 4 || confirm.length !== 4} />
       <Link title="Cancel" onPress={onCancel} disabled={busy} />
-    </KeyboardAvoidingView>
+    </Form>
   );
 }
 
@@ -336,6 +416,7 @@ function SyncScreen({
   setMe,
   notice,
   onChangePin,
+  onChangePassword,
   onLogout,
 }: {
   token: string;
@@ -343,6 +424,7 @@ function SyncScreen({
   setMe: (me: Me) => void;
   notice: string;
   onChangePin: () => void;
+  onChangePassword: () => void;
   onLogout: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -462,6 +544,7 @@ function SyncScreen({
       <View style={styles.card}>
         <Text style={styles.label}>Logged in as</Text>
         <Text style={styles.value}>{me?.phone ?? '…'}</Text>
+        {me?.email ? <Text style={styles.hint}>{me.email}</Text> : null}
         <Text style={styles.label}>Your name (signs your SMS)</Text>
         <View style={styles.nameRow}>
           <TextInput
@@ -489,7 +572,8 @@ function SyncScreen({
           <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
         </View>
         <View style={styles.linkRow}>
-          <Link title="Change PIN" onPress={onChangePin} disabled={busy} />
+          <Link title="Change password" onPress={onChangePassword} disabled={busy} />
+          <Link title="Change USSD PIN" onPress={onChangePin} disabled={busy} />
           <Link title="Log out" onPress={onLogout} disabled={busy} />
         </View>
       </View>
@@ -556,6 +640,76 @@ function PhoneField({ value, onChange }: { value: string; onChange: (v: string) 
         placeholder="0712 345 678 or +254 712 345 678"
         keyboardType="phone-pad"
         autoComplete="tel"
+      />
+    </>
+  );
+}
+
+function AccountField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <>
+      <Text style={styles.label}>Email or phone number</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChange}
+        placeholder="you@example.com or 0712 345 678"
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoComplete="username"
+        autoCorrect={false}
+      />
+    </>
+  );
+}
+
+function PasswordField({
+  label,
+  value,
+  onChange,
+  isNew,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  isNew?: boolean;
+}) {
+  const [shown, setShown] = useState(false);
+  return (
+    <>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.nameRow}>
+        <TextInput
+          style={[styles.input, styles.nameInput]}
+          value={value}
+          onChangeText={onChange}
+          secureTextEntry={!shown}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete={isNew ? 'new-password' : 'current-password'}
+          textContentType={isNew ? 'newPassword' : 'password'}
+          maxLength={128}
+        />
+        <Pressable onPress={() => setShown(!shown)} hitSlop={8}>
+          <Text style={styles.showLink}>{shown ? 'Hide' : 'Show'}</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+}
+
+function CodeField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <>
+      <Text style={styles.label}>6-digit code</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={(v) => onChange(v.replace(/\D/g, '').slice(0, 6))}
+        placeholder="123456"
+        keyboardType="number-pad"
+        autoComplete="sms-otp"
+        textContentType="oneTimeCode"
       />
     </>
   );
@@ -638,6 +792,8 @@ const styles = StyleSheet.create({
   linkRow: { flexDirection: 'row', justifyContent: 'space-around' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   nameInput: { flex: 1 },
+  showLink: { color: COLORS.primary, fontSize: 15 },
+  formScroll: { paddingBottom: 40 },
   list: { flex: 1 },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
   switchText: { flex: 1 },

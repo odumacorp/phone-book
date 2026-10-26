@@ -67,10 +67,18 @@ contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must 
 
 ## Mobile app (`mobile/`)
 
-An Expo (React Native) Android app that uploads the phone's contacts to the user's phone book.
-Users register their number here (6-digit SMS code, then a PIN) and log in with the same number and PIN they use on USSD.
-After syncing, the app lists the phone book; users star up to 5 priority contacts (shown first everywhere)
-and choose whether their other contacts appear on USSD.
+An Expo (React Native) app that uploads the phone's contacts to the user's phone book.
+
+- **Register:** name, phone number (confirmed with a 6-digit SMS code), optional email, a password of the
+  user's choosing (8+ characters) and a 4-digit USSD PIN.
+- **Log in:** email *or* phone number + password. USSD keeps phone number + PIN (letters are slow on a keypad).
+- **Forgot password:** email or phone -> code by SMS to the account's phone -> new password.
+- **Change password** (other devices are logged out) and **Change USSD PIN** (needs the password, so a
+  forgotten PIN can simply be replaced).
+- Wrong passwords lock the app login for 15 minutes after 5 tries, separately from the USSD PIN lockout.
+- Emails aren't verified (the server can't send email yet); they are only a login name and must be unique.
+- After syncing, the app lists the phone book; users star up to 5 priority contacts (shown first everywhere)
+  and choose whether their other contacts appear on USSD.
 
 ```bash
 cd mobile && npm install
@@ -79,16 +87,18 @@ npx eas-cli build -p android --profile preview   # installable APK (needs a free
 ```
 
 API (JSON):
-- `POST /api/register/request` `{phone}` -> texts a 6-digit code (valid 10 min, one per minute)
-- `POST /api/register/confirm` `{phone, code, new_pin, confirm_pin, name}` -> `{token}`; creates the account
-- `POST /api/login` `{phone, pin}` -> `{token}`; 5 wrong PINs lock the number for 15 minutes
-- `GET /api/me` -> `{phone, contacts}`
-- `POST /api/pin/change` `{current_pin, new_pin, confirm_pin}` -> `{token}`; other sessions are logged out
-- `POST /api/pin/reset/request` `{phone}` -> texts a 6-digit code (valid 10 min, one per minute)
-- `POST /api/pin/reset/confirm` `{phone, code, new_pin, confirm_pin}` -> `{token}`; 5 wrong codes burn it; clears any lockout
+- `POST /api/register/request` `{phone, email?}` -> texts a 6-digit code (valid 10 min, one per minute)
+- `POST /api/register/confirm` `{phone, code, name, email?, password, confirm_password?, pin, confirm_pin?}` -> `{token}`
+- `POST /api/login` `{login, password}` (login = email or phone) -> `{token}`
+- `POST /api/password/reset/request` `{login}` -> texts a code to the account's phone -> `{sent, phone (masked)}`
+- `POST /api/password/reset/confirm` `{login, code, new_password, confirm_password?}` -> `{token}`; clears the password lockout
+- `POST /api/password/change` `{current_password, new_password, confirm_password?}` -> `{token}`; other sessions logged out
+- `POST /api/pin/change` `{password, new_pin, confirm_pin?}` -> `{token}`; the USSD PIN
+- `GET /api/me` -> `{phone, contacts, name, email, show_others}`
 - `GET /api/contacts` -> `{contacts: [{id, name, phone, priority}], max_priority, show_others}` (priority first)
 - `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
-- `POST /api/settings` `{show_others?: true|false, name?: string}`; name signs the user's SMS; when show_others is false, USSD lists/search/delete/SMS-me show only priority contacts
+- `POST /api/settings` `{show_others?, name?, email?}`; name signs the user's SMS; email ("" removes it) is a login;
+  when show_others is false, USSD lists/search/delete/SMS-me show only priority contacts
 - `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
 
-Send the token as `Authorization: Bearer <token>`.
+Send the token as `Authorization: Bearer <token>`. Codes stop working after 5 wrong tries.
