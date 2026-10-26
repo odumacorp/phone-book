@@ -96,6 +96,20 @@ export const PASSWORD_MIN = 8;
 export const getMe = (token: string) => request<Me>('/api/me', {}, token);
 
 /** USSD login attempts on this account, newest first (kept for `keep_days`). */
+export type UssdSession = { phone: string; own_phone: boolean; last_active: number; expires_at: number };
+
+/** Logged-in USSD sessions on this account (they end after `timeout_seconds` without a screen). */
+export const getUssdSessions = (token: string) =>
+  request<{ sessions: UssdSession[]; timeout_seconds: number }>('/api/ussd/sessions', {}, token);
+
+/** Ends USSD sessions: an open one stops on its next screen, and the next dial needs a full login. */
+export const logoutUssd = (token: string) =>
+  request<{ logged_out: number }>('/api/ussd/logout', { method: 'POST' }, token);
+
+/** Revokes this device's login on the server, or every app login plus USSD when `everywhere`. */
+export const logoutApp = (token: string, everywhere = false) =>
+  request<{ logged_out: string }>('/api/logout', { method: 'POST', body: JSON.stringify({ everywhere }) }, token);
+
 export const getLogins = (token: string) => request<{ logins: UssdLogin[]; keep_days: number }>('/api/logins', {}, token);
 
 export const getContacts = (token: string) => request<ContactList>('/api/contacts', {}, token);

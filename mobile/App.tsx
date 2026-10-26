@@ -22,6 +22,7 @@ import {
   PASSWORD_MIN,
   SyncContact,
   UssdLogin,
+  UssdSession,
   PHONE_FORMAT,
   addContact,
   changePassword,
@@ -30,10 +31,13 @@ import {
   deleteContact,
   getContacts,
   getLogins,
+  getUssdSessions,
   getMe,
   isValidPhone,
   loadToken,
   login,
+  logoutApp,
+  logoutUssd,
   normalizePhone,
   register,
   requestPasswordReset,
@@ -86,7 +90,7 @@ export default function App() {
   };
 
   const logout = async () => {
-    await clearToken();
+    await clearToken(); // local only: used when the server already rejected the token
     setToken(null);
     setMe(null);
     setNotice('');
@@ -94,6 +98,18 @@ export default function App() {
   };
 
   const back = () => setView(token ? 'sync' : 'login');
+
+  const confirmLogout = () => {
+    const out = async (everywhere: boolean) => {
+      if (token) await logoutApp(token, everywhere).catch(() => null); // offline: still log out here
+      await logout();
+    };
+    Alert.alert('Log out?', 'Log out everywhere also ends your app login on other devices and any USSD session.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log out everywhere', style: 'destructive', onPress: () => out(true) },
+      { text: 'Log out', onPress: () => out(false) },
+    ]);
+  };
 
   let content;
   if (booting) content = <ActivityIndicator size="large" color={COLORS.primary} />;
@@ -146,7 +162,14 @@ export default function App() {
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
-      <Text style={styles.title}>Remote Phonebook</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>Remote Phonebook</Text>
+        {token && !booting && view !== 'register' && view !== 'reset' ? (
+          <Pressable onPress={confirmLogout} hitSlop={10} accessibilityRole="button">
+            <Text style={styles.logout}>Log out</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {content}
     </View>
   );
@@ -446,13 +469,18 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
   const [keepDays, setKeepDays] = useState(90);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [sessions, setSessions] = useState<UssdSession[]>([]);
+  const [timeout, setTimeoutSeconds] = useState(120);
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
     setError('');
     try {
-      const res = await getLogins(token);
+      const [res, active] = await Promise.all([getLogins(token), getUssdSessions(token)]);
       setLogins(res.logins);
       setKeepDays(res.keep_days);
+      setSessions(active.sessions);
+      setTimeoutSeconds(active.timeout_seconds);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return onLogout();
       setError(e instanceof Error ? e.message : 'Could not load your login history.');
@@ -462,6 +490,25 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
   useEffect(() => {
     load();
   }, [load]);
+
+  const endUssd = () =>
+    Alert.alert('Log out USSD?', 'The open USSD session ends on its next screen, and the next dial needs your number and PIN.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log out USSD',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await logoutUssd(token);
+            setSessions([]);
+            setNotice('USSD session logged out.');
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 401) return onLogout();
+            setError(e instanceof Error ? e.message : 'Could not log out the USSD session.');
+          }
+        },
+      },
+    ]);
 
   const failures = logins?.filter((l) => !l.success).length ?? 0;
   const otherPhones = new Set(logins?.filter((l) => l.success && !l.own_phone).map((l) => l.phone)).size;
@@ -479,6 +526,26 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
       }}
       ListHeaderComponent={
         <>
+          <View style={[styles.card, sessions.length ? styles.activeCard : null]}>
+            <Text style={styles.heading}>Active USSD session</Text>
+            {sessions.length ? (
+              <>
+                {sessions.map((s) => (
+                  <Text key={s.phone} style={styles.status}>
+                    {s.phone} {s.own_phone ? '(your phone)' : '(another phone)'} · active at{' '}
+                    {new Date(s.last_active * 1000).toLocaleTimeString()} · ends by{' '}
+                    {new Date(s.expires_at * 1000).toLocaleTimeString()} if idle
+                  </Text>
+                ))}
+                <Button title="Log out USSD session" onPress={endUssd} />
+              </>
+            ) : (
+              <Text style={styles.hint}>
+                {notice || `None. A USSD login ends after ${Math.round(timeout / 60)} minutes without activity.`}
+              </Text>
+            )}
+          </View>
+          <View style={styles.spacer} />
           <View style={styles.card}>
             <Text style={styles.heading}>USSD logins</Text>
             <Text style={styles.hint}>
@@ -925,7 +992,6 @@ function SyncScreen({
           <Link title="USSD logins" onPress={onLoginHistory} disabled={busy} />
           <Link title="Change password" onPress={onChangePassword} disabled={busy} />
           <Link title="Change USSD PIN" onPress={onChangePin} disabled={busy} />
-          <Link title="Log out" onPress={onLogout} disabled={busy} />
         </View>
       </View>
       <Text style={styles.sectionTitle}>
@@ -1132,7 +1198,10 @@ const COLORS = { primary: '#0B6E4F', text: '#1A1A1A', muted: '#6B6B6B', border: 
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F6F7F6', paddingHorizontal: 20, paddingTop: 80 },
-  title: { fontSize: 28, fontWeight: '700', color: COLORS.text, marginBottom: 24 },
+  title: { fontSize: 26, fontWeight: '700', color: COLORS.text, flexShrink: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
+  logout: { color: COLORS.error, fontSize: 16, fontWeight: '600' },
+  activeCard: { borderWidth: 2, borderColor: COLORS.primary },
   heading: { fontSize: 20, fontWeight: '600', color: COLORS.text },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 20, gap: 8 },
   label: { fontSize: 14, color: COLORS.muted, marginTop: 4 },
