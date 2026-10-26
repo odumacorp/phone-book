@@ -11,6 +11,7 @@ uploads the device's contacts to /api/contacts/sync.
 """
 import os
 import re
+import secrets
 import sqlite3
 import threading
 import time
@@ -44,6 +45,9 @@ TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
 LOCKOUT_SECONDS = 15 * 60
 MAX_SYNC_CONTACTS = 5000
+RESET_CODE_TTL = 10 * 60  # forgot-PIN SMS code lifetime
+RESET_RESEND_SECONDS = 60
+MAX_RESET_ATTEMPTS = 5
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ussd")
@@ -129,6 +133,13 @@ def init_db():
                failed_attempts INTEGER NOT NULL DEFAULT 0,
                locked_until INTEGER NOT NULL DEFAULT 0
            )""",
+        """CREATE TABLE IF NOT EXISTS pin_resets (
+               phone TEXT PRIMARY KEY,
+               code_hash TEXT NOT NULL,
+               expires_at INTEGER NOT NULL,
+               sent_at INTEGER NOT NULL,
+               attempts INTEGER NOT NULL DEFAULT 0
+           )""",
         """CREATE TABLE IF NOT EXISTS pending_calls (
                user_phone TEXT PRIMARY KEY,
                contact_phone TEXT NOT NULL,
@@ -210,11 +221,30 @@ def set_pin(phone, pin):
     return True
 
 
+def update_pin(phone, pin):
+    """Change or reset an existing PIN (app only). Clears any lockout; old app sessions stop working."""
+    execute(
+        "UPDATE users SET pin_hash = ?, failed_attempts = 0, locked_until = 0 WHERE phone = ?",
+        (generate_password_hash(pin), phone),
+    )
+    return get_user(phone)
+
+
 # ---------------------------------------------------------------- helpers
 
 PHONE_RE = re.compile(r"^\+?\d{9,15}$")
 PHONE_JUNK_RE = re.compile(r"[\s\-().]")
 PIN_RE = re.compile(r"^\d{4}$")
+LOGIN_PHONE_RE = re.compile(r"^(?:\+254\d{9}|07\d{8})$")
+LOGIN_PHONE_FORMAT = "+254XXXXXXXXX or 07XXXXXXXX"
+
+
+def login_phone(raw):
+    """The number someone logs in with must be +254XXXXXXXXX or 07XXXXXXXX; returns +254... or None."""
+    phone = PHONE_JUNK_RE.sub("", raw or "")
+    if not LOGIN_PHONE_RE.match(phone):
+        return None
+    return "+254" + phone[1:] if phone.startswith("0") else phone
 
 
 def normalize_phone(raw):
@@ -314,9 +344,9 @@ def handle(caller, text):
     if not parts:
         return con("Welcome to Remote Phone-Book\nEnter your phone number:")
 
-    owner = normalize_phone(parts[0])
+    owner = login_phone(parts[0])
     if not owner:
-        return end("Invalid phone number. Please dial again.")
+        return end(f"Invalid phone number. Use {LOGIN_PHONE_FORMAT}.")
 
     if not get_user(owner):
         # First time: a PIN can only be created from the phone that owns the number, once
@@ -338,7 +368,8 @@ def handle(caller, text):
         return con("Enter your PIN:")
     _user, error = check_pin(owner, parts[1])
     if error:
-        return end(error)
+        # PINs are changed or reset only in the mobile app
+        return end(f"{error}\nForgot your PIN? Reset it in the Phone Book app.")
     return menu(owner, caller, parts[2:])
 
 
@@ -558,17 +589,108 @@ def api_login():
     if not SECRET_KEY:
         return api_error("App login is not configured on the server.", 503)
     body = request.get_json(silent=True) or {}
-    phone = normalize_phone(str(body.get("phone", "")))
+    phone = login_phone(str(body.get("phone", "")))
     pin = str(body.get("pin", ""))
-    if not phone or not PIN_RE.match(pin):
-        return api_error("Enter your phone number and 4-digit PIN.", 400)
+    if not phone:
+        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
+    if not PIN_RE.match(pin):
+        return api_error("Enter your 4-digit PIN.", 400)
 
     if not get_user(phone):
-        return api_error("No PIN set for this number. Dial *384*88041# from this phone to set one.", 401)
+        return api_error(NO_PIN_YET, 401)
 
     user, error = check_pin(phone, pin)
     if error:
         return api_error(error, 429 if error.startswith("Too many") else 401)
+    return jsonify({"token": make_token(user), "phone": phone})
+
+
+NO_PIN_YET = "No PIN set for this number. Dial *384*88041# from this phone to create one."
+
+
+def pin_error(new_pin, confirm):
+    if not PIN_RE.match(new_pin):
+        return "New PIN must be exactly 4 digits."
+    if confirm is not None and confirm != new_pin:
+        return "New PINs do not match."
+    return None
+
+
+@app.route("/api/pin/change", methods=["POST"])
+@require_auth
+def api_change_pin():
+    body = request.get_json(silent=True) or {}
+    current, new_pin = str(body.get("current_pin", "")), str(body.get("new_pin", ""))
+    error = pin_error(new_pin, str(body.get("confirm_pin", new_pin)))
+    if error:
+        return api_error(error, 400)
+    if new_pin == current:
+        return api_error("New PIN must be different from your current PIN.", 400)
+    _user, error = check_pin(g.phone, current)  # wrong current PINs count toward the lockout
+    if error:
+        if error.startswith("Wrong"):
+            error = "Current PIN is wrong."
+        return api_error(error, 429 if error.startswith("Too many") else 401)
+    user = update_pin(g.phone, new_pin)
+    return jsonify({"token": make_token(user), "phone": g.phone})
+
+
+@app.route("/api/pin/reset/request", methods=["POST"])
+def api_reset_request():
+    """Forgot PIN, step 1: text a 6-digit code to the number (proves the user has that SIM)."""
+    body = request.get_json(silent=True) or {}
+    phone = login_phone(str(body.get("phone", "")))
+    if not phone:
+        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
+    if sms is None:
+        return api_error("SMS service is not available right now.", 503)
+    if not get_user(phone):
+        return api_error(NO_PIN_YET, 404)
+
+    now = int(time.time())
+    row = fetch_one("SELECT sent_at FROM pin_resets WHERE phone = ?", (phone,))
+    if row and now - row["sent_at"] < RESET_RESEND_SECONDS:
+        return api_error("A code was just sent. Wait a minute before asking for another.", 429)
+
+    code = f"{secrets.randbelow(10 ** 6):06d}"
+    db = get_db()
+    db.execute(sql("DELETE FROM pin_resets WHERE phone = ?"), (phone,))
+    db.execute(
+        sql("INSERT INTO pin_resets (phone, code_hash, expires_at, sent_at) VALUES (?, ?, ?, ?)"),
+        (phone, generate_password_hash(code), now + RESET_CODE_TTL, now),
+    )
+    db.commit()
+    send_sms_async(phone, f"Your Remote Phone-Book reset code is {code}. It expires in 10 minutes.")
+    return jsonify({"sent": True, "phone": phone})
+
+
+@app.route("/api/pin/reset/confirm", methods=["POST"])
+def api_reset_confirm():
+    """Forgot PIN, step 2: code from the SMS + new PIN. Logs the user in."""
+    if not SECRET_KEY:
+        return api_error("App login is not configured on the server.", 503)
+    body = request.get_json(silent=True) or {}
+    phone = login_phone(str(body.get("phone", "")))
+    code, new_pin = str(body.get("code", "")).strip(), str(body.get("new_pin", ""))
+    if not phone:
+        return api_error(f"Enter your phone number as {LOGIN_PHONE_FORMAT}.", 400)
+    error = pin_error(new_pin, str(body.get("confirm_pin", new_pin)))
+    if error:
+        return api_error(error, 400)
+
+    row = fetch_one("SELECT code_hash, expires_at, attempts FROM pin_resets WHERE phone = ?", (phone,))
+    if not row or row["expires_at"] < time.time():
+        return api_error("This code has expired. Ask for a new one.", 400)
+    if not check_password_hash(row["code_hash"], code):
+        attempts = row["attempts"] + 1
+        if attempts >= MAX_RESET_ATTEMPTS:
+            execute("DELETE FROM pin_resets WHERE phone = ?", (phone,))
+            return api_error("Too many wrong codes. Ask for a new one.", 429)
+        execute("UPDATE pin_resets SET attempts = ? WHERE phone = ?", (attempts, phone))
+        return api_error("Wrong code.", 401)
+
+    execute("DELETE FROM pin_resets WHERE phone = ?", (phone,))
+    user = update_pin(phone, new_pin)
     return jsonify({"token": make_token(user), "phone": phone})
 
 
