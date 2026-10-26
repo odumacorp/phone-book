@@ -37,14 +37,27 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string |
 export const loadToken = () => SecureStore.getItemAsync(TOKEN_KEY);
 export const clearToken = () => SecureStore.deleteItemAsync(TOKEN_KEY);
 
-export async function login(phone: string, pin: string): Promise<string> {
-  const { token } = await request<{ token: string }>('/api/login', {
-    method: 'POST',
-    body: JSON.stringify({ phone, pin }),
-  });
-  await SecureStore.setItemAsync(TOKEN_KEY, token);
-  return token;
+/** Same rule as the server: +254XXXXXXXXX or 07XXXXXXXX (spaces and dashes are ignored). */
+export const PHONE_FORMAT = '+254XXXXXXXXX or 07XXXXXXXX';
+export const isValidPhone = (phone: string) => /^(\+254\d{9}|07\d{8})$/.test(phone.replace(/[\s\-().]/g, ''));
+
+async function saveToken(path: string, body: object, token?: string): Promise<string> {
+  const res = await request<{ token: string }>(path, { method: 'POST', body: JSON.stringify(body) }, token);
+  await SecureStore.setItemAsync(TOKEN_KEY, res.token);
+  return res.token;
 }
+
+export const login = (phone: string, pin: string) => saveToken('/api/login', { phone, pin });
+
+/** Changing the PIN signs out other devices; the returned token keeps this one logged in. */
+export const changePin = (token: string, currentPin: string, newPin: string) =>
+  saveToken('/api/pin/change', { current_pin: currentPin, new_pin: newPin }, token);
+
+export const requestPinReset = (phone: string) =>
+  request<{ sent: boolean }>('/api/pin/reset/request', { method: 'POST', body: JSON.stringify({ phone }) });
+
+export const confirmPinReset = (phone: string, code: string, newPin: string) =>
+  saveToken('/api/pin/reset/confirm', { phone, code, new_pin: newPin });
 
 export const getMe = (token: string) => request<Me>('/api/me', {}, token);
 

@@ -3,9 +3,10 @@
 A USSD phone book built on Africa's Talking. Each phone number has its own contact list,
 reachable from any phone after logging in.
 
-Every session starts with a login: phone number -> 4-digit PIN -> main menu.
+Every session starts with a login: phone number (`+254XXXXXXXXX` or `07XXXXXXXX`) -> 4-digit PIN -> main menu.
 The first time, a number has no PIN; dialling from that same phone creates one (once only).
 Wrong PINs count toward the same lockout as the app (5 tries, then 15 minutes).
+PINs can't be changed over USSD: users change or reset them in the mobile app.
 
 ```
 1. Add contact      -> name -> phone number
@@ -66,6 +67,9 @@ npx eas-cli build -p android --profile preview   # installable APK (needs a free
 API (JSON):
 - `POST /api/login` `{phone, pin}` -> `{token}`; 5 wrong PINs lock the number for 15 minutes
 - `GET /api/me` -> `{phone, contacts}`
+- `POST /api/pin/change` `{current_pin, new_pin, confirm_pin}` -> `{token}`; other sessions are logged out
+- `POST /api/pin/reset/request` `{phone}` -> texts a 6-digit code (valid 10 min, one per minute)
+- `POST /api/pin/reset/confirm` `{phone, code, new_pin, confirm_pin}` -> `{token}`; 5 wrong codes burn it; clears any lockout
 - `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
 
 Send the token as `Authorization: Bearer <token>`.
