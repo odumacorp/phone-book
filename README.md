@@ -31,7 +31,8 @@ On the search and list screens, reply with the contact's position (1-4) or type 
 
 ```
 1. Call             -> AT rings the caller, then connects them to the contact (needs AT_VOICE_NUMBER)
-2. Send SMS         -> type a message (no `*`); sent to the contact as "<message> - from <caller>"
+2. Send SMS         -> quick replies (1. Please call me 2. I'm on my way 3. I'll call you later), 4 or just type
+                       a message (no `*`); sent to the contact as "<message> - from <caller>"
 3. Copy number      -> the number is texted to the caller, who can copy, call or save it
 ```
 
