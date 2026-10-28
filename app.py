@@ -407,6 +407,30 @@ def normalize_phone(raw):
     return "+" + phone
 
 
+SERVICE_NUMBER_RE = re.compile(r"^\d{3,6}$")  # 999, 112, 1199, 116...
+
+# Free emergency and help lines (Kenya). Calls to these are always dialled from the user's own
+# phone, never connected through Africa's Talking.
+EMERGENCY_NUMBERS = [  # (number, name for contacts and the app, short name for the USSD list)
+    ("999", "Police, fire, ambulance", "Police/Fire/Ambulance"),
+    ("112", "Emergency (any mobile)", "Emergency"),
+    ("911", "Emergency (any mobile)", "Emergency"),
+    ("1199", "Kenya Red Cross", "Red Cross"),
+    ("1195", "Gender violence helpline", "GBV helpline"),
+    ("116", "Childline Kenya", "Childline"),
+]
+
+
+def is_service_number(phone):
+    return bool(SERVICE_NUMBER_RE.match(phone or ""))
+
+
+def normalize_contact_phone(raw):
+    """A contact's number: a full phone number (normalised to +...) or a short service number kept as is."""
+    phone = PHONE_JUNK_RE.sub("", raw or "")
+    return phone if is_service_number(phone) else normalize_phone(phone)
+
+
 def con(msg):
     return "CON " + msg[: USSD_MAX_LEN - 4]
 
@@ -470,6 +494,7 @@ MAIN_MENU = (
     "3. My contacts\n"
     "4. Delete contact\n"
     "5. SMS me my contacts\n"
+    "6. Emergency numbers\n"
     "Or type a name to search\n"
     "000. Log out"
 )
@@ -880,7 +905,7 @@ def menu(owner, caller, parts):
             return screen(f"Enter phone number for {name}:")
         if len(rest) > 2:
             return screen(INVALID)
-        phone = normalize_phone(rest[1])
+        phone = normalize_contact_phone(rest[1])
         if not phone:
             return screen("Invalid phone number.")
         add_contact(owner, name, phone)
@@ -946,7 +971,34 @@ def menu(owner, caller, parts):
         send_sms_async(caller, "Your contacts:\n" + format_contacts(rows))
         return screen("You will receive your contacts by SMS shortly.")
 
+    # 6. Emergency numbers: 6 -> pick -> 1 call now (dial it yourself) / 2 add to contacts
+    if choice == "6":
+        if len(rest) == 0:
+            lines = "\n".join(f"{i}. {num} {short}" for i, (num, _label, short) in enumerate(EMERGENCY_NUMBERS, 1))
+            return screen(f"Emergency (free):\n{lines}")
+        if not rest[0].isdigit() or not 1 <= int(rest[0]) <= len(EMERGENCY_NUMBERS):
+            return screen(INVALID)
+        number, label, _short = EMERGENCY_NUMBERS[int(rest[0]) - 1]
+        if len(rest) == 1:
+            return screen(f"{number} {label}\n1. Call now\n2. Add to my contacts")
+        if len(rest) > 2:
+            return screen(INVALID)
+        if rest[1] == "1":
+            return end(dial_yourself(number))
+        if rest[1] == "2":
+            existing = find_contact_by_phone(owner, number)
+            if existing:
+                return screen(f"{number} is already in your contacts as {existing['name']}.")
+            add_contact(owner, label, number)
+            return screen(f"Saved {label} - {number}")
+        return screen(INVALID)
+
     return screen(INVALID)
+
+
+def dial_yourself(number):
+    # Ending the USSD session frees the phone to dial straight away
+    return f"Dial {number} now from your phone. It is free."
 
 
 PICK_HINT = "Reply no. or phone no."
@@ -977,7 +1029,7 @@ def pick_and_act(owner, caller, rows, selection, rest, first=1):
     if index is not None:
         contact = rows[index]
     else:
-        phone = normalize_phone(selection)
+        phone = normalize_contact_phone(selection)
         if not phone:
             return screen("Enter a number from the list or a phone number.")
         contact = find_contact_by_phone(owner, phone) or {"name": phone, "phone": phone}
@@ -990,6 +1042,15 @@ def calling_available():
 
 def contact_menu(owner, caller, contact, rest):
     name, phone = contact["name"], contact["phone"]
+    if is_service_number(phone):
+        # 999, 1199...: never connected through Africa's Talking, and they can't receive SMS
+        if len(rest) == 0:
+            title = name if name == phone else f"{name}\n{phone}"
+            return screen(f"{title}\n1. Call\n3. Copy number")
+        if rest == ["1"]:
+            return end(dial_yourself(phone))
+        if rest[0] != "3" or len(rest) > 1:
+            return screen(INVALID)
     if len(rest) == 0:
         title = name if name == phone else f"{name}\n{phone}"
         return screen(f"{title}\n1. Call\n2. Send SMS\n3. Copy number")
@@ -1670,12 +1731,19 @@ def api_contacts():
     })
 
 
+@app.route("/api/emergency", methods=["GET"])
+@require_auth
+def api_emergency():
+    saved = {r["phone"] for r in fetch_all("SELECT phone FROM contacts WHERE owner = ?", (g.phone,))}
+    return jsonify({"numbers": [{"number": n, "label": label, "saved": n in saved} for n, label, _short in EMERGENCY_NUMBERS]})
+
+
 @app.route("/api/contacts", methods=["POST"])
 @require_auth
 def api_add_contact():
     body = body_json()
     name = " ".join(str(body.get("name") or "").split())[:60]
-    phone = normalize_phone(str(body.get("phone") or ""))
+    phone = normalize_contact_phone(str(body.get("phone") or ""))
     if not name:
         return api_error("Enter a name.", 400)
     if not phone:
@@ -1757,7 +1825,7 @@ def api_sync():
             skipped += 1
             continue
         name = str(item.get("name") or "").strip()[:60]
-        phone = normalize_phone(str(item.get("phone") or ""))
+        phone = normalize_contact_phone(str(item.get("phone") or ""))
         if not name or not phone or phone in seen:
             skipped += 1
             continue

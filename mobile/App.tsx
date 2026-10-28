@@ -5,6 +5,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -18,6 +19,7 @@ import {
 import {
   ApiError,
   Contact,
+  EmergencyNumber,
   Me,
   PASSWORD_MIN,
   SyncContact,
@@ -31,6 +33,7 @@ import {
   clearToken,
   deleteContact,
   getContacts,
+  getEmergencyNumbers,
   getLogins,
   getSessions,
   getMe,
@@ -67,6 +70,7 @@ type View_ =
   | 'logins'
   | 'sessions'
   | 'addContact'
+  | 'emergency'
   | 'pickContacts';
 
 export default function App() {
@@ -146,6 +150,7 @@ function Main() {
     content = <ChangePasswordScreen token={token} onDone={(t) => loggedIn(t, 'Password changed.')} onCancel={back} onLogout={logout} />;
   else if (view === 'logins') content = <LoginHistoryScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'sessions') content = <SessionsScreen token={token} onBack={back} onLogout={logout} />;
+  else if (view === 'emergency') content = <EmergencyScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'addContact')
     content = <AddContactScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
   else if (view === 'pickContacts')
@@ -166,6 +171,10 @@ function Main() {
         onChangePassword={() => {
           setNotice('');
           setView('changePassword');
+        }}
+        onEmergency={() => {
+          setNotice('');
+          setView('emergency');
         }}
         onAddContact={() => {
           setNotice('');
@@ -807,7 +816,7 @@ function AddContactScreen({
         placeholder="0712 345 678"
         keyboardType="phone-pad"
       />
-      <Text style={styles.hint}>Kenyan numbers can start with 0; other countries need the + code.</Text>
+      <Text style={styles.hint}>Kenyan numbers can start with 0; other countries need the + code. Service numbers like 999 or 1199 work too.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button title="Add contact" onPress={submit} busy={busy} disabled={!name.trim() || !phone.trim()} />
       <Link title="Cancel" onPress={onCancel} disabled={busy} />
@@ -999,6 +1008,96 @@ function PickContactsScreen({
   );
 }
 
+/** Opens the phone's dialler with the number (the user presses call). Works in the app and the website. */
+function callNumber(phone: string) {
+  const url = `tel:${phone.replace(/[^\d+]/g, '')}`;
+  if (isWeb) {
+    window.location.href = url; // same page: mobile browsers go straight to the dialler (a new tab can stay blank)
+    return;
+  }
+  Linking.openURL(url).catch(() => {});
+}
+
+/** Free emergency and help lines: call straight from the phone, or add to the contacts. */
+function EmergencyScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+  const [numbers, setNumbers] = useState<EmergencyNumber[] | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setNumbers((await getEmergencyNumbers(token)).numbers);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onLogout();
+      setError(e instanceof Error ? e.message : 'Could not load the emergency numbers.');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const add = async (n: EmergencyNumber) => {
+    setError('');
+    try {
+      await addContact(token, n.label, n.number);
+      setNotice(`${n.label} (${n.number}) added to your contacts.`);
+      setNumbers((list) => list && list.map((x) => (x.number === n.number ? { ...x, saved: true } : x)));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onLogout();
+      if (e instanceof ApiError && e.status === 409) {
+        setNumbers((list) => list && list.map((x) => (x.number === n.number ? { ...x, saved: true } : x)));
+        return setNotice(e.message);
+      }
+      setError(e instanceof Error ? e.message : 'Could not add the number.');
+    }
+  };
+
+  return (
+    <FlatList
+      style={styles.list}
+      data={numbers ?? []}
+      keyExtractor={(n) => n.number}
+      ListHeaderComponent={
+        <View style={styles.card}>
+          <Text style={styles.heading}>Emergency numbers</Text>
+          <Text style={styles.hint}>
+            Free to call. Call opens your phone&apos;s dialler, so the call goes straight from your phone. On USSD, choose 6 on
+            the main menu.
+          </Text>
+          {notice ? <Text style={styles.status}>{notice}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Link title="Back" onPress={onBack} />
+        </View>
+      }
+      ListEmptyComponent={numbers === null ? <ActivityIndicator color={COLORS.primary} /> : undefined}
+      renderItem={({ item }) => (
+        <View style={styles.sessionRow}>
+          <View style={styles.rowText}>
+            <Text style={styles.emergencyNumber}>{item.number}</Text>
+            <Text style={styles.rowPhone}>{item.label}</Text>
+          </View>
+          {item.saved ? (
+            <Text style={styles.savedTag}>In contacts</Text>
+          ) : (
+            <Pressable onPress={() => add(item)} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.showLink}>Add</Text>
+            </Pressable>
+          )}
+          <Pressable
+            style={styles.callButton}
+            onPress={() => callNumber(item.number)}
+            accessibilityRole="button"
+            accessibilityLabel={`Call ${item.number}, ${item.label}`}
+          >
+            <Text style={styles.callButtonText}>Call</Text>
+          </Pressable>
+        </View>
+      )}
+    />
+  );
+}
+
 /** Home: sync, the USSD visibility switch, and the synced phone book with priority stars. */
 function SyncScreen({
   token,
@@ -1007,6 +1106,7 @@ function SyncScreen({
   notice,
   onChangePin,
   onChangePassword,
+  onEmergency,
   onAddContact,
   onPickContacts,
   onLoginHistory,
@@ -1019,6 +1119,7 @@ function SyncScreen({
   notice: string;
   onChangePin: () => void;
   onChangePassword: () => void;
+  onEmergency: () => void;
   onAddContact: () => void;
   onPickContacts: () => void;
   onLoginHistory: () => void;
@@ -1175,6 +1276,9 @@ function SyncScreen({
           />
           {name.trim() && name.trim() !== savedName ? <Link title="Save" onPress={saveName} /> : null}
         </View>
+        <Pressable style={styles.emergencyButton} onPress={onEmergency} accessibilityRole="button">
+          <Text style={styles.emergencyButtonText}>Emergency numbers</Text>
+        </Pressable>
         <Button title="Choose contacts from phone" onPress={onPickContacts} disabled={busy} />
         <View style={styles.buttonRow}>
           <SecondaryButton title="Add contact" onPress={onAddContact} disabled={busy} />
@@ -1237,6 +1341,9 @@ function SyncScreen({
               {item.name}
             </Text>
             <Text style={styles.rowPhone}>{item.phone}</Text>
+          </Pressable>
+          <Pressable onPress={() => callNumber(item.phone)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Call ${item.name}`}>
+            <Text style={styles.callLink}>Call</Text>
           </Pressable>
           <Pressable
             onPress={() => togglePriority(item)}
@@ -1421,6 +1528,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   sessionActive: { borderLeftWidth: 4, borderLeftColor: COLORS.primary },
+  emergencyButton: {
+    backgroundColor: COLORS.error,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  emergencyButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  emergencyNumber: { fontSize: 22, fontWeight: '700', color: COLORS.text },
+  callButton: { backgroundColor: COLORS.error, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 18 },
+  callButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  callLink: { color: COLORS.primary, fontSize: 15, fontWeight: '600', marginRight: 16 },
   activeText: { color: COLORS.primary },
   heading: { fontSize: 20, fontWeight: '600', color: COLORS.text },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 20, gap: 8 },

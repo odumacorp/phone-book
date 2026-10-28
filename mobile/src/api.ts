@@ -147,15 +147,23 @@ export const setName = (token: string, name: string) =>
 export const setShowOthers = (token: string, showOthers: boolean) =>
   request<{ show_others: boolean }>('/api/settings', { method: 'POST', body: JSON.stringify({ show_others: showOthers }) }, token);
 
+export type EmergencyNumber = { number: string; label: string; saved: boolean };
+
+/** Free emergency and help lines; `saved` says whether each is already in the contacts. */
+export const getEmergencyNumbers = (token: string) =>
+  request<{ numbers: EmergencyNumber[] }>('/api/emergency', {}, token);
+
 export const addContact = (token: string, name: string, phone: string) =>
   request<Contact>('/api/contacts', { method: 'POST', body: JSON.stringify({ name, phone }) }, token);
 
 export const deleteContact = (token: string, id: number) =>
   request<{ deleted: number }>(`/api/contacts/${id}`, { method: 'DELETE' }, token);
 
-/** Same rule as the server, so the app can tell which phone contacts are already in the phone book. */
+/** Same rule as the server, so the app can tell which phone contacts are already in the phone book.
+ * Short service numbers (999, 1199...) are kept as they are. */
 export function normalizePhone(raw: string): string | null {
   const phone = raw.replace(/[\s\-().]/g, '');
+  if (/^\d{3,6}$/.test(phone)) return phone;
   if (!/^\+?\d{9,15}$/.test(phone)) return null;
   if (phone.startsWith('+')) return phone;
   if (phone.startsWith('0')) return '+254' + phone.slice(1);
