@@ -233,6 +233,12 @@ def init_db():
                jti TEXT PRIMARY KEY,
                expires_at INTEGER NOT NULL
            )""",
+        """CREATE TABLE IF NOT EXISTS ussd_wrong_pins (
+               session_id TEXT NOT NULL,
+               mac TEXT NOT NULL,
+               created_at INTEGER NOT NULL,
+               PRIMARY KEY (session_id, mac)
+           )""",
         """CREATE TABLE IF NOT EXISTS pending_calls (
                user_phone TEXT PRIMARY KEY,
                contact_phone TEXT NOT NULL,
@@ -517,6 +523,7 @@ def check_pin(phone, pin):
             "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE phone = ?",
             (0 if locked_until else attempts, locked_until, phone),
         )
+        get_user(phone, fresh=True)  # a second try in this same request must see the new count
         if locked_until:
             return None, "Too many wrong PINs. Try again in 15 min."
         return None, "Wrong phone number or PIN."
@@ -570,6 +577,61 @@ def session_mac(session_id, owner, pin):
         return None
     msg = f"{session_id}|{owner}|{pin}".encode()
     return hmac.new(SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
+
+
+PIN_TRIES = 2  # per USSD session: a wrong first PIN gets one more try
+RESET_PIN_HELP = (
+    "Reset your PIN in the Remote Phonebook app or at phone-book.odumacorp.com: "
+    "log in and tap Change USSD PIN."
+)
+
+
+def wrong_pin_mac(session_id, owner, pin):
+    msg = f"wrong|{session_id}|{owner}|{pin}".encode()
+    return hmac.new((SECRET_KEY or "dev").encode(), msg, hashlib.sha256).hexdigest()
+
+
+def known_wrong(session_id, owner, pin):
+    """Every screen resends the earlier inputs, so a PIN already rejected in this session is
+    remembered rather than checked (and counted toward the lockout) again on each screen."""
+    return bool(session_id) and bool(fetch_one(
+        "SELECT 1 AS x FROM ussd_wrong_pins WHERE session_id = ? AND mac = ?",
+        (session_id, wrong_pin_mac(session_id, owner, pin)),
+    ))
+
+
+def remember_wrong(session_id, owner, pin):
+    if not session_id:
+        return
+    now = int(time.time())
+    db = get_db()
+    db.execute(sql("DELETE FROM ussd_wrong_pins WHERE created_at < ?"), (now - 3600,))
+    db.execute(
+        sql("INSERT INTO ussd_wrong_pins (session_id, mac, created_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING"),
+        (session_id, wrong_pin_mac(session_id, owner, pin), now),
+    )
+    db.commit()
+
+
+def authenticate(owner, inputs, session_id, state, caller, network):
+    """PIN entry with a second try. `inputs` starts at the first PIN.
+
+    Returns (mac, inputs after the PIN that worked, None), or (None, None, a screen to show).
+    """
+    for attempt in range(PIN_TRIES):
+        if len(inputs) <= attempt:
+            return None, None, con(f"Wrong PIN. You have {PIN_TRIES - attempt} more try. Enter your PIN:")
+        pin = inputs[attempt]
+        error = "Wrong phone number or PIN." if known_wrong(session_id, owner, pin) else None
+        if error is None:
+            mac, error = login(owner, pin, session_id, state, caller, network)
+            if error is None:
+                return mac, inputs[attempt + 1:], None
+            if not error.startswith("Too many"):
+                remember_wrong(session_id, owner, pin)
+        if error.startswith("Too many"):
+            return None, None, end(f"{error} {RESET_PIN_HELP}")
+    return None, None, end(f"Wrong PIN again. {RESET_PIN_HELP}")
 
 
 def login(owner, pin, session_id, state, caller, network):
@@ -767,10 +829,10 @@ def handle(caller, text, session_id="", network=""):
             owner = state["resume_owner"]
             if not owner:  # logged out earlier in this session; only "0 ..." (start over) is valid
                 return end("Invalid choice. Please dial again.")
-            mac, error = login(owner, parts[0], session_id, state, caller, network)
-            if error:
-                return end(f"{error}\nForgot your PIN? Set a new one in the Remote Phonebook app.")
-            path = resolve_nav(json.loads(state["resume_from"]) + parts[1:])
+            mac, rest, screen_ = authenticate(owner, parts, session_id, state, caller, network)
+            if screen_:
+                return screen_
+            path = resolve_nav(json.loads(state["resume_from"]) + rest)
             login_id = current_login(owner, caller, network, session_id, state)
             return run_menu(owner, caller, path, session_id, state, mac, login_id)
         parts = parts[1:]
@@ -786,12 +848,11 @@ def handle(caller, text, session_id="", network=""):
 
     if len(parts) == 1:
         return con("Enter your PIN:")
-    mac, error = login(owner, parts[1], session_id, state, caller, network)
-    if error:
-        # PINs are changed or reset only in the mobile app
-        return end(f"{error}\nForgot your PIN? Set a new one in the Remote Phonebook app.")
+    mac, rest, screen_ = authenticate(owner, parts[1:], session_id, state, caller, network)
+    if screen_:
+        return screen_  # second try, or (after two wrong PINs) how to reset it in the app/website
     login_id = current_login(owner, caller, network, session_id, state)
-    return run_menu(owner, caller, resolve_nav(parts[2:]), session_id, state, mac, login_id)
+    return run_menu(owner, caller, resolve_nav(rest), session_id, state, mac, login_id)
 
 
 # ---------------------------------------------------------------- menu logic

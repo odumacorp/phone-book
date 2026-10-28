@@ -5,7 +5,10 @@ reachable from any phone after logging in.
 
 Every session starts with a login: phone number (`+254XXXXXXXXX` or `0XXXXXXXXX`, e.g. 07… or 01…) -> 4-digit PIN -> main menu.
 Numbers are registered in the mobile app (SMS code + PIN); an unregistered number dialling in is told to register there.
-Wrong PINs count toward the same lockout as the app (5 tries, then 15 minutes).
+A wrong PIN gets one more try in the same session ("Wrong PIN. You have 1 more try"); a second wrong PIN
+ends the session with how to reset it: in the Remote Phonebook app or at phone-book.odumacorp.com, log in and
+tap Change USSD PIN. Wrong PINs count toward the lockout (5, then 15 minutes); a PIN already rejected in a
+session isn't counted again when later screens resend it.
 PINs are changed or reset only in the mobile app (Change PIN / Forgot PIN), never over USSD.
 
 Typing a name on the main menu searches straight away.
