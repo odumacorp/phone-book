@@ -11,9 +11,9 @@ PINs are changed or reset only in the mobile app (Change PIN / Forgot PIN), neve
 Typing a name on the main menu searches straight away.
 
 The network ends each USSD session after a few minutes (sooner if a screen sits idle); that limit
-can't be changed. A *login*, though, stays active for **1 minute of inactivity**:
-redialling from your own phone within 1 minute shows "Welcome back: 1. Continue where you left off,
-2. Main menu, 0. Log out" with no PIN. A borrowed phone always asks for the PIN again. After 1 minute
+can't be changed. A *login*, though, stays active for **40 seconds of inactivity** between screens:
+redialling from your own phone within 40 seconds shows "Welcome back: 1. Continue where you left off,
+2. Main menu, 0. Log out" with no PIN. A borrowed phone always asks for the PIN again. After 40 seconds
 without activity the user is logged out (the saved login is deleted and the next dial says so); a PIN
 change in the app or a lockout also ends it.
 A screen that just saved/sent/deleted continues at the main menu instead, so nothing runs twice.

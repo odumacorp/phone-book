@@ -46,7 +46,15 @@ MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 160  # one SMS
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
 SESSION_HISTORY_DAYS = 30  # ended app/USSD sessions shown in the app
-RESUME_SECONDS = 60  # a USSD login stays active this long after the last screen (inactivity timeout)
+RESUME_SECONDS = 40  # a USSD login stays active this long after the last screen (inactivity timeout)
+
+
+def duration_text(seconds):
+    """40 -> "40 seconds", 60 -> "1 minute", 180 -> "3 minutes"."""
+    if seconds % 60:
+        return f"{seconds} second{'s' if seconds != 1 else ''}"
+    minutes = seconds // 60
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
 
 TOKEN_MAX_AGE = 30 * 24 * 3600  # app stays logged in for 30 days
 MAX_PIN_ATTEMPTS = 5
@@ -727,9 +735,8 @@ def handle(caller, text, session_id="", network=""):
         close_idle_ussd_logins()
         execute("DELETE FROM ussd_resume WHERE saved_at < ?", (int(time.time()) - RESUME_SECONDS,))
         if expired:
-            minutes = RESUME_SECONDS // 60
             return con(
-                f"Your session expired after {minutes} minute{'s' if minutes != 1 else ''} of inactivity. "
+                f"Your session expired after {duration_text(RESUME_SECONDS)} of inactivity. "
                 "You were logged out for security.\nEnter your phone number:"
             )
         return con("Welcome to Remote Phone-Book\nEnter your phone number:")

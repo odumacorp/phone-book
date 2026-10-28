@@ -491,7 +491,7 @@ function ChangePinScreen({
 
 const LOGIN_RESULT: Record<UssdLogin['reason'], string> = {
   ok: 'Logged in',
-  resumed: 'Continued (within 1 min)',
+  resumed: 'Continued (no PIN)',
   wrong_pin: 'Wrong PIN',
   locked: 'Blocked: too many wrong PINs',
 };
@@ -509,6 +509,13 @@ function formatDuration(seconds: number) {
 }
 
 const formatTime = (unix: number) => new Date(unix * 1000).toLocaleString();
+
+/** 40 -> "40 seconds", 60 -> "1 minute", 180 -> "3 minutes" */
+function timeoutText(seconds: number) {
+  if (seconds % 60) return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  const m = seconds / 60;
+  return `${m} minute${m === 1 ? '' : 's'}`;
+}
 
 const END_REASON: Record<string, string> = {
   'logged out': 'Logged out',
@@ -614,7 +621,7 @@ function SessionsScreen({ token, onBack, onLogout }: { token: string; onBack: ()
           </Text>
           {data ? (
             <Text style={styles.hint}>
-              USSD sessions end after {Math.round(data.timeout / 60)} minute{Math.round(data.timeout / 60) === 1 ? '' : 's'}{' '}
+              USSD sessions end after {timeoutText(data.timeout)}{' '}
               without activity.
             </Text>
           ) : null}
