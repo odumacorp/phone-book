@@ -32,6 +32,8 @@ is rejected rather than repeating the save/send/delete.
 3. My contacts      -> 4 per screen, 98 = next page (numbers continue: 5-8, 9-12...) -> pick a contact
 4. Delete contact   -> pick number -> 1 Yes / 2 No
 5. SMS me my contacts (sent to the phone in use, with the Africa's Talking SMS API)
+6. Emergency numbers -> 999, 112, 911, 1199 (Red Cross), 1195 (GBV), 116 (Childline): 1. Call now ends the
+                       session with "Dial 999 now" (calls are always made from the user's own phone), 2. Add to contacts
 ```
 
 On the search and list screens, reply with the contact's position (1-4) or type any phone number:
@@ -100,6 +102,9 @@ An Expo (React Native) app for managing the phone book that USSD uses.
 - **Sessions:** each app device and USSD login with login time, logout time (and why), duration, and its own Log out.
 - **USSD logins:** shows the active USSD session with a "Log out USSD session" button, and lists every USSD login attempt on the account: the phone that dialled
   (the user's own or another), its network, the time, and whether it succeeded.
+- **Emergency numbers:** a Call button opens the phone's dialler; Add puts the number in the contacts.
+  Every contact also has a Call button. Contacts can be short service numbers (999, 1199...): on USSD
+  they show Call (dial it yourself) and Copy number, never SMS.
 - **Contacts:** choose which phone contacts to add (checkboxes, search, select all; already-added ones are
   marked), add one by hand, sync all at once, or tap a contact to remove it.
 - The app lists the phone book; users star up to 5 priority contacts (shown first everywhere)
@@ -131,7 +136,8 @@ API (JSON):
 - `GET /api/logins?limit=` -> `{logins: [{at, phone, own_phone, network, success, reason}], keep_days}`: USSD login
   attempts on this account (one per session; reason ok / wrong_pin / locked), newest first, kept 90 days
 - `GET /api/contacts` -> `{contacts: [{id, name, phone, priority}], max_priority, show_others}` (priority first)
-- `POST /api/contacts` `{name, phone}` -> the new contact (409 if the number is already saved)
+- `GET /api/emergency` -> `{numbers: [{number, label, saved}]}`
+- `POST /api/contacts` `{name, phone}` (phone may be a 3-6 digit service number) -> the new contact (409 if the number is already saved)
 - `DELETE /api/contacts/<id>`
 - `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
 - `POST /api/settings` `{show_others?, name?, email?}`; name signs the user's SMS; email ("" removes it) is a login;
