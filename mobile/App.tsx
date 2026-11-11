@@ -1140,7 +1140,7 @@ function EmergencyScreen({ token, onBack, onLogout }: { token: string; onBack: (
         <View style={styles.card}>
           <Text style={styles.heading}>Emergency numbers</Text>
           <Text style={styles.hint}>
-            Free to call. Call opens your phone&apos;s dialler, so the call goes straight from your phone. On USSD, choose 6 on
+            Free to call. Call opens your phone&apos;s dialler, so the call goes straight from your phone. On USSD, choose 2 on
             the main menu.
           </Text>
           {notice ? <Text style={styles.status}>{notice}</Text> : null}
