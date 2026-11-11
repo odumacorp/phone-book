@@ -1767,6 +1767,26 @@ def api_delete_contact(contact_id):
     return jsonify({"deleted": contact_id})
 
 
+@app.route("/api/contacts/<int:contact_id>", methods=["PATCH"])
+@require_auth
+def api_edit_contact(contact_id):
+    contact = fetch_one("SELECT priority FROM contacts WHERE id = ? AND owner = ?", (contact_id, g.phone))
+    if not contact:
+        return api_error("Contact not found.", 404)
+    body = body_json()
+    name = " ".join(str(body.get("name") or "").split())[:60]
+    phone = normalize_contact_phone(str(body.get("phone") or ""))
+    if not name:
+        return api_error("Enter a name.", 400)
+    if not phone:
+        return api_error("Enter a valid phone number.", 400)
+    existing = find_contact_by_phone(g.phone, phone)
+    if existing and existing["id"] != contact_id:
+        return api_error(f"{phone} is already saved as {existing['name']}.", 409)
+    execute("UPDATE contacts SET name = ?, phone = ? WHERE id = ? AND owner = ?", (name, phone, contact_id, g.phone))
+    return jsonify({"id": contact_id, "name": name, "phone": phone, "priority": bool(contact["priority"])})
+
+
 @app.route("/api/contacts/<int:contact_id>/priority", methods=["POST"])
 @require_auth
 def api_set_priority(contact_id):

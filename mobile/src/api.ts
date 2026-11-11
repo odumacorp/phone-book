@@ -156,6 +156,9 @@ export const getEmergencyNumbers = (token: string) =>
 export const addContact = (token: string, name: string, phone: string) =>
   request<Contact>('/api/contacts', { method: 'POST', body: JSON.stringify({ name, phone }) }, token);
 
+export const editContact = (token: string, id: number, name: string, phone: string) =>
+  request<Contact>(`/api/contacts/${id}`, { method: 'PATCH', body: JSON.stringify({ name, phone }) }, token);
+
 export const deleteContact = (token: string, id: number) =>
   request<{ deleted: number }>(`/api/contacts/${id}`, { method: 'DELETE' }, token);
 
