@@ -6,7 +6,7 @@ Africa's Talking POSTs to /ussd with form fields:
 `text` is every input in the session joined by "*" (e.g. "1*John*0712345678").
 We reply with plain text starting with "CON " (keep session open) or "END " (close it).
 
-The mobile app logs in with phone number + PIN (set via USSD option 6) and
+The mobile app and website log in with email or phone number + password and
 uploads the device's contacts to /api/contacts/sync.
 """
 import os
@@ -489,15 +489,17 @@ def start_call_async(to):
 
 MAIN_MENU = (
     "Remote Phone-Book\n"
-    "1. Add contact\n"
-    "2. Search contact\n"
-    "3. My contacts\n"
-    "4. Delete contact\n"
-    "5. SMS me my contacts\n"
-    "6. Emergency numbers\n"
+    "1. My contacts\n"
+    "2. Emergency numbers\n"
+    "3. Add contact\n"
+    "4. Search contact\n"
+    "5. Delete contact\n"
+    "6. SMS me my contacts\n"
     "Or type a name to search\n"
     "000. Log out"
 )
+# Main menu numbers, in the order shown above
+MENU_ACTIONS = {"1": "list", "2": "emergency", "3": "add", "4": "search", "5": "delete", "6": "sms"}
 BACK, HOME, LOGOUT = "0", "00", "000"
 NAV = "0.Back 00.Home 000.Logout"  # on every screen after login
 
@@ -888,14 +890,14 @@ def menu(owner, caller, parts):
     if not parts:
         return con(MAIN_MENU)
 
-    choice, rest = parts[0], parts[1:]
-    if choice.strip() and not choice.strip().isdigit():
-        return menu(owner, caller, ["2"] + parts)  # typed a name on the main menu: search straight away
+    choice, rest = MENU_ACTIONS.get(parts[0]), parts[1:]
+    if parts[0].strip() and not parts[0].strip().isdigit():
+        return menu(owner, caller, ["4"] + parts)  # typed a name on the main menu: search straight away
     only = priority_only(owner)
     none_yet = NO_PRIORITY if only else "You have no contacts yet."
 
-    # 1. Add contact: 1 -> name -> phone
-    if choice == "1":
+    # 3. Add contact: 3 -> name -> phone
+    if choice == "add":
         if len(rest) == 0:
             return screen("Enter contact name:")
         name = rest[0].strip()
@@ -911,8 +913,8 @@ def menu(owner, caller, parts):
         add_contact(owner, name, phone)
         return screen(f"Saved {name} - {phone}")
 
-    # 2. Search: 2 -> query -> pick contact -> action
-    if choice == "2":
+    # 4. Search: 4 -> query -> pick contact -> action
+    if choice == "search":
         if len(rest) == 0:
             return screen("Enter name to search:")
         query = rest[0].strip()
@@ -923,8 +925,8 @@ def menu(owner, caller, parts):
             return screen(format_contacts(rows, numbered=True, short=True) + "\n" + PICK_HINT)
         return pick_and_act(owner, caller, rows, rest[1], rest[2:])
 
-    # 3. List, paginated: 3 -> 9 (more) -> 9 ... -> pick contact -> action
-    if choice == "3":
+    # 1. List, paginated: 1 -> 98 (more) -> 98 ... -> pick contact -> action
+    if choice == "list":
         rows = list_contacts(owner, only)
         if not rows:
             return screen(none_yet)
@@ -940,8 +942,8 @@ def menu(owner, caller, parts):
             return screen(body + "\n" + PICK_HINT)
         return pick_and_act(owner, caller, chunk, rest[i], rest[i + 1:], first)
 
-    # 4. Delete: 4 -> pick number -> 1 confirm / 2 cancel
-    if choice == "4":
+    # 5. Delete: 5 -> pick number -> 1 confirm / 2 cancel
+    if choice == "delete":
         rows = list_contacts(owner, only)[:PAGE_SIZE]
         if not rows:
             return screen(none_yet)
@@ -959,8 +961,8 @@ def menu(owner, caller, parts):
             return screen(f"{contact['name']} deleted.")
         return screen("Cancelled.")
 
-    # 5. SMS full phone book to the phone in use
-    if choice == "5":
+    # 6. SMS full phone book to the phone in use
+    if choice == "sms":
         if rest:
             return screen(INVALID)
         if sms is None:
@@ -971,8 +973,8 @@ def menu(owner, caller, parts):
         send_sms_async(caller, "Your contacts:\n" + format_contacts(rows))
         return screen("You will receive your contacts by SMS shortly.")
 
-    # 6. Emergency numbers: 6 -> pick -> 1 call now (dial it yourself) / 2 add to contacts
-    if choice == "6":
+    # 2. Emergency numbers: 2 -> pick -> 1 call now (dial it yourself) / 2 add to contacts
+    if choice == "emergency":
         if len(rest) == 0:
             lines = "\n".join(f"{i}. {num} {short}" for i, (num, _label, short) in enumerate(EMERGENCY_NUMBERS, 1))
             return screen(f"Emergency (free):\n{lines}")

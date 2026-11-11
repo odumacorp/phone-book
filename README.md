@@ -27,13 +27,13 @@ keep the session open instead of ending it. Actions only run once: input typed a
 is rejected rather than repeating the save/send/delete.
 
 ```
-1. Add contact      -> name -> phone number
-2. Search contact   -> part of a name -> pick a contact
-3. My contacts      -> 4 per screen, 98 = next page (numbers continue: 5-8, 9-12...) -> pick a contact
-4. Delete contact   -> pick number -> 1 Yes / 2 No
-5. SMS me my contacts (sent to the phone in use, with the Africa's Talking SMS API)
-6. Emergency numbers -> 999, 112, 911, 1199 (Red Cross), 1195 (GBV), 116 (Childline): 1. Call now ends the
+1. My contacts      -> 4 per screen, 98 = next page (numbers continue: 5-8, 9-12...) -> pick a contact
+2. Emergency numbers -> 999, 112, 911, 1199 (Red Cross), 1195 (GBV), 116 (Childline): 1. Call now ends the
                        session with "Dial 999 now" (calls are always made from the user's own phone), 2. Add to contacts
+3. Add contact      -> name -> phone number
+4. Search contact   -> part of a name -> pick a contact
+5. Delete contact   -> pick number -> 1 Yes / 2 No
+6. SMS me my contacts (sent to the phone in use, with the Africa's Talking SMS API)
 ```
 
 On the search and list screens, reply with the contact's position (1-4) or type any phone number:
