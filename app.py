@@ -11,6 +11,7 @@ uploads the device's contacts to /api/contacts/sync.
 """
 import os
 import re
+import unicodedata
 import atexit
 import hashlib
 import hmac
@@ -41,7 +42,8 @@ SECRET_KEY = os.getenv("SECRET_KEY", "")
 
 USSD_MAX_LEN = 182  # max characters a USSD screen can show
 PAGE_SIZE = 4  # contacts per screen; leaves room for "98. More" and the pick hint
-NAME_MAX = 11  # names are shortened on list screens so a full page + the Back/Home/Logout line fits
+NAME_MAX = 12  # names are shortened on list screens so a full page + the Back/Home/Logout line fits
+LIST_SCREEN_LEN = 160  # list screens stay this far below USSD_MAX_LEN: a full 182 is refused by some networks
 MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 160  # one SMS
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
@@ -431,12 +433,24 @@ def normalize_contact_phone(raw):
     return phone if is_service_number(phone) else normalize_phone(phone)
 
 
+# Characters that make the network send the whole screen in UCS-2, which fits about half as much
+# text: the network then rejects a full screen ("the network is experiencing technical problems").
+# Phone contacts often have them (iPhone's ’ in "Mama’s", accents, emoji), so screens use plain text.
+PLAIN_SWAPS = str.maketrans({"’": "'", "‘": "'", "‚": ",", "“": '"', "”": '"', "–": "-", "—": "-", "…": "...", "\u00a0": " "})
+GSM_SAFE_RE = re.compile(r"[^A-Za-z0-9 \n!\"#%&'()*+,\-./:;<=>?@_£$¥]")
+
+
+def plain_text(msg):
+    msg = unicodedata.normalize("NFKD", msg.translate(PLAIN_SWAPS))
+    return re.sub(r"[ \t]+", " ", GSM_SAFE_RE.sub("", msg))
+
+
 def con(msg):
-    return "CON " + msg[: USSD_MAX_LEN - 4]
+    return "CON " + plain_text(msg)[: USSD_MAX_LEN - 4]
 
 
 def end(msg):
-    return "END " + msg[: USSD_MAX_LEN - 4]
+    return "END " + plain_text(msg)[: USSD_MAX_LEN - 4]
 
 
 def label(position):
@@ -454,13 +468,31 @@ def position_of(choice, first, count):
     return index if 0 <= index < count else None
 
 
-def format_contacts(rows, numbered=False, short=False, first=1):
-    lines = []
-    for i, row in enumerate(rows, first):
-        prefix = f"{label(i)}. " if numbered else ""
-        name = row["name"][:NAME_MAX].rstrip() if short else row["name"]
-        lines.append(f"{prefix}{name} {row['phone']}")
-    return "\n".join(lines)
+def format_contacts(rows, numbered=False, short=False, first=1, extra=""):
+    """Contacts one per line. short: for a menu screen, where the list plus `extra` (the lines shown
+    under it) must stay within LIST_SCREEN_LEN, so names are shortened (more on pages with long numbers)."""
+    def build(name_max):
+        lines = []
+        for i, row in enumerate(rows, first):
+            prefix = f"{label(i)}. " if numbered else ""
+            name = plain_text(row["name"])[:name_max].rstrip() if short else row["name"]
+            phone = local_phone(row["phone"]) if short else row["phone"]
+            lines.append(f"{prefix}{name} {phone}")
+        return "\n".join(lines)
+
+    if not short:
+        return build(None)
+    room = LIST_SCREEN_LEN - len("CON ") - len("\n" + NAV) - len(extra)
+    for name_max in range(NAME_MAX, 3, -1):
+        text = build(name_max)
+        if len(text) <= room:
+            break
+    return text
+
+
+def local_phone(phone):
+    """+254712345678 -> 0712345678, shorter on list screens; other countries keep their + code."""
+    return "0" + phone[4:] if phone.startswith("+254") and len(phone) == 13 else phone
 
 
 def send_sms_async(to, message):
@@ -922,7 +954,7 @@ def menu(owner, caller, parts):
         if not rows:
             return screen(f"No contacts match '{query}'.")
         if len(rest) == 1:
-            return screen(format_contacts(rows, numbered=True, short=True) + "\n" + PICK_HINT)
+            return screen(format_contacts(rows, numbered=True, short=True, extra="\n" + PICK_HINT) + "\n" + PICK_HINT)
         return pick_and_act(owner, caller, rows, rest[1], rest[2:])
 
     # 1. List, paginated: 1 -> 98 (more) -> 98 ... -> pick contact -> action
@@ -936,10 +968,9 @@ def menu(owner, caller, parts):
         chunk = rows[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
         first = page * PAGE_SIZE + 1
         if i == len(rest):
-            body = format_contacts(chunk, numbered=True, short=True, first=first)
-            if (page + 1) * PAGE_SIZE < len(rows):
-                body += f"\n{MORE}. More"
-            return screen(body + "\n" + PICK_HINT)
+            more = f"\n{MORE}. More" if (page + 1) * PAGE_SIZE < len(rows) else ""
+            body = format_contacts(chunk, numbered=True, short=True, first=first, extra=more + "\n" + PICK_HINT)
+            return screen(body + more + "\n" + PICK_HINT)
         return pick_and_act(owner, caller, chunk, rest[i], rest[i + 1:], first)
 
     # 5. Delete: 5 -> pick number -> 1 confirm / 2 cancel
@@ -948,7 +979,8 @@ def menu(owner, caller, parts):
         if not rows:
             return screen(none_yet)
         if len(rest) == 0:
-            return screen("Select contact to delete:\n" + format_contacts(rows, numbered=True, short=True))
+            title = "Select contact to delete:\n"
+            return screen(title + format_contacts(rows, numbered=True, short=True, extra=title))
         if not rest[0].isdigit() or not 1 <= int(rest[0]) <= len(rows):
             return screen("Invalid selection.")
         contact = rows[int(rest[0]) - 1]
