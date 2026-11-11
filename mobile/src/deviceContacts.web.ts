@@ -89,3 +89,10 @@ export function parseVCards(text: string): SyncContact[] {
 }
 
 const unescape = (v: string) => v.replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\n/gi, ' ').replace(/\\\\/g, '\\');
+
+/** Browsers have no lasting contacts permission: the user chooses contacts each time, so there is nothing to manage. */
+export type ContactAccess = 'all' | 'limited' | 'denied' | 'unasked';
+export const getContactAccess = async (): Promise<ContactAccess | null> => null;
+export const askContactAccess = async () => {};
+export const openPhoneSettings = async () => {};
+export const chooseSharedContacts = async () => [];
