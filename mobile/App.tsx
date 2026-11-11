@@ -33,6 +33,7 @@ import {
   changePin,
   clearToken,
   deleteContact,
+  deleteContacts,
   editContact,
   getContacts,
   getEmergencyNumbers,
@@ -1261,6 +1262,10 @@ function SyncScreen({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(notice);
   const [error, setError] = useState('');
+  const ask = useDialog();
+  // Bulk select: tick several contacts, then delete them together
+  const [selecting, setSelecting] = useState(false);
+  const [chosen, setChosen] = useState<Set<number>>(new Set());
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [maxPriority, setMaxPriority] = useState(5);
   const [showOthers, setShowOthersState] = useState(true);
@@ -1351,6 +1356,46 @@ function SyncScreen({
     }
   };
 
+  const stopSelecting = () => {
+    setSelecting(false);
+    setChosen(new Set());
+  };
+
+  const toggleChosen = (id: number) =>
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const confirmDeleteChosen = () => {
+    const ids = [...chosen];
+    const label = `${ids.length} contact${ids.length === 1 ? '' : 's'}`;
+    ask(`Delete ${label}?`, 'They are removed from your Remote Phonebook and USSD. They stay on your phone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          setError('');
+          try {
+            const { deleted } = await deleteContacts(token, ids);
+            const gone = new Set(deleted);
+            setContacts((list) => list && list.filter((c) => !gone.has(c.id)));
+            stopSelecting();
+            setStatus(`${deleted.length} contact${deleted.length === 1 ? '' : 's'} deleted.`);
+          } catch (e) {
+            failed(e, 'Could not delete the contacts.');
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
   const toggleShowOthers = async (value: boolean) => {
     setShowOthersState(value);
     setError('');
@@ -1419,7 +1464,11 @@ function SyncScreen({
       <Text style={styles.sectionTitle}>
         Your contacts{contacts ? ` (${contacts.length})` : ''} · ★ {priorityCount}/{maxPriority} priority
       </Text>
-      <Text style={styles.hint}>Tap ☆ to pick up to {maxPriority} priority contacts. Tap a contact to edit or remove it.</Text>
+      <Text style={styles.hint}>
+        {selecting
+          ? 'Tick the contacts to delete.'
+          : `Tap ☆ to pick up to ${maxPriority} priority contacts. Tap a contact to edit or remove it. To add several at once, use Choose contacts from phone.`}
+      </Text>
       <TextInput
         style={[styles.input, styles.search]}
         value={query}
@@ -1427,50 +1476,107 @@ function SyncScreen({
         placeholder="Search name or number"
         autoCorrect={false}
       />
+      {contacts?.length ? (
+        <View style={styles.linkRow}>
+          {selecting ? (
+            <>
+              <Link
+                title={`Select all${query ? ' shown' : ''} (${visible.length})`}
+                onPress={() => setChosen((prev) => new Set([...prev, ...visible.map((c) => c.id)]))}
+              />
+              <Link title="Clear" onPress={() => setChosen(new Set())} />
+              <Link title="Done" onPress={stopSelecting} />
+            </>
+          ) : (
+            <>
+              <Link title="Select to delete" onPress={() => setSelecting(true)} disabled={busy} />
+              <Link title="Add from phone" onPress={onPickContacts} disabled={busy} />
+            </>
+          )}
+        </View>
+      ) : null}
     </>
   );
 
   return (
-    <FlatList
-      style={styles.list}
-      data={visible}
-      keyExtractor={(c) => String(c.id)}
-      ListHeaderComponent={header}
-      keyboardShouldPersistTaps="handled"
-      ListEmptyComponent={
-        contacts === null ? (
-          <ActivityIndicator color={COLORS.primary} />
-        ) : (
-          <Text style={styles.hint}>
-            {query ? 'No contacts match.' : 'No contacts yet. Choose some from your phone, or add one.'}
-          </Text>
-        )
-      }
-      renderItem={({ item }) => (
-        <View style={styles.row}>
-          <Pressable style={styles.rowText} onPress={() => onEditContact(item)} accessibilityHint="Edit or remove this contact">
-            <Text style={styles.rowName} numberOfLines={1}>
-              {item.name}
+    <View style={styles.list}>
+      <FlatList
+        style={styles.list}
+        data={visible}
+        keyExtractor={(c) => String(c.id)}
+        ListHeaderComponent={header}
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={
+          contacts === null ? (
+            <ActivityIndicator color={COLORS.primary} />
+          ) : (
+            <Text style={styles.hint}>
+              {query ? 'No contacts match.' : 'No contacts yet. Choose some from your phone, or add one.'}
             </Text>
-            <Text style={styles.rowPhone}>{item.phone}</Text>
-          </Pressable>
-          <Pressable onPress={() => callNumber(item.phone)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Call ${item.name}`}>
-            <Text style={styles.callLink}>Call</Text>
-          </Pressable>
-          <Pressable onPress={() => onEditContact(item)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
-            <Text style={styles.callLink}>Edit</Text>
-          </Pressable>
+          )
+        }
+        renderItem={({ item }) => {
+          if (selecting) {
+            const on = chosen.has(item.id);
+            return (
+              <Pressable
+                style={styles.row}
+                onPress={() => toggleChosen(item.id)}
+                disabled={busy}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: on }}
+              >
+                <View style={styles.rowText}>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.rowPhone}>{item.phone}</Text>
+                </View>
+                <View style={[styles.checkbox, on && styles.checkboxOn]}>{on ? <Text style={styles.checkmark}>✓</Text> : null}</View>
+              </Pressable>
+            );
+          }
+          return (
+            <View style={styles.row}>
+              <Pressable style={styles.rowText} onPress={() => onEditContact(item)} accessibilityHint="Edit or remove this contact">
+                <Text style={styles.rowName} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Text style={styles.rowPhone}>{item.phone}</Text>
+              </Pressable>
+              <Pressable onPress={() => callNumber(item.phone)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Call ${item.name}`}>
+                <Text style={styles.callLink}>Call</Text>
+              </Pressable>
+              <Pressable onPress={() => onEditContact(item)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
+                <Text style={styles.callLink}>Edit</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => togglePriority(item)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel={item.priority ? `Remove ${item.name} from priority` : `Make ${item.name} a priority`}
+              >
+                <Text style={[styles.star, item.priority && styles.starOn]}>{item.priority ? '★' : '☆'}</Text>
+              </Pressable>
+            </View>
+          );
+        }}
+      />
+      {selecting ? (
+        <View style={styles.footer}>
           <Pressable
-            onPress={() => togglePriority(item)}
-            hitSlop={12}
+            style={[styles.removeButton, (!chosen.size || busy) && styles.buttonOff]}
+            onPress={confirmDeleteChosen}
+            disabled={!chosen.size || busy}
             accessibilityRole="button"
-            accessibilityLabel={item.priority ? `Remove ${item.name} from priority` : `Make ${item.name} a priority`}
           >
-            <Text style={[styles.star, item.priority && styles.starOn]}>{item.priority ? '★' : '☆'}</Text>
+            <Text style={styles.removeButtonText}>
+              {chosen.size ? `Delete ${chosen.size} contact${chosen.size === 1 ? '' : 's'}` : 'Select contacts to delete'}
+            </Text>
           </Pressable>
         </View>
-      )}
-    />
+      ) : null}
+    </View>
   );
 }
 

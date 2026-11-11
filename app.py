@@ -1767,6 +1767,24 @@ def api_delete_contact(contact_id):
     return jsonify({"deleted": contact_id})
 
 
+@app.route("/api/contacts/delete", methods=["POST"])
+@require_auth
+def api_delete_contacts():
+    """Bulk delete: {ids: [...]}. Ids that are not the user's are ignored."""
+    ids = body_json().get("ids")
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
+        return api_error("Expected ids: a list of contact ids.", 400)
+    if len(ids) > 500:
+        return api_error("Delete at most 500 contacts at a time.", 400)
+    ids = list(dict.fromkeys(ids))
+    marks = ", ".join("?" * len(ids))
+    owned = [r["id"] for r in fetch_all(f"SELECT id FROM contacts WHERE owner = ? AND id IN ({marks})", (g.phone, *ids))]
+    if owned:
+        marks = ", ".join("?" * len(owned))
+        execute(f"DELETE FROM contacts WHERE owner = ? AND id IN ({marks})", (g.phone, *owned))
+    return jsonify({"deleted": owned})
+
+
 @app.route("/api/contacts/<int:contact_id>", methods=["PATCH"])
 @require_auth
 def api_edit_contact(contact_id):

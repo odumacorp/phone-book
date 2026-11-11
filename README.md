@@ -140,6 +140,7 @@ API (JSON):
 - `POST /api/contacts` `{name, phone}` (phone may be a 3-6 digit service number) -> the new contact (409 if the number is already saved)
 - `PATCH /api/contacts/<id>` `{name, phone}` -> the edited contact (409 if another contact has that number)
 - `DELETE /api/contacts/<id>`
+- `POST /api/contacts/delete` `{ids: [...]}` -> `{deleted: [...]}`; bulk delete (up to 500), ids that are not yours are ignored
 - `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
 - `POST /api/settings` `{show_others?, name?, email?}`; name signs the user's SMS; email ("" removes it) is a login;
   when show_others is false, USSD lists/search/delete/SMS-me show only priority contacts
