@@ -75,6 +75,12 @@ gunicorn -w 2 -b 0.0.0.0:8000 app:app
 Set `DATABASE_URL` to a Postgres connection string (e.g. Neon) in production. Without it,
 contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must be set for app logins.
 
+`gunicorn.conf.py` (read automatically) gives each worker 4 threads. Database waits are capped at
+5 seconds, so if Neon is slow a USSD screen answers "busy, please dial again" before the network
+gives up. On Render's free plan the server sleeps after 15 minutes idle and waking takes longer
+than a USSD screen may; `.github/workflows/keep-awake.yml` pings `/health` every 10 minutes to
+prevent that (a paid plan never sleeps).
+
 ## Website: https://phone-book.odumacorp.com/
 
 The same Remote Phonebook app, built for the web (Expo web) and served by this server at `/`

@@ -97,11 +97,18 @@ if not SECRET_KEY:
 def connect(url=None):
     if DATABASE_URL:
         # prepare_threshold=None: no server-side prepared statements through Neon's PgBouncer pooler
-        return psycopg.connect(url or DATABASE_URL, row_factory=dict_row, prepare_threshold=None)
+        return psycopg.connect(
+            url or DATABASE_URL, row_factory=dict_row, prepare_threshold=None, connect_timeout=DB_CONNECT_TIMEOUT
+        )
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     return db
 
+
+# A USSD screen must answer within ~10 s or the network gives up ("USSD code running..." then an
+# error), so a slow database fails fast with "please dial again" instead of hanging the phone.
+DB_CONNECT_TIMEOUT = 5
+DB_WAIT_TIMEOUT = 5  # waiting for a free pooled connection
 
 _pool = None
 _pool_lock = threading.Lock()
@@ -118,10 +125,11 @@ def pool():
             _pool = ConnectionPool(
                 DATABASE_URL,
                 min_size=1,
-                max_size=4,
+                max_size=4,  # = gunicorn threads per worker (gunicorn.conf.py)
+                timeout=DB_WAIT_TIMEOUT,
                 max_idle=240,  # Neon may close idle connections; drop ours first
                 check=ConnectionPool.check_connection,  # replace connections Neon closed while idle
-                kwargs={"row_factory": dict_row, "prepare_threshold": None},
+                kwargs={"row_factory": dict_row, "prepare_threshold": None, "connect_timeout": DB_CONNECT_TIMEOUT},
                 open=True,
             )
             atexit.register(_pool.close)
@@ -1173,7 +1181,7 @@ def ussd():
             body = handle(caller, text, session_id, request.values.get("networkCode", ""))
         except Exception:
             log.exception("Error handling USSD request")
-            body = end("Something went wrong. Please try again.")
+            body = end("Remote Phone-Book is busy right now. Please dial again.")
 
     return Response(body, mimetype="text/plain")
 
