@@ -33,6 +33,7 @@ import {
   changePin,
   clearToken,
   deleteContact,
+  editContact,
   getContacts,
   getEmergencyNumbers,
   getLogins,
@@ -79,6 +80,7 @@ type View_ =
   | 'logins'
   | 'sessions'
   | 'addContact'
+  | 'editContact'
   | 'emergency'
   | 'pickContacts';
 
@@ -97,6 +99,7 @@ function Main() {
   const [view, setView] = useState<View_>('login');
   const [notice, setNotice] = useState('');
   const [booting, setBooting] = useState(true);
+  const [editing, setEditing] = useState<Contact | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -162,6 +165,10 @@ function Main() {
   else if (view === 'emergency') content = <EmergencyScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'addContact')
     content = <AddContactScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
+  else if (view === 'editContact' && editing)
+    content = (
+      <AddContactScreen token={token} contact={editing} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />
+    );
   else if (view === 'pickContacts')
     content = <PickContactsScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
   else if (view === 'changePin')
@@ -188,6 +195,11 @@ function Main() {
         onAddContact={() => {
           setNotice('');
           setView('addContact');
+        }}
+        onEditContact={(contact) => {
+          setNotice('');
+          setEditing(contact);
+          setView('editContact');
         }}
         onPickContacts={() => {
           setNotice('');
@@ -783,28 +795,38 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
   );
 }
 
+/** Adds a contact, or edits one when `contact` is given (and offers to remove it). */
 function AddContactScreen({
   token,
+  contact,
   onDone,
   onCancel,
   onLogout,
 }: {
   token: string;
+  contact?: Contact;
   onDone: (message: string) => void;
   onCancel: () => void;
   onLogout: () => void;
 }) {
-  const [name, setNameText] = useState('');
-  const [phone, setPhone] = useState('');
+  const ask = useDialog();
+  const [name, setNameText] = useState(contact?.name ?? '');
+  const [phone, setPhone] = useState(contact?.phone ?? '');
   const { busy, error, setError, run } = useForm();
+  const unchanged = !!contact && name.trim() === contact.name && phone.trim() === contact.phone;
 
   const submit = () => {
     if (!name.trim()) return setError('Enter a name.');
     if (!normalizePhone(phone)) return setError('Enter a valid phone number, e.g. 0712 345 678 or +965 6674 4067.');
     run(async () => {
       try {
-        const saved = await addContact(token, name.trim(), phone);
-        onDone(`${saved.name} added.`);
+        if (contact) {
+          const saved = await editContact(token, contact.id, name.trim(), phone);
+          onDone(`${saved.name} saved.`);
+        } else {
+          const saved = await addContact(token, name.trim(), phone);
+          onDone(`${saved.name} added.`);
+        }
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return onLogout();
         throw e;
@@ -812,9 +834,29 @@ function AddContactScreen({
     });
   };
 
+  const confirmRemove = () =>
+    contact &&
+    ask(contact.name, `${contact.phone}\n\nRemove from your Remote Phonebook? It stays on your phone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () =>
+          run(async () => {
+            try {
+              await deleteContact(token, contact.id);
+              onDone(`${contact.name} removed.`);
+            } catch (e) {
+              if (e instanceof ApiError && e.status === 401) return onLogout();
+              throw e;
+            }
+          }),
+      },
+    ]);
+
   return (
     <Form>
-      <Text style={styles.heading}>Add contact</Text>
+      <Text style={styles.heading}>{contact ? 'Edit contact' : 'Add contact'}</Text>
       <Text style={styles.label}>Name</Text>
       <TextInput style={styles.input} value={name} onChangeText={setNameText} placeholder="e.g. Mama Mboga" maxLength={60} />
       <Text style={styles.label}>Phone number</Text>
@@ -827,9 +869,19 @@ function AddContactScreen({
       />
       <Text style={styles.hint}>Kenyan numbers can start with 0; other countries need the + code. Service numbers like 999 or 1199 work too.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button title="Add contact" onPress={submit} busy={busy} disabled={!name.trim() || !phone.trim()} />
+      <Button
+        title={contact ? 'Save changes' : 'Add contact'}
+        onPress={submit}
+        busy={busy}
+        disabled={!name.trim() || !phone.trim() || unchanged}
+      />
+      {contact ? (
+        <Pressable style={styles.removeButton} onPress={confirmRemove} disabled={busy} accessibilityRole="button">
+          <Text style={styles.removeButtonText}>Remove contact</Text>
+        </Pressable>
+      ) : null}
       <Link title="Cancel" onPress={onCancel} disabled={busy} />
-      <ContactAccessSettings />
+      {contact ? null : <ContactAccessSettings />}
     </Form>
   );
 }
@@ -1186,6 +1238,7 @@ function SyncScreen({
   onChangePassword,
   onEmergency,
   onAddContact,
+  onEditContact,
   onPickContacts,
   onLoginHistory,
   onSessions,
@@ -1199,12 +1252,12 @@ function SyncScreen({
   onChangePassword: () => void;
   onEmergency: () => void;
   onAddContact: () => void;
+  onEditContact: (contact: Contact) => void;
   onPickContacts: () => void;
   onLoginHistory: () => void;
   onSessions: () => void;
   onLogout: () => void;
 }) {
-  const ask = useDialog();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(notice);
   const [error, setError] = useState('');
@@ -1298,25 +1351,6 @@ function SyncScreen({
     }
   };
 
-  const confirmRemove = (contact: Contact) =>
-    ask(contact.name, `${contact.phone}\n\nRemove from your Remote Phonebook? It stays on your phone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          setError('');
-          try {
-            await deleteContact(token, contact.id);
-            setContacts((list) => list && list.filter((c) => c.id !== contact.id));
-            setStatus(`${contact.name} removed.`);
-          } catch (e) {
-            failed(e, 'Could not remove the contact.');
-          }
-        },
-      },
-    ]);
-
   const toggleShowOthers = async (value: boolean) => {
     setShowOthersState(value);
     setError('');
@@ -1385,7 +1419,7 @@ function SyncScreen({
       <Text style={styles.sectionTitle}>
         Your contacts{contacts ? ` (${contacts.length})` : ''} · ★ {priorityCount}/{maxPriority} priority
       </Text>
-      <Text style={styles.hint}>Tap ☆ to pick up to {maxPriority} priority contacts. Tap a contact to remove it.</Text>
+      <Text style={styles.hint}>Tap ☆ to pick up to {maxPriority} priority contacts. Tap a contact to edit or remove it.</Text>
       <TextInput
         style={[styles.input, styles.search]}
         value={query}
@@ -1414,7 +1448,7 @@ function SyncScreen({
       }
       renderItem={({ item }) => (
         <View style={styles.row}>
-          <Pressable style={styles.rowText} onPress={() => confirmRemove(item)} accessibilityHint="Remove this contact">
+          <Pressable style={styles.rowText} onPress={() => onEditContact(item)} accessibilityHint="Edit or remove this contact">
             <Text style={styles.rowName} numberOfLines={1}>
               {item.name}
             </Text>
@@ -1422,6 +1456,9 @@ function SyncScreen({
           </Pressable>
           <Pressable onPress={() => callNumber(item.phone)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Call ${item.name}`}>
             <Text style={styles.callLink}>Call</Text>
+          </Pressable>
+          <Pressable onPress={() => onEditContact(item)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
+            <Text style={styles.callLink}>Edit</Text>
           </Pressable>
           <Pressable
             onPress={() => togglePriority(item)}
@@ -1644,6 +1681,8 @@ const styles = StyleSheet.create({
   status: { color: COLORS.text, marginTop: 8 },
   error: { color: COLORS.error, marginTop: 8 },
   hint: { color: COLORS.muted, fontSize: 13, marginTop: 12 },
+  removeButton: { borderWidth: 1, borderColor: COLORS.error, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
+  removeButtonText: { color: COLORS.error, fontSize: 16, fontWeight: '600' },
   accessBox: { borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 16, paddingTop: 12, gap: 8 },
   link: { color: COLORS.primary, fontSize: 15, marginTop: 16, textAlign: 'center' },
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', columnGap: 16 },
