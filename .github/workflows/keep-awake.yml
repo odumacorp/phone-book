@@ -1,0 +1,14 @@
+# Render's free plan puts the server to sleep after 15 minutes without requests, and waking it takes
+# longer than a USSD screen may (the phone shows "USSD code running..." and then an error).
+# Pinging it keeps it awake. GitHub may run these a few minutes late; a paid Render plan never sleeps.
+name: Keep the server awake
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: curl -fsS --retry 3 --retry-delay 10 --max-time 60 https://phone-book.odumacorp.com/health
