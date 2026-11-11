@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -53,7 +54,15 @@ import {
   setShowOthers,
   syncContacts,
 } from './src/api';
-import { contactSource, readDeviceContacts } from './src/deviceContacts';
+import {
+  askContactAccess,
+  chooseSharedContacts,
+  type ContactAccess,
+  contactSource,
+  getContactAccess,
+  openPhoneSettings,
+  readDeviceContacts,
+} from './src/deviceContacts';
 import { DialogProvider, useDialog } from './src/dialog';
 import { isWeb } from './src/platform';
 
@@ -820,7 +829,69 @@ function AddContactScreen({
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button title="Add contact" onPress={submit} busy={busy} disabled={!name.trim() || !phone.trim()} />
       <Link title="Cancel" onPress={onCancel} disabled={busy} />
+      <ContactAccessSettings />
     </Form>
+  );
+}
+
+const ACCESS_TEXT: Record<ContactAccess, string> = {
+  all: 'Remote Phonebook can read all the contacts on this phone. Sync all uploads every one; Choose contacts from phone lets you pick.',
+  limited: 'Remote Phonebook can only see the contacts you selected. Change the selection, or allow all contacts in phone settings.',
+  denied: 'Contacts access is off, so the app cannot read your phonebook. Turn it on in phone settings.',
+  unasked: 'Allow access to your phonebook so you can sync or choose contacts.',
+};
+
+/**
+ * Shows what the phone lets the app read from the phonebook, with buttons to change it:
+ * allow all contacts (for Sync all) or keep only selected ones. onChange runs after a change.
+ */
+function ContactAccessSettings({ onChange }: { onChange?: () => void }) {
+  const [access, setAccess] = useState<ContactAccess | null>(null);
+
+  const refresh = useCallback(async () => {
+    const next = await getContactAccess().catch(() => null);
+    setAccess((prev) => {
+      if (prev && next && prev !== next) onChange?.();
+      return next;
+    });
+  }, [onChange]);
+
+  useEffect(() => {
+    refresh();
+    // Coming back from the phone's Settings app: show the new setting
+    const sub = AppState.addEventListener('change', (state) => state === 'active' && refresh());
+    return () => sub.remove();
+  }, [refresh]);
+
+  if (isWeb) {
+    return (
+      <Text style={styles.hint}>
+        The website asks for contacts each time you choose them. To let Remote Phonebook read all your phone's contacts or only selected
+        ones, use the Remote Phonebook app.
+      </Text>
+    );
+  }
+  if (!access) return null;
+
+  const settingsHint =
+    Platform.OS === 'ios' ? 'In Settings → Remote Phonebook → Contacts, choose Full Access or Limited Access.' : 'In Settings → Permissions → Contacts, choose Allow or Don\'t allow.';
+
+  return (
+    <View style={styles.accessBox}>
+      <Text style={styles.switchLabel}>Phone contacts access</Text>
+      <Text style={styles.hint}>{ACCESS_TEXT[access]}</Text>
+      {access === 'unasked' ? (
+        <SecondaryButton title="Allow contacts access" onPress={() => askContactAccess().then(refresh)} />
+      ) : (
+        <>
+          {access === 'limited' ? (
+            <SecondaryButton title="Choose which contacts" onPress={() => chooseSharedContacts().then(() => onChange?.(), () => {})} />
+          ) : null}
+          <SecondaryButton title="Change in phone settings" onPress={() => openPhoneSettings().catch(() => {})} />
+          <Text style={styles.hint}>{settingsHint}</Text>
+        </>
+      )}
+    </View>
   );
 }
 
@@ -876,6 +947,12 @@ function PickContactsScreen({
 
   useEffect(() => {
     if (!isWeb) load(readDeviceContacts());
+  }, [token]);
+
+  // Contacts access changed (e.g. more contacts shared in phone settings): read the phonebook again
+  const reload = useCallback(() => {
+    setEntries(null);
+    load(readDeviceContacts());
   }, [token]);
 
   const openOnWeb = () => {
@@ -941,6 +1018,7 @@ function PickContactsScreen({
                 </>
               ) : null}
               {error ? <Text style={styles.error}>{error}</Text> : null}
+              {isWeb ? null : <ContactAccessSettings onChange={reload} />}
               <Link title="Cancel" onPress={onCancel} disabled={busy} />
             </View>
             <TextInput
@@ -1566,6 +1644,7 @@ const styles = StyleSheet.create({
   status: { color: COLORS.text, marginTop: 8 },
   error: { color: COLORS.error, marginTop: 8 },
   hint: { color: COLORS.muted, fontSize: 13, marginTop: 12 },
+  accessBox: { borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 16, paddingTop: 12, gap: 8 },
   link: { color: COLORS.primary, fontSize: 15, marginTop: 16, textAlign: 'center' },
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', columnGap: 16 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
