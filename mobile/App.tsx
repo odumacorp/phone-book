@@ -19,8 +19,11 @@ import {
 
 import {
   ApiError,
+  AppNotification,
   Complaint,
   Contact,
+  NotificationPrefs,
+  EmailAddress,
   EmergencyNumber,
   Me,
   PASSWORD_MIN,
@@ -32,7 +35,13 @@ import {
   addContact,
   changePassword,
   changePin,
+  addEmail,
+  clearNotifications,
   clearToken,
+  getNotifications,
+  markNotificationsRead,
+  setNotificationPrefs,
+  deleteEmail,
   confirmEmailCode,
   getComplaints,
   requestEmailCode,
@@ -90,6 +99,8 @@ type View_ =
   | 'emergency'
   | 'pickContacts'
   | 'verifyEmail'
+  | 'addEmail'
+  | 'notifications'
   | 'report';
 
 export default function App() {
@@ -108,6 +119,7 @@ function Main() {
   const [notice, setNotice] = useState('');
   const [booting, setBooting] = useState(true);
   const [editing, setEditing] = useState<Contact | null>(null);
+  const [verifying, setVerifying] = useState<EmailAddress | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -174,9 +186,35 @@ function Main() {
         onReport={() => setView('report')}
       />
     );
-  else if (view === 'verifyEmail')
+  else if (view === 'verifyEmail' && verifying)
     content = (
-      <VerifyEmailScreen token={token} email={me?.email ?? ''} onDone={() => loggedIn(token, 'Email verified.')} onCancel={back} onLogout={logout} />
+      <VerifyEmailScreen token={token} entry={verifying} onDone={() => loggedIn(token, 'Email verified.')} onCancel={back} onLogout={logout} />
+    );
+  else if (view === 'notifications')
+    content = (
+      <NotificationsScreen
+        token={token}
+        onBack={() => {
+          back();
+          getMe(token).then(setMe).catch(() => null); // refresh the unread count
+        }}
+        onLogout={logout}
+      />
+    );
+  else if (view === 'addEmail')
+    content = (
+      <AddEmailScreen
+        token={token}
+        onDone={(entry) => {
+          if (me?.features?.email_verification) {
+            setVerifying(entry);
+            setView('verifyEmail');
+            getMe(token).then(setMe).catch(() => null);
+          } else loggedIn(token, `${entry.email} added. You can now log in with it.`);
+        }}
+        onCancel={back}
+        onLogout={logout}
+      />
     );
   else if (view === 'changePassword')
     content = <ChangePasswordScreen token={token} onDone={(t) => loggedIn(t, 'Password changed.')} onCancel={back} onLogout={logout} />;
@@ -233,9 +271,18 @@ function Main() {
           setNotice('');
           setView('sessions');
         }}
-        onVerifyEmail={() => {
+        onVerifyEmail={(entry) => {
           setNotice('');
+          setVerifying(entry);
           setView('verifyEmail');
+        }}
+        onAddEmail={() => {
+          setNotice('');
+          setView('addEmail');
+        }}
+        onNotifications={() => {
+          setNotice('');
+          setView('notifications');
         }}
         onReport={() => {
           setNotice('');
@@ -466,15 +513,214 @@ function ResetPasswordScreen({ onDone, onCancel }: { onDone: (token: string) => 
 }
 
 /** Email verification (when the admin has turned it on): send a code to the account's email, then enter it. */
-function VerifyEmailScreen({
+/** The in-app inbox, and where the user gets notifications (or stops them). */
+function NotificationsScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+  const ask = useDialog();
+  const [items, setItems] = useState<AppNotification[] | null>(null);
+  const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
+  const [keepDays, setKeepDays] = useState(90);
+  const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const failed = (e: unknown, fallback: string) => {
+    if (e instanceof ApiError && e.status === 401) return onLogout();
+    setError(e instanceof Error ? e.message : fallback);
+  };
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const inbox = await getNotifications(token);
+      setItems(inbox.notifications);
+      setPrefs(inbox.prefs);
+      setKeepDays(inbox.keep_days);
+      if (inbox.unread) markNotificationsRead(token).catch(() => null); // seen now; still shown as new this time
+    } catch (e) {
+      failed(e, 'Could not load your notifications.');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const change = async (c: Parameters<typeof setNotificationPrefs>[1]) => {
+    setError('');
+    try {
+      setPrefs(await setNotificationPrefs(token, c));
+    } catch (e) {
+      failed(e, 'Could not save your choice.');
+    }
+  };
+
+  const clear = () =>
+    ask('Clear notifications?', 'This removes every notification from this list.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await clearNotifications(token);
+            setItems([]);
+          } catch (e) {
+            failed(e, 'Could not clear them.');
+          }
+        },
+      },
+    ]);
+
+  const anyOn = prefs ? prefs.inapp || prefs.emails.some((e) => e.notify) : true;
+  const allOff = prefs ? !prefs.security && !prefs.messages : false;
+
+  const toggle = (label: string, hint: string, value: boolean, onChange: (v: boolean) => void, key: string) => (
+    <View style={styles.switchRow} key={key}>
+      <View style={styles.switchText}>
+        <Text style={styles.switchLabel}>{label}</Text>
+        {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      </View>
+      <Switch value={value} onValueChange={onChange} trackColor={{ true: COLORS.primary }} />
+    </View>
+  );
+
+  return (
+    <FlatList
+      style={styles.list}
+      data={items ?? []}
+      keyExtractor={(n) => String(n.id)}
+      refreshing={refreshing}
+      onRefresh={async () => {
+        setRefreshing(true);
+        await load();
+        setRefreshing(false);
+      }}
+      ListHeaderComponent={
+        <>
+          <View style={styles.card}>
+            <Text style={styles.heading}>Notifications</Text>
+            <Text style={styles.hint}>Security alerts about your account, replies to your reports and messages from the team.</Text>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {prefs ? (
+              <>
+                <Text style={[styles.label, { marginTop: 12 }]}>What to get</Text>
+                {toggle('Security alerts', 'New logins, password or PIN changes, lockouts', prefs.security, (v) => change({ security: v }), 'security')}
+                {toggle('Messages from the team', 'Replies to your reports and announcements', prefs.messages, (v) => change({ messages: v }), 'messages')}
+                <Text style={[styles.label, { marginTop: 12 }]}>Where to get them</Text>
+                {toggle('In the app', 'This list', prefs.inapp, (v) => change({ inapp: v }), 'inapp')}
+                {prefs.emails.map((e) =>
+                  toggle(
+                    e.email,
+                    !prefs.email_available
+                      ? 'Email is not available yet'
+                      : prefs.verified_only && !e.verified
+                        ? 'Verify this email to get notifications here'
+                        : 'Email',
+                    !!e.notify,
+                    (v) => change({ email_id: e.id, notify: v }),
+                    `email-${e.id}`,
+                  ),
+                )}
+                {!prefs.emails.length ? <Text style={styles.hint}>Add an email on the home screen to get notifications by email.</Text> : null}
+                {allOff || !anyOn ? (
+                  <Text style={[styles.status, styles.warn]}>Notifications are off. You won't hear about logins or replies.</Text>
+                ) : null}
+                <View style={styles.linkRow}>
+                  {allOff && !anyOn ? (
+                    <Link title="Turn all notifications on" onPress={() => change({ all: true })} />
+                  ) : (
+                    <Link title="Stop all notifications" onPress={() => change({ all: false })} />
+                  )}
+                  {items && items.length ? <Link title="Clear list" onPress={clear} /> : null}
+                  <Link title="Back" onPress={onBack} />
+                </View>
+              </>
+            ) : (
+              <Link title="Back" onPress={onBack} />
+            )}
+          </View>
+          <View style={styles.spacer} />
+        </>
+      }
+      ListEmptyComponent={
+        items === null ? (
+          <ActivityIndicator color={COLORS.primary} />
+        ) : (
+          <Text style={styles.hint}>No notifications yet. They are kept for {keepDays} days.</Text>
+        )
+      }
+      renderItem={({ item }) => (
+        <View style={styles.row}>
+          <View style={[styles.dot, item.read ? styles.dotRead : item.kind === 'security' ? styles.dotBad : styles.dotOk]} />
+          <View style={styles.rowText}>
+            <Text style={[styles.rowName, !item.read && { fontWeight: '700' }]}>{item.title}</Text>
+            <Text style={styles.rowPhone}>{new Date(item.created_at * 1000).toLocaleString()}</Text>
+            <Text style={styles.noteBody}>{item.body}</Text>
+          </View>
+        </View>
+      )}
+    />
+  );
+}
+
+/** Add one more email to the account (up to the server's limit). */
+function AddEmailScreen({
   token,
-  email,
   onDone,
   onCancel,
   onLogout,
 }: {
   token: string;
-  email: string;
+  onDone: (entry: EmailAddress) => void;
+  onCancel: () => void;
+  onLogout: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const { busy, error, setError, run } = useForm();
+
+  const submit = () => {
+    if (!isEmail(email)) return setError('Enter a valid email address.');
+    run(async () => {
+      try {
+        onDone(await addEmail(token, email.trim()));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return onLogout();
+        throw e;
+      }
+    });
+  };
+
+  return (
+    <Form>
+      <Text style={styles.heading}>Add email</Text>
+      <Text style={styles.hint}>You can add up to 3 emails. Any of them can be used to log in.</Text>
+      <Text style={styles.label}>Email</Text>
+      <TextInput
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        autoComplete="email"
+        placeholder="you@example.com"
+        onSubmitEditing={submit}
+      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button title="Add email" onPress={submit} busy={busy} disabled={!email.trim()} />
+      <Link title="Cancel" onPress={onCancel} disabled={busy} />
+    </Form>
+  );
+}
+
+function VerifyEmailScreen({
+  token,
+  entry,
+  onDone,
+  onCancel,
+  onLogout,
+}: {
+  token: string;
+  entry: EmailAddress;
   onDone: () => void;
   onCancel: () => void;
   onLogout: () => void;
@@ -497,7 +743,7 @@ function VerifyEmailScreen({
     <Form>
       <Text style={styles.heading}>Verify your email</Text>
       <Text style={styles.hint}>
-        We'll email a 6-digit code to {email}. Verified emails can be used to log in and get security alerts.
+        We'll email a 6-digit code to {entry.email}. Verified emails can be used to log in and get security alerts.
       </Text>
       {sent ? (
         <>
@@ -508,11 +754,11 @@ function VerifyEmailScreen({
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {sent ? (
         <>
-          <Button title="Verify" onPress={() => guard(async () => { await confirmEmailCode(token, code); onDone(); })} busy={busy} disabled={code.length !== 6} />
-          <Link title="Send a new code" onPress={() => guard(async () => { await requestEmailCode(token); })} disabled={busy} />
+          <Button title="Verify" onPress={() => guard(async () => { await confirmEmailCode(token, entry.id, code); onDone(); })} busy={busy} disabled={code.length !== 6} />
+          <Link title="Send a new code" onPress={() => guard(async () => { await requestEmailCode(token, entry.id); })} disabled={busy} />
         </>
       ) : (
-        <Button title="Send code" onPress={() => guard(async () => { await requestEmailCode(token); setSent(true); })} busy={busy} />
+        <Button title="Send code" onPress={() => guard(async () => { await requestEmailCode(token, entry.id); setSent(true); })} busy={busy} />
       )}
       <Link title="Cancel" onPress={onCancel} disabled={busy} />
     </Form>
@@ -1409,6 +1655,8 @@ function SyncScreen({
   onLoginHistory,
   onSessions,
   onVerifyEmail,
+  onAddEmail,
+  onNotifications,
   onReport,
   onLogout,
 }: {
@@ -1424,7 +1672,9 @@ function SyncScreen({
   onPickContacts: () => void;
   onLoginHistory: () => void;
   onSessions: () => void;
-  onVerifyEmail: () => void;
+  onVerifyEmail: (entry: EmailAddress) => void;
+  onAddEmail: () => void;
+  onNotifications: () => void;
   onReport: () => void;
   onLogout: () => void;
 }) {
@@ -1446,6 +1696,25 @@ function SyncScreen({
     setNameText(me?.name ?? '');
     setSavedName(me?.name ?? '');
   }, [me?.name]);
+
+  const removeEmail = (entry: EmailAddress) =>
+    ask('Remove email?', `${entry.email} will no longer log in to this account or get alerts.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setError('');
+          try {
+            await deleteEmail(token, entry.id);
+            setMe(await getMe(token));
+            setStatus(`${entry.email} removed.`);
+          } catch (e) {
+            failed(e, 'Could not remove the email.');
+          }
+        },
+      },
+    ]);
 
   const saveName = async () => {
     setError('');
@@ -1589,15 +1858,30 @@ function SyncScreen({
       <View style={styles.card}>
         <Text style={styles.label}>Logged in as</Text>
         <Text style={styles.value}>{me?.phone ?? '…'}</Text>
-        {me?.email ? (
-          <Text style={styles.hint}>
-            {me.email}
-            {me.features?.email_verification ? (me.email_verified ? '  ✓ verified' : '  (not verified)') : ''}
-          </Text>
-        ) : null}
-        {me?.email && me.features?.email_verification && !me.email_verified ? (
-          <Link title="Verify your email" onPress={onVerifyEmail} disabled={busy} />
-        ) : null}
+        <Text style={styles.label}>Emails (log in with any of them)</Text>
+        {(me?.emails ?? []).map((e) => (
+          <View key={e.id} style={styles.emailRow}>
+            <Text style={styles.emailText} numberOfLines={1}>
+              {e.email}
+              {me?.features?.email_verification ? (e.verified ? '  ✓ verified' : '  (not verified)') : ''}
+            </Text>
+            {me?.features?.email_verification && !e.verified ? (
+              <Pressable onPress={() => onVerifyEmail(e)} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.callLink}>Verify</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => removeEmail(e)} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.removeLink}>Remove</Text>
+            </Pressable>
+          </View>
+        ))}
+        {(me?.emails?.length ?? 0) < (me?.max_emails ?? 3) ? (
+          <View style={styles.buttonRow}>
+            <SecondaryButton title="Add email" onPress={onAddEmail} disabled={busy} />
+          </View>
+        ) : (
+          <Text style={styles.hint}>You've added the most emails allowed ({me?.max_emails ?? 3}). Remove one to add another.</Text>
+        )}
         <Text style={styles.label}>Your name (signs your SMS)</Text>
         <View style={styles.nameRow}>
           <TextInput
@@ -1632,6 +1916,11 @@ function SyncScreen({
           <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
         </View>
         <View style={styles.linkRow}>
+          <Link
+            title={me?.unread_notifications ? `Notifications (${me.unread_notifications} new)` : 'Notifications'}
+            onPress={onNotifications}
+            disabled={busy}
+          />
           <Link title="Sessions" onPress={onSessions} disabled={busy} />
           <Link title="Login attempts" onPress={onLoginHistory} disabled={busy} />
           <Link title="Change password" onPress={onChangePassword} disabled={busy} />
@@ -1971,6 +2260,11 @@ const styles = StyleSheet.create({
   link: { color: COLORS.primary, fontSize: 15, marginTop: 16, textAlign: 'center' },
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', columnGap: 16 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  emailRow: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 6 },
+  dotRead: { backgroundColor: COLORS.border },
+  noteBody: { fontSize: 14, color: COLORS.text, marginTop: 4 },
+  emailText: { flex: 1, fontSize: 15, color: COLORS.text },
+  removeLink: { color: COLORS.error, fontSize: 15, fontWeight: '600' },
   nameInput: { flex: 1 },
   showLink: { color: COLORS.primary, fontSize: 15 },
   spacer: { height: 16 },
