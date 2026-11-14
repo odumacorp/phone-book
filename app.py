@@ -13,9 +13,13 @@ import os
 import re
 import unicodedata
 import atexit
+import base64
 import hashlib
 import hmac
 import secrets
+import smtplib
+import ssl
+from email.message import EmailMessage
 import sqlite3
 import threading
 import time
@@ -24,8 +28,10 @@ import logging
 from functools import wraps
 from xml.sax.saxutils import quoteattr
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
-from flask import Flask, request, Response, g, jsonify, send_from_directory
+from flask import Flask, request, Response, g, jsonify, send_from_directory, session, render_template, redirect, url_for, abort
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -39,6 +45,15 @@ DATABASE_URL = os.getenv("DATABASE_URL")  # Postgres (Neon pooled); falls back t
 DATABASE_URL_UNPOOLED = os.getenv("DATABASE_URL_UNPOOLED") or DATABASE_URL  # direct, for schema setup
 DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "phonebook.db"))
 SECRET_KEY = os.getenv("SECRET_KEY", "")
+CONTACTS_KEY = os.getenv("CONTACTS_KEY", "")  # encrypts contacts at rest; never stored in the database
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")  # /admin is disabled until this is set
+# Email (for verification codes and notifications), sent over SMTP: e.g. Gmail with an app password,
+# Brevo, Mailgun or SendGrid SMTP. Nothing is sent until the admin turns the email features on.
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT") or 587)  # 587 = STARTTLS, 465 = TLS from the start
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+EMAIL_FROM = os.getenv("EMAIL_FROM") or SMTP_USER
 
 USSD_MAX_LEN = 182  # max characters a USSD screen can show
 PAGE_SIZE = 4  # contacts per screen; leaves room for "98. More" and the pick hint
@@ -71,6 +86,13 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ussd")
 
 app = Flask(__name__)
+app.secret_key = SECRET_KEY or None  # signs the admin login cookie
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=bool(os.getenv("RENDER")),  # https-only cookie on Render; plain http works locally
+    PERMANENT_SESSION_LIFETIME=8 * 3600,
+)
 
 sms = None
 voice = None
@@ -90,6 +112,118 @@ if DATABASE_URL:
 
 if not SECRET_KEY:
     log.warning("SECRET_KEY not set - mobile app login is disabled")
+
+
+# ---------------------------------------------------------------- feature switches
+# Optional features the admin turns on and off at /admin (stored in the settings table, so they
+# apply to every server process). All start off, so the prototype behaves as before.
+
+FEATURES = {
+    "encrypt_contacts": "Encrypt contacts at rest",
+    "email_verification": "Email verification",
+    "email_notifications": "Email notifications",
+}
+SETTINGS_TTL = 5  # seconds a process keeps a setting before reading it again
+_settings_cache = {}
+
+
+def feature_on(name, fresh=False):
+    cached = _settings_cache.get(name)
+    if cached and not fresh and time.time() - cached[1] < SETTINGS_TTL:
+        return cached[0]
+    row = fetch_one("SELECT value FROM settings WHERE key = ?", (name,))
+    on = bool(row) and row["value"] == "1"
+    _settings_cache[name] = (on, time.time())
+    return on
+
+
+def set_feature(name, on):
+    execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (name, "1" if on else "0"),
+    )
+    _settings_cache[name] = (on, time.time())
+
+
+# ---------------------------------------------------------------- contacts encrypted at rest (optional)
+# When the admin turns on "encrypt_contacts", every contact's name and phone number is stored as
+# AES-256-GCM ciphertext (random 96-bit nonce per value; the field name is authenticated, so a
+# name can't be swapped into a phone column), and existing contacts are encrypted. Turning it off
+# decrypts them again. Each row's `enc` flag says which form it is in, so reads work either way.
+# The key lives only in the server's environment (CONTACTS_KEY), never in the database.
+# Losing CONTACTS_KEY while contacts are encrypted means losing them: keep a copy somewhere safe.
+
+KEYGEN = "python -c \"import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode())\""
+
+
+def _contacts_cipher():
+    if not CONTACTS_KEY:
+        return None
+    try:
+        key = base64.urlsafe_b64decode(CONTACTS_KEY)
+    except ValueError:
+        key = b""
+    if len(key) != 32:
+        raise SystemExit(f"CONTACTS_KEY must be a 32-byte urlsafe base64 key. Generate one with:\n  {KEYGEN}")
+    return AESGCM(key)
+
+
+CONTACTS_CIPHER = _contacts_cipher()
+
+
+def seal(value, field):
+    nonce = os.urandom(12)
+    return base64.b64encode(nonce + CONTACTS_CIPHER.encrypt(nonce, value.encode(), field.encode())).decode()
+
+
+def unseal(value, field):
+    raw = base64.b64decode(value)
+    return CONTACTS_CIPHER.decrypt(raw[:12], raw[12:], field.encode()).decode()
+
+
+def encrypting():
+    return bool(CONTACTS_CIPHER) and feature_on("encrypt_contacts", fresh=True)
+
+
+def stored_contact(name, phone, encrypt=None):
+    """(name, phone, enc) as they should be written now: encrypted only while the feature is on."""
+    if encrypt if encrypt is not None else encrypting():
+        return seal(name, "name"), seal(phone, "phone"), 1
+    return name, phone, 0
+
+
+def open_contacts(rows):
+    """Database rows (with their enc flag) -> dicts with plain name and phone."""
+    return [
+        dict(r, name=unseal(r["name"], "name"), phone=unseal(r["phone"], "phone")) if r["enc"] else dict(r) for r in rows
+    ]
+
+
+def check_contacts_key(db):
+    """On startup: encrypted contacts need the key they were encrypted with."""
+    row = db.execute("SELECT name FROM contacts WHERE enc = 1 LIMIT 1").fetchone()
+    if not row:
+        return
+    if not CONTACTS_CIPHER:
+        raise SystemExit("Some contacts are encrypted: set CONTACTS_KEY to the key they were encrypted with.")
+    try:
+        unseal(row["name"], "name")
+    except (InvalidTag, ValueError):
+        raise SystemExit("CONTACTS_KEY does not match the key the stored contacts were encrypted with.")
+
+
+def convert_contacts(encrypt):
+    """Encrypt every plaintext contact (encrypt=True) or decrypt every encrypted one. Returns the count."""
+    rows = fetch_all("SELECT id, name, phone, enc FROM contacts WHERE enc = ?", (0 if encrypt else 1,))
+    if encrypt:
+        new = [(seal(r["name"], "name"), seal(r["phone"], "phone"), 1, r["id"], 0) for r in rows]
+    else:
+        new = [(r["name"], r["phone"], 0, r["id"], 1) for r in open_contacts(rows)]
+    db = get_db()
+    for i in range(0, len(new), 500):
+        db.cursor().executemany(sql("UPDATE contacts SET name = ?, phone = ?, enc = ? WHERE id = ? AND enc = ?"), new[i:i + 500])
+    db.commit()
+    return len(new)
 
 
 # ---------------------------------------------------------------- database
@@ -249,6 +383,27 @@ def init_db():
                created_at INTEGER NOT NULL,
                PRIMARY KEY (session_id, mac)
            )""",
+        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        f"""CREATE TABLE IF NOT EXISTS complaints (
+               id {id_col},
+               owner TEXT,
+               contact TEXT,
+               message TEXT NOT NULL,
+               status TEXT NOT NULL DEFAULT 'open',
+               reply TEXT,
+               ip TEXT,
+               created_at INTEGER NOT NULL,
+               updated_at INTEGER NOT NULL
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints(status, created_at)",
+        """CREATE TABLE IF NOT EXISTS email_codes (
+               phone TEXT PRIMARY KEY,
+               email TEXT NOT NULL,
+               code_hash TEXT NOT NULL,
+               expires_at INTEGER NOT NULL,
+               sent_at INTEGER NOT NULL,
+               attempts INTEGER NOT NULL DEFAULT 0
+           )""",
         """CREATE TABLE IF NOT EXISTS pending_calls (
                user_phone TEXT PRIMARY KEY,
                contact_phone TEXT NOT NULL,
@@ -276,6 +431,9 @@ def init_db():
         add_column(db, "ussd_resume", "pin_mac", "TEXT")
         add_column(db, "ussd_resume", "logged_out", "INTEGER NOT NULL DEFAULT 0")  # ended from the app
         add_column(db, "ussd_resume", "login_id", "INTEGER")  # the ussd_sessions row of this login
+        add_column(db, "contacts", "enc", "INTEGER NOT NULL DEFAULT 0")  # 1 = name/phone are ciphertext
+        add_column(db, "users", "email_verified", "INTEGER NOT NULL DEFAULT 0")
+        check_contacts_key(db)
         db.commit()
     finally:
         db.close()
@@ -288,24 +446,16 @@ def add_column(db, table, column, definition):
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-CONTACT_ORDER = "ORDER BY priority DESC, LOWER(name), id"  # priority contacts first
-
-
 def list_contacts(owner, priority_only=False):
+    """Decrypted contacts, priority ones first, then by name (sorted here: the database only holds ciphertext)."""
     only = " AND priority = 1" if priority_only else ""
-    return fetch_all(
-        f"SELECT id, name, phone, priority FROM contacts WHERE owner = ?{only} {CONTACT_ORDER}",
-        (owner,),
-    )
+    rows = open_contacts(fetch_all(f"SELECT id, name, phone, priority, enc FROM contacts WHERE owner = ?{only}", (owner,)))
+    return sorted(rows, key=lambda r: (-r["priority"], r["name"].lower(), r["id"]))
 
 
 def search_contacts(owner, query, priority_only=False):
-    only = " AND priority = 1" if priority_only else ""
-    return fetch_all(
-        f"SELECT id, name, phone, priority FROM contacts WHERE owner = ? AND LOWER(name) LIKE LOWER(?){only} "
-        f"{CONTACT_ORDER} LIMIT ?",
-        (owner, f"%{query}%", PAGE_SIZE),
-    )
+    query = query.lower()
+    return [r for r in list_contacts(owner, priority_only) if query in r["name"].lower()][:PAGE_SIZE]
 
 
 def priority_only(owner):
@@ -315,7 +465,7 @@ def priority_only(owner):
 
 def add_contact(owner, name, phone):
     g.action_done = True
-    execute("INSERT INTO contacts (owner, name, phone) VALUES (?, ?, ?)", (owner, name, phone))
+    execute("INSERT INTO contacts (owner, name, phone, enc) VALUES (?, ?, ?, ?)", (owner, *stored_contact(name, phone)))
 
 
 def delete_contact(owner, contact_id):
@@ -324,10 +474,8 @@ def delete_contact(owner, contact_id):
 
 
 def find_contact_by_phone(owner, phone):
-    return fetch_one(
-        "SELECT id, name, phone FROM contacts WHERE owner = ? AND phone = ? ORDER BY id LIMIT 1",
-        (owner, phone),
-    )
+    rows = open_contacts(fetch_all("SELECT id, name, phone, enc FROM contacts WHERE owner = ? ORDER BY id", (owner,)))
+    return next((r for r in rows if r["phone"] == phone), None)
 
 
 def save_pending_call(user_phone, contact_phone):
@@ -350,7 +498,7 @@ def pop_pending_call(user_phone):
 
 USER_COLUMNS = (
     "phone, pin_hash, failed_attempts, locked_until, show_others, name, "
-    "email, password_hash, pw_failed_attempts, pw_locked_until, token_epoch"
+    "email, password_hash, pw_failed_attempts, pw_locked_until, token_epoch, email_verified"
 )
 
 
@@ -592,6 +740,9 @@ def check_pin(phone, pin):
         )
         get_user(phone, fresh=True)  # a second try in this same request must see the new count
         if locked_until:
+            notify(phone, "USSD login locked after wrong PINs",
+                   f"{MAX_PIN_ATTEMPTS} wrong PINs were entered for your account on USSD, so USSD login is locked "
+                   "for 15 minutes.\n\nIf this wasn't you, change your USSD PIN in the app.")
             return None, "Too many wrong PINs. Try again in 15 min."
         return None, "Wrong phone number or PIN."
     if user["failed_attempts"]:
@@ -728,6 +879,10 @@ def log_login(owner, caller, network, session_id, error, resumed=False):
         "SELECT 1 AS x FROM login_logs WHERE owner = ? AND session_id = ? AND success = 1", (owner, session_id)
     ):
         return  # already logged this session (only happens without SECRET_KEY, when every screen re-checks)
+    if success and not resumed and caller != owner:
+        notify(owner, "USSD login from another phone",
+               f"Your Remote Phonebook account was opened on USSD from {masked(caller)}.\n\n"
+               "If this wasn't you, end the session in the app (Sessions) and change your USSD PIN.")
     if resumed:
         reason = "resumed"  # own phone, within the inactivity window: no PIN asked
     elif success:
@@ -1385,9 +1540,14 @@ def api_login():
     user = find_account(login)
     if not user:
         return api_error(NO_ACCOUNT, 401)
+    if "@" in login and feature_on("email_verification") and not user["email_verified"]:
+        return api_error("Verify your email in the app before logging in with it. Use your phone number for now.", 401)
     error = check_password(user, password)
     if error:
         return api_error(error, auth_status(error))
+    device = " ".join(request.headers.get("X-Device-Name", "").split())[:60] or "an unknown device"
+    notify(user["phone"], "New login to your Remote Phonebook account",
+           f"Your account was just logged into from {device}.\n\nIf this wasn't you, change your password in the app.")
     return logged_in(user)
 
 
@@ -1571,6 +1731,9 @@ def api_change_password():
     error = check_password(get_user(g.phone), current)
     if error:
         return api_error("Current password is wrong." if error.startswith("Wrong") else error, auth_status(error))
+    notify(g.phone, "Your password was changed",
+           "Your Remote Phonebook password was just changed, and your other devices were logged out.\n\n"
+           "If this wasn't you, reset your password with Forgot password in the app.")
     return logged_in(set_password(g.phone, new), same_session=True)
 
 
@@ -1586,6 +1749,9 @@ def api_change_pin():
     error = check_password(get_user(g.phone), str(body.get("password", "")))
     if error:
         return api_error("Password is wrong." if error.startswith("Wrong") else error, auth_status(error))
+    notify(g.phone, "Your USSD PIN was changed",
+           f"The PIN for {USSD_CODE_TEXT} on your Remote Phonebook account was just changed.\n\n"
+           "If this wasn't you, change your password and PIN in the app.")
     return logged_in(update_pin(g.phone, new_pin), same_session=True)
 
 
@@ -1717,6 +1883,9 @@ def api_reset_confirm():
     failed = use_code(user["phone"], str(body.get("code", "")).strip())
     if failed:
         return api_error(*failed)
+    notify(user["phone"], "Your password was reset",
+           "Your Remote Phonebook password was just reset with a code sent to your phone.\n\n"
+           "If this wasn't you, reset it again and contact support.")
     return logged_in(set_password(user["phone"], password))
 
 
@@ -1731,6 +1900,8 @@ def api_me():
         "show_others": bool(user["show_others"]),
         "name": user["name"],
         "email": user["email"],
+        "email_verified": bool(user["email_verified"]),
+        "features": {"email_verification": feature_on("email_verification") and email_configured()},
     })
 
 
@@ -1779,7 +1950,7 @@ def api_contacts():
 @app.route("/api/emergency", methods=["GET"])
 @require_auth
 def api_emergency():
-    saved = {r["phone"] for r in fetch_all("SELECT phone FROM contacts WHERE owner = ?", (g.phone,))}
+    saved = {r["phone"] for r in list_contacts(g.phone)}
     return jsonify({"numbers": [{"number": n, "label": label, "saved": n in saved} for n, label, _short in EMERGENCY_NUMBERS]})
 
 
@@ -1844,7 +2015,10 @@ def api_edit_contact(contact_id):
     existing = find_contact_by_phone(g.phone, phone)
     if existing and existing["id"] != contact_id:
         return api_error(f"{phone} is already saved as {existing['name']}.", 409)
-    execute("UPDATE contacts SET name = ?, phone = ? WHERE id = ? AND owner = ?", (name, phone, contact_id, g.phone))
+    execute(
+        "UPDATE contacts SET name = ?, phone = ?, enc = ? WHERE id = ? AND owner = ?",
+        (*stored_contact(name, phone), contact_id, g.phone),
+    )
     return jsonify({"id": contact_id, "name": name, "phone": phone, "priority": bool(contact["priority"])})
 
 
@@ -1885,10 +2059,13 @@ def api_settings():
         if not name:
             return api_error("Enter your name.", 400)
         execute("UPDATE users SET name = ? WHERE phone = ?", (name, g.phone))
-    if "email" in body:
-        execute("UPDATE users SET email = ? WHERE phone = ?", (email or None, g.phone))
+    if "email" in body and email != (get_user(g.phone)["email"] or ""):
+        execute("UPDATE users SET email = ?, email_verified = 0 WHERE phone = ?", (email or None, g.phone))
     user = get_user(g.phone, fresh=True)
-    return jsonify({"show_others": bool(user["show_others"]), "name": user["name"], "email": user["email"]})
+    return jsonify({
+        "show_others": bool(user["show_others"]), "name": user["name"], "email": user["email"],
+        "email_verified": bool(user["email_verified"]),
+    })
 
 
 @app.route("/api/contacts/sync", methods=["POST"])
@@ -1901,7 +2078,8 @@ def api_sync():
     if len(incoming) > MAX_SYNC_CONTACTS:
         return api_error(f"At most {MAX_SYNC_CONTACTS} contacts per sync.", 400)
 
-    seen = {row["phone"] for row in fetch_all("SELECT phone FROM contacts WHERE owner = ?", (g.phone,))}
+    seen = {row["phone"] for row in list_contacts(g.phone)}
+    encrypt = encrypting()
     new_rows, skipped = [], 0
     for item in incoming:
         if not isinstance(item, dict):
@@ -1913,12 +2091,12 @@ def api_sync():
             skipped += 1
             continue
         seen.add(phone)
-        new_rows.append((g.phone, name, phone))
+        new_rows.append((g.phone, *stored_contact(name, phone, encrypt)))
 
     if new_rows:
         db = get_db()
         cur = db.cursor()
-        cur.executemany(sql("INSERT INTO contacts (owner, name, phone) VALUES (?, ?, ?)"), new_rows)
+        cur.executemany(sql("INSERT INTO contacts (owner, name, phone, enc) VALUES (?, ?, ?, ?)"), new_rows)
         db.commit()
 
     return jsonify({"added": len(new_rows), "skipped": skipped, "total": len(seen)})
@@ -1927,6 +2105,362 @@ def api_sync():
 @app.route("/health", methods=["GET"])
 def health():
     return "Phone Book USSD service is running"
+
+
+# ---------------------------------------------------------------- email (optional)
+# Verification codes and security notifications by email. Both are off until the admin turns
+# them on at /admin, and both need SMTP_* settings, so the prototype never depends on email.
+
+USSD_CODE_TEXT = "*384*88041#"
+EMAIL_CODE_TTL = 15 * 60
+
+
+def email_configured():
+    return bool(SMTP_HOST and EMAIL_FROM)
+
+
+def send_email(to, subject, body):
+    """Send one email now; raises on failure (the admin test uses this to show the error)."""
+    msg = EmailMessage()
+    msg["From"] = f"Remote Phonebook <{EMAIL_FROM}>"
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body + "\n\n- Remote Phonebook (Oduma Corp)")
+    context = ssl.create_default_context()
+    if SMTP_PORT == 465:
+        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=context)
+    else:
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15)
+        server.starttls(context=context)
+    with server:
+        if SMTP_USER:
+            server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(msg)
+
+
+def send_email_async(to, subject, body):
+    """Email in the background, so USSD screens and app requests never wait on the mail server."""
+    def _send():
+        try:
+            send_email(to, subject, body)
+            log.info("email sent to %s: %s", to, subject)
+        except Exception:
+            log.exception("email to %s failed", to)
+
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def notify(owner, subject, body):
+    """A security notification to the account's email, when the admin has turned notifications on.
+
+    While email verification is on, only verified addresses get them.
+    """
+    try:
+        if not (email_configured() and feature_on("email_notifications")):
+            return
+        user = get_user(owner)
+        if not user or not user["email"]:
+            return
+        if feature_on("email_verification") and not user["email_verified"]:
+            return
+        send_email_async(user["email"], subject, body)
+    except Exception:
+        log.exception("notification for %s failed", owner)  # never break a login over an email
+
+
+def email_verification_error(user):
+    if not (feature_on("email_verification") and email_configured()):
+        return "Email verification is not available right now.", 503
+    if not user["email"]:
+        return "Add an email address first.", 400
+    if user["email_verified"]:
+        return "Your email is already verified.", 409
+    return None
+
+
+@app.route("/api/email/verify/request", methods=["POST"])
+@require_auth
+def api_email_verify_request():
+    """Email a 6-digit code to the account's address."""
+    user = get_user(g.phone)
+    failed = email_verification_error(user)
+    if failed:
+        return api_error(*failed)
+    now = int(time.time())
+    row = fetch_one("SELECT sent_at FROM email_codes WHERE phone = ?", (g.phone,))
+    if row and now - row["sent_at"] < RESET_RESEND_SECONDS:
+        return api_error("A code was just sent. Wait a minute before asking for another.", 429)
+    code = f"{secrets.randbelow(10 ** 6):06d}"
+    db = get_db()
+    db.execute(sql("DELETE FROM email_codes WHERE phone = ?"), (g.phone,))
+    db.execute(
+        sql("INSERT INTO email_codes (phone, email, code_hash, expires_at, sent_at) VALUES (?, ?, ?, ?, ?)"),
+        (g.phone, user["email"], generate_password_hash(code), now + EMAIL_CODE_TTL, now),
+    )
+    db.commit()
+    send_email_async(
+        user["email"], "Your Remote Phonebook verification code",
+        f"Your code is {code}. Enter it in the Remote Phonebook app to verify this email. It expires in 15 minutes.",
+    )
+    return jsonify({"sent": True, "email": user["email"]})
+
+
+@app.route("/api/email/verify/confirm", methods=["POST"])
+@require_auth
+def api_email_verify_confirm():
+    user = get_user(g.phone)
+    failed = email_verification_error(user)
+    if failed:
+        return api_error(*failed)
+    code = str(body_json().get("code", "")).strip()
+    row = fetch_one("SELECT email, code_hash, expires_at, attempts FROM email_codes WHERE phone = ?", (g.phone,))
+    if not row or row["expires_at"] < time.time() or row["email"] != user["email"]:
+        return api_error("This code has expired. Ask for a new one.", 400)
+    if not check_password_hash(row["code_hash"], code):
+        if row["attempts"] + 1 >= MAX_RESET_ATTEMPTS:
+            execute("DELETE FROM email_codes WHERE phone = ?", (g.phone,))
+            return api_error("Too many wrong codes. Ask for a new one.", 429)
+        execute("UPDATE email_codes SET attempts = attempts + 1 WHERE phone = ?", (g.phone,))
+        return api_error("Wrong code.", 401)
+    execute("DELETE FROM email_codes WHERE phone = ?", (g.phone,))
+    execute("UPDATE users SET email_verified = 1 WHERE phone = ? AND email = ?", (g.phone, row["email"]))
+    return jsonify({"email_verified": True, "email": row["email"]})
+
+
+# ---------------------------------------------------------------- complaints
+# Users report problems from the app (logged in) or the login screen (with a phone or email to
+# reply to). The admin reads and answers them at /admin; logged-in users see the answer in the app.
+
+COMPLAINT_MAX = 1000
+COMPLAINTS_PER_HOUR = 5
+
+
+def client_ip():
+    return (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()[:64]
+
+
+def optional_user():
+    """The logged-in user's phone if a valid app token was sent, else None."""
+    header = request.headers.get("Authorization", "")
+    if not SECRET_KEY or not header.startswith("Bearer "):
+        return None
+    try:
+        data = serializer().loads(header[7:], max_age=TOKEN_MAX_AGE)
+    except BadSignature:
+        return None
+    user = get_user(data.get("phone", ""))
+    return user["phone"] if user and token_version(user) == data.get("v") else None
+
+
+def complaint_json(r):
+    return {
+        "id": r["id"], "message": r["message"], "status": r["status"], "reply": r["reply"],
+        "created_at": r["created_at"], "updated_at": r["updated_at"],
+    }
+
+
+@app.route("/api/complaints", methods=["POST"])
+def api_add_complaint():
+    body = body_json()
+    message = str(body.get("message") or "").strip()[:COMPLAINT_MAX]
+    owner = optional_user()
+    contact = " ".join(str(body.get("contact") or "").split())[:120] or None
+    if len(message) < 5:
+        return api_error("Describe the problem in a few words.", 400)
+    if not owner and not contact:
+        return api_error("Enter a phone number or email so we can reply.", 400)
+    now, ip = int(time.time()), client_ip()
+    recent = fetch_one(
+        "SELECT COUNT(*) AS n FROM complaints WHERE (ip = ? OR owner = ?) AND created_at > ?", (ip, owner or "", now - 3600)
+    )
+    if recent["n"] >= COMPLAINTS_PER_HOUR:
+        return api_error("You've sent several reports already. Please wait a while.", 429)
+    execute(
+        "INSERT INTO complaints (owner, contact, message, ip, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (owner, contact, message, ip, now, now),
+    )
+    return jsonify({"sent": True}), 201
+
+
+@app.route("/api/complaints", methods=["GET"])
+@require_auth
+def api_complaints():
+    rows = fetch_all(
+        "SELECT id, message, status, reply, created_at, updated_at FROM complaints WHERE owner = ? "
+        "ORDER BY created_at DESC LIMIT 50",
+        (g.phone,),
+    )
+    return jsonify({"complaints": [complaint_json(r) for r in rows]})
+
+
+# ---------------------------------------------------------------- admin page (/admin)
+# One password (ADMIN_PASSWORD) for the developer/admin. Feature switches, complaint handling,
+# and a test email. Login is a signed, HttpOnly, SameSite=Strict cookie; forms carry a CSRF token.
+
+ADMIN_MAX_TRIES = 5
+_admin_failures = {}  # ip -> (count, locked_until); per process, enough to slow guessing
+
+
+def admin_enabled():
+    return bool(ADMIN_PASSWORD and SECRET_KEY)
+
+
+def is_admin():
+    return admin_enabled() and session.get("admin") is True
+
+
+def csrf_token():
+    if "csrf" not in session:
+        session["csrf"] = secrets.token_urlsafe(24)
+    return session["csrf"]
+
+
+def admin_post_ok():
+    return is_admin() and hmac.compare_digest(str(request.form.get("csrf", "")), session.get("csrf", "") or "x")
+
+
+def admin_stats():
+    one = lambda q, p=(): fetch_one(q, p)["n"]
+    return {
+        "users": one("SELECT COUNT(*) AS n FROM users"),
+        "contacts": one("SELECT COUNT(*) AS n FROM contacts"),
+        "encrypted": one("SELECT COUNT(*) AS n FROM contacts WHERE enc = 1"),
+        "emails": one("SELECT COUNT(*) AS n FROM users WHERE email IS NOT NULL"),
+        "verified": one("SELECT COUNT(*) AS n FROM users WHERE email IS NOT NULL AND email_verified = 1"),
+        "open": one("SELECT COUNT(*) AS n FROM complaints WHERE status = 'open'"),
+    }
+
+
+@app.after_request
+def admin_no_cache(response):
+    if request.path.startswith("/admin"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@app.route("/admin", methods=["GET"])
+@app.route("/admin/", methods=["GET"])
+def admin_page():
+    if not admin_enabled():
+        abort(404)
+    if not is_admin():
+        return render_template("admin.html", page="login", error=request.args.get("error"), csrf=csrf_token())
+    show = request.args.get("show", "open")
+    where = "" if show == "all" else "WHERE status = 'open'"
+    complaints = fetch_all(
+        f"SELECT id, owner, contact, message, status, reply, created_at, updated_at FROM complaints {where} "
+        "ORDER BY created_at DESC LIMIT 200"
+    )
+    return render_template(
+        "admin.html",
+        page="dashboard",
+        csrf=csrf_token(),
+        stats=admin_stats(),
+        features={name: feature_on(name, fresh=True) for name in FEATURES},
+        key_set=bool(CONTACTS_CIPHER),
+        email_ready=email_configured(),
+        email_from=EMAIL_FROM,
+        complaints=complaints,
+        show=show,
+        message=session.pop("flash", None),
+        fmt_time=lambda t: time.strftime("%d %b %Y %H:%M", time.gmtime(t + 3 * 3600)) + " EAT",
+        local=local_number,
+    )
+
+
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    if not admin_enabled():
+        abort(404)
+    ip, now = client_ip(), time.time()
+    count, locked_until = _admin_failures.get(ip, (0, 0))
+    if locked_until > now:
+        return redirect(url_for("admin_page", error="Too many wrong passwords. Try again in 15 minutes."))
+    if not hmac.compare_digest(str(request.form.get("csrf", "")), session.get("csrf", "") or "x"):
+        return redirect(url_for("admin_page", error="Your login form expired. Try again."))
+    if not hmac.compare_digest(str(request.form.get("password", "")).encode(), ADMIN_PASSWORD.encode()):
+        count += 1
+        _admin_failures[ip] = (0, now + LOCKOUT_SECONDS) if count >= ADMIN_MAX_TRIES else (count, 0)
+        log.warning("admin login failed from %s", ip)
+        return redirect(url_for("admin_page", error="Wrong password."))
+    _admin_failures.pop(ip, None)
+    session.clear()
+    session.permanent = True
+    session["admin"] = True
+    log.info("admin logged in from %s", ip)
+    return redirect(url_for("admin_page"))
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    if admin_post_ok():
+        session.clear()
+    return redirect(url_for("admin_page"))
+
+
+@app.route("/admin/feature", methods=["POST"])
+def admin_feature():
+    if not admin_post_ok():
+        abort(403)
+    name, on = request.form.get("name"), request.form.get("on") == "1"
+    if name not in FEATURES:
+        abort(400)
+    if name == "encrypt_contacts":
+        if on and not CONTACTS_CIPHER:
+            session["flash"] = "Set CONTACTS_KEY on the server first (see README), then turn encryption on."
+            return redirect(url_for("admin_page"))
+        set_feature(name, on)
+        changed = convert_contacts(encrypt=on) if CONTACTS_CIPHER else 0
+        session["flash"] = f"Contact encryption {'on' if on else 'off'}: {changed} contacts {'encrypted' if on else 'decrypted'}."
+    else:
+        if on and not email_configured():
+            session["flash"] = "Set SMTP_HOST and EMAIL_FROM (and SMTP_USER/SMTP_PASSWORD) on the server first."
+            return redirect(url_for("admin_page"))
+        set_feature(name, on)
+        session["flash"] = f"{FEATURES[name]} turned {'on' if on else 'off'}."
+    log.info("admin set %s = %s", name, on)
+    return redirect(url_for("admin_page"))
+
+
+@app.route("/admin/test-email", methods=["POST"])
+def admin_test_email():
+    if not admin_post_ok():
+        abort(403)
+    to = clean_email(request.form.get("to"))
+    if not to:
+        session["flash"] = "Enter a valid email address."
+    elif not email_configured():
+        session["flash"] = "Email is not configured (SMTP_HOST, EMAIL_FROM)."
+    else:
+        try:
+            send_email(to, "Remote Phonebook test email", "Email from the Remote Phonebook server works.")
+            session["flash"] = f"Test email sent to {to}."
+        except Exception as e:
+            log.exception("test email failed")
+            session["flash"] = f"Test email failed: {type(e).__name__}: {e}"[:300]
+    return redirect(url_for("admin_page"))
+
+
+@app.route("/admin/complaints/<int:complaint_id>", methods=["POST"])
+def admin_complaint(complaint_id):
+    if not admin_post_ok():
+        abort(403)
+    row = fetch_one("SELECT owner, status, reply FROM complaints WHERE id = ?", (complaint_id,))
+    if not row:
+        abort(404)
+    reply = str(request.form.get("reply") or "").strip()[:COMPLAINT_MAX] or row["reply"]
+    status = request.form.get("status") if request.form.get("status") in ("open", "resolved") else row["status"]
+    execute(
+        "UPDATE complaints SET reply = ?, status = ?, updated_at = ? WHERE id = ?",
+        (reply, status, int(time.time()), complaint_id),
+    )
+    if row["owner"] and (reply != row["reply"] or status != row["status"]):
+        notify(row["owner"], f"Your report was {'resolved' if status == 'resolved' else 'updated'}",
+               (f"Our reply: {reply}\n\n" if reply else "") + "See it in the app under Report a problem.")
+    session["flash"] = f"Report #{complaint_id} saved."
+    return redirect(url_for("admin_page", show=request.form.get("show", "open")))
 
 
 # ---------------------------------------------------------------- website
