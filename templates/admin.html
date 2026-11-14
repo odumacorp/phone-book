@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Remote Phonebook Admin</title>
+<link rel="icon" href="/favicon.png">
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --text: #1b2430; --muted: #5d6b7a; --line: #dfe4ea;
+    --primary: #1565c0; --primary-text: #ffffff; --ok: #1b7f3b; --ok-bg: #e5f4ea;
+    --warn: #8a5a00; --warn-bg: #fff4dc; --bad: #b3261e; --bad-bg: #fdecea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11161c; --card: #1a2129; --text: #e6ebf0; --muted: #9aa7b4; --line: #2c3540;
+      --primary: #64a8f0; --primary-text: #0b1520; --ok: #7fd49a; --ok-bg: #173323;
+      --warn: #f0c46a; --warn-bg: #3a2e12; --bad: #f2a29c; --bad-bg: #3d1a18;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .feature { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--line); }
+  .feature:first-of-type { border-top: 0; padding-top: 0; }
+  .feature p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px; margin-left: 6px; vertical-align: 1px; }
+  .on { color: var(--ok); background: var(--ok-bg); }
+  .off { color: var(--muted); background: var(--bg); border: 1px solid var(--line); }
+  .warn { color: var(--warn); background: var(--warn-bg); }
+  .open { color: var(--warn); background: var(--warn-bg); }
+  .resolved { color: var(--ok); background: var(--ok-bg); }
+  button, .btn { font: inherit; border-radius: 8px; padding: 7px 14px; cursor: pointer; border: 1px solid var(--primary); background: var(--primary); color: var(--primary-text); white-space: nowrap; }
+  button.secondary { background: transparent; color: var(--primary); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  input, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+  textarea { min-height: 64px; resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row input { flex: 1 1 200px; width: auto; }
+  .flash { background: var(--ok-bg); color: var(--ok); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; }
+  .error { background: var(--bad-bg); color: var(--bad); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .complaint { border-top: 1px solid var(--line); padding: 14px 0; }
+  .complaint:first-of-type { border-top: 0; }
+  .complaint .msg { white-space: pre-wrap; margin: 6px 0 10px; overflow-wrap: anywhere; }
+  .tabs a { color: var(--primary); text-decoration: none; margin-right: 12px; }
+  .tabs a.active { font-weight: 700; text-decoration: underline; }
+  .login { max-width: 360px; margin: 12vh auto 0; }
+  code { font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+{% if page == "login" %}
+  <div class="card login">
+    <h1>Remote Phonebook Admin</h1>
+    <p class="muted">Developer and admin access only.</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/admin/login">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="pw" class="muted">Admin password</label>
+      <input id="pw" type="password" name="password" autocomplete="current-password" autofocus required>
+      <p><button type="submit">Log in</button></p>
+    </form>
+  </div>
+{% else %}
+  <header>
+    <h1>Remote Phonebook Admin</h1>
+    <form method="post" action="/admin/logout">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="secondary" type="submit">Log out</button>
+    </form>
+  </header>
+
+  {% if message %}<div class="flash">{{ message }}</div>{% endif %}
+
+  <section class="card">
+    <h2>Overview</h2>
+    <div class="stats">
+      <div class="stat"><b>{{ stats.users }}</b><span>Accounts</span></div>
+      <div class="stat"><b>{{ stats.contacts }}</b><span>Contacts</span></div>
+      <div class="stat"><b>{{ stats.encrypted }}</b><span>Encrypted contacts</span></div>
+      <div class="stat"><b>{{ stats.verified }} / {{ stats.emails }}</b><span>Verified emails</span></div>
+      <div class="stat"><b>{{ stats.open }}</b><span>Open reports</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Features</h2>
+
+    <div class="feature">
+      <div>
+        <strong>Encrypt contacts at rest</strong>
+        {% if features.encrypt_contacts %}<span class="pill on">On</span>{% else %}<span class="pill off">Off</span>{% endif %}
+        <p>Names and numbers are stored as AES-256-GCM ciphertext; the key (<code>CONTACTS_KEY</code>) stays on the server.
+          Turning it on encrypts every stored contact, turning it off decrypts them.
+          {{ stats.encrypted }} of {{ stats.contacts }} contacts are encrypted now.</p>
+        {% if not key_set %}<p><span class="pill warn">CONTACTS_KEY not set</span> Add it to the server environment first.</p>{% endif %}
+        {% if features.encrypt_contacts and stats.encrypted < stats.contacts %}<p><span class="pill warn">Some contacts are still plain text</span> Turn it on again to encrypt them.</p>{% endif %}
+      </div>
+      <form method="post" action="/admin/feature">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="name" value="encrypt_contacts">
+        {% if features.encrypt_contacts %}
+          <input type="hidden" name="on" value="{{ '1' if stats.encrypted < stats.contacts else '0' }}">
+          <button type="submit" class="secondary">{{ 'Encrypt the rest' if stats.encrypted < stats.contacts else 'Turn off' }}</button>
+        {% else %}
+          <input type="hidden" name="on" value="1">
+          <button type="submit" {% if not key_set %}disabled{% endif %}>Turn on</button>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="feature">
+      <div>
+        <strong>Email verification</strong>
+        {% if features.email_verification %}<span class="pill on">On</span>{% else %}<span class="pill off">Off</span>{% endif %}
+        <p>Users confirm their email with a 6-digit code in the app. While on, only verified emails can be used to log in
+          and receive notifications. Phone-number login always works.</p>
+        {% if not email_ready %}<p><span class="pill warn">Email not configured</span> Set <code>SMTP_HOST</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>EMAIL_FROM</code>.</p>{% endif %}
+      </div>
+      <form method="post" action="/admin/feature">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="name" value="email_verification">
+        <input type="hidden" name="on" value="{{ '0' if features.email_verification else '1' }}">
+        <button type="submit" class="{{ 'secondary' if features.email_verification else '' }}" {% if not email_ready and not features.email_verification %}disabled{% endif %}>
+          {{ 'Turn off' if features.email_verification else 'Turn on' }}</button>
+      </form>
+    </div>
+
+    <div class="feature">
+      <div>
+        <strong>Email notifications</strong>
+        {% if features.email_notifications %}<span class="pill on">On</span>{% else %}<span class="pill off">Off</span>{% endif %}
+        <p>Emails the account on a new app login, password or PIN change, password reset, USSD login from another phone,
+          a USSD PIN lockout, and when you answer their report.</p>
+      </div>
+      <form method="post" action="/admin/feature">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="name" value="email_notifications">
+        <input type="hidden" name="on" value="{{ '0' if features.email_notifications else '1' }}">
+        <button type="submit" class="{{ 'secondary' if features.email_notifications else '' }}" {% if not email_ready and not features.email_notifications %}disabled{% endif %}>
+          {{ 'Turn off' if features.email_notifications else 'Turn on' }}</button>
+      </form>
+    </div>
+
+    {% if email_ready %}
+    <div class="feature">
+      <div style="flex:1">
+        <strong>Send a test email</strong>
+        <p>Checks the SMTP settings. Sent from {{ email_from }}.</p>
+        <form method="post" action="/admin/test-email" class="row" style="margin-top:8px">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="email" name="to" placeholder="you@example.com" required>
+          <button type="submit" class="secondary">Send test</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Reports and complaints</h2>
+    <p class="tabs">
+      <a href="/admin?show=open" class="{{ 'active' if show != 'all' else '' }}">Open ({{ stats.open }})</a>
+      <a href="/admin?show=all" class="{{ 'active' if show == 'all' else '' }}">All</a>
+    </p>
+    {% for c in complaints %}
+      <div class="complaint">
+        <div class="row">
+          <strong>#{{ c.id }}</strong>
+          <span class="pill {{ c.status }}">{{ c.status|capitalize }}</span>
+          <span class="muted">{{ fmt_time(c.created_at) }} ·
+            {% if c.owner %}Account {{ local(c.owner) }}{% else %}Not logged in{% endif %}
+            {% if c.contact %} · Reply to: {{ c.contact }}{% endif %}</span>
+        </div>
+        <div class="msg">{{ c.message }}</div>
+        <form method="post" action="/admin/complaints/{{ c.id }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="show" value="{{ show }}">
+          <textarea name="reply" placeholder="{{ 'Reply (shown to the user in the app)' if c.owner else 'Notes (the user is not logged in: reply to them directly)' }}">{{ c.reply or '' }}</textarea>
+          <div class="row" style="margin-top:8px">
+            {% if c.status == 'open' %}
+              <button type="submit" name="status" value="resolved">Save and resolve</button>
+              <button type="submit" name="status" value="open" class="secondary">Save reply</button>
+            {% else %}
+              <button type="submit" name="status" value="resolved" class="secondary">Save reply</button>
+              <button type="submit" name="status" value="open" class="secondary">Reopen</button>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    {% else %}
+      <p class="muted">No {{ 'open ' if show != 'all' else '' }}reports.</p>
+    {% endfor %}
+  </section>
+{% endif %}
+</main>
+</body>
+</html>

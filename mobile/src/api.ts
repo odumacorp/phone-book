@@ -8,7 +8,15 @@ const DEVICE_NAME = deviceName();
 
 export type SyncContact = { name: string; phone: string };
 export type SyncResult = { added: number; skipped: number; total: number };
-export type Me = { phone: string; contacts: number; show_others: boolean; name: string | null; email: string | null };
+export type Me = {
+  phone: string;
+  contacts: number;
+  show_others: boolean;
+  name: string | null;
+  email: string | null;
+  email_verified?: boolean;
+  features?: { email_verification?: boolean }; // switched on by the admin
+};
 export type Contact = { id: number; name: string; phone: string; priority: boolean };
 export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean };
 export type UssdLogin = {
@@ -175,6 +183,29 @@ export function normalizePhone(raw: string): string | null {
   if (phone.startsWith('0')) return '+254' + phone.slice(1);
   return '+' + phone;
 }
+
+/** Email verification (only when the admin has turned it on): a 6-digit code goes to the account's email. */
+export const requestEmailCode = (token: string) =>
+  request<{ sent: boolean; email: string }>('/api/email/verify/request', { method: 'POST' }, token);
+
+export const confirmEmailCode = (token: string, code: string) =>
+  request<{ email_verified: boolean }>('/api/email/verify/confirm', { method: 'POST', body: JSON.stringify({ code }) }, token);
+
+export type Complaint = {
+  id: number;
+  message: string;
+  status: 'open' | 'resolved';
+  reply: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+/** Report a problem. Without a login, `contact` (phone or email) says where to reply. */
+export const sendComplaint = (message: string, contact: string, token?: string | null) =>
+  request<{ sent: boolean }>('/api/complaints', { method: 'POST', body: JSON.stringify({ message, contact }) }, token);
+
+/** The user's own reports, newest first, with the admin's reply. */
+export const getComplaints = (token: string) => request<{ complaints: Complaint[] }>('/api/complaints', {}, token);
 
 export const syncContacts = (token: string, contacts: SyncContact[]) =>
   request<SyncResult>('/api/contacts/sync', { method: 'POST', body: JSON.stringify({ contacts }) }, token);

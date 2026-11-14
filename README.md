@@ -74,11 +74,46 @@ gunicorn -w 2 -b 0.0.0.0:8000 app:app
 Set `DATABASE_URL` to a Postgres connection string (e.g. Neon) in production. Without it,
 contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must be set for app logins.
 
-`gunicorn.conf.py` (read automatically) gives each worker 4 threads. Database waits are capped at
-5 seconds, so if Neon is slow a USSD screen answers "busy, please dial again" before the network
-gives up. On Render's free plan the server sleeps after 15 minutes idle and waking takes longer
-than a USSD screen may; `.github/workflows/keep-awake.yml` pings `/health` every 10 minutes to
-prevent that (a paid plan never sleeps).
+## Admin page (`/admin`)
+
+Set `ADMIN_PASSWORD` (and `SECRET_KEY`) on the server, then open `/admin` (e.g.
+https://phone-book.odumacorp.com/admin). Without `ADMIN_PASSWORD` the page doesn't exist (404).
+It's for the developer/admin only: one password, a signed HttpOnly SameSite=Strict cookie (8 hours),
+CSRF tokens on every form, and 5 wrong passwords lock that address out for 15 minutes.
+
+- **Overview:** accounts, contacts, encrypted contacts, verified emails, open reports.
+- **Feature switches** (all **off** by default, so the prototype demo behaves exactly as before):
+  - **Encrypt contacts at rest:** see below.
+  - **Email verification:** users confirm their email with a 6-digit code (app: *Verify your email*).
+    While on, an email can only be used to log in once verified; phone-number login always works.
+  - **Email notifications:** emails the account on a new app login, password change/reset, PIN change,
+    USSD login from another phone, a USSD PIN lockout, and when the admin answers their report.
+    While verification is on, only verified emails get them.
+  - **Send a test email** to check the SMTP settings.
+- **Reports and complaints:** users send them from the app (*Report a problem*, also on the login screen
+  for people who can't log in, with a phone/email to reply to). The admin replies, resolves or reopens;
+  logged-in users see the reply in the app (and by email if notifications are on). 5 reports per hour
+  per user/address.
+
+The email switches can't be turned on until email is configured: `SMTP_HOST`, `SMTP_PORT` (587 STARTTLS
+or 465 TLS), `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM` (e.g. Gmail with an app password, Brevo, Mailgun).
+Emails are sent in the background, so USSD screens never wait on the mail server.
+
+### Encrypting contacts at rest (optional)
+
+When the admin turns it on, every contact's name and phone number is stored as **AES-256-GCM**
+ciphertext (a random nonce per value, authenticated so it can't be altered or moved between fields),
+and all existing contacts are encrypted. Turning it off decrypts them again. The key is
+`CONTACTS_KEY`, kept only in the server's environment (Render env vars / local `.env`), never in the
+database, so a copy of the database or a backup shows only ciphertext. Contacts are decrypted on the
+server only when the owner's USSD screen or app request needs them; search and sorting happen there.
+
+- Generate a key: `python -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`
+- The switch is disabled until `CONTACTS_KEY` is set. Every server using the same database needs the same key.
+- While any contact is encrypted, the server won't start without the matching key.
+- **Keep a copy of the key somewhere safe**: without it, encrypted contacts can't be recovered.
+- Only contacts are encrypted (not account names, emails or login history), and the database provider's
+  restore history may still hold older plaintext copies for its retention period.
 
 ## Website: https://phone-book.odumacorp.com/
 
@@ -150,5 +185,10 @@ API (JSON):
 - `POST /api/settings` `{show_others?, name?, email?}`; name signs the user's SMS; email ("" removes it) is a login;
   when show_others is false, USSD lists/search/delete/SMS-me show only priority contacts
 - `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
+- `POST /api/email/verify/request` -> emails a 6-digit code (only while the admin has email verification on)
+- `POST /api/email/verify/confirm` `{code}` -> `{email_verified: true}`; `GET /api/me` also returns `email_verified`
+  and `features.email_verification`
+- `POST /api/complaints` `{message, contact?}` -> a report to the admin (token optional; without one, `contact` is required)
+- `GET /api/complaints` -> `{complaints: [{id, message, status, reply, created_at, updated_at}]}`: the user's own reports
 
 Send the token as `Authorization: Bearer <token>`. Codes stop working after 5 wrong tries.

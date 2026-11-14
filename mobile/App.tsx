@@ -19,6 +19,7 @@ import {
 
 import {
   ApiError,
+  Complaint,
   Contact,
   EmergencyNumber,
   Me,
@@ -32,6 +33,10 @@ import {
   changePassword,
   changePin,
   clearToken,
+  confirmEmailCode,
+  getComplaints,
+  requestEmailCode,
+  sendComplaint,
   deleteContact,
   deleteContacts,
   editContact,
@@ -83,7 +88,9 @@ type View_ =
   | 'addContact'
   | 'editContact'
   | 'emergency'
-  | 'pickContacts';
+  | 'pickContacts'
+  | 'verifyEmail'
+  | 'report';
 
 export default function App() {
   return (
@@ -157,8 +164,20 @@ function Main() {
     content = <RegisterScreen onDone={(t) => loggedIn(t, 'Account created. Tap Sync contacts to upload them.')} onCancel={back} />;
   else if (view === 'reset')
     content = <ResetPasswordScreen onDone={(t) => loggedIn(t, 'Password reset. You are logged in.')} onCancel={back} />;
+  else if (view === 'report') content = <ReportScreen token={token} onBack={back} onLogout={logout} />;
   else if (!token)
-    content = <LoginScreen onLogin={loggedIn} onRegister={() => setView('register')} onForgot={() => setView('reset')} />;
+    content = (
+      <LoginScreen
+        onLogin={loggedIn}
+        onRegister={() => setView('register')}
+        onForgot={() => setView('reset')}
+        onReport={() => setView('report')}
+      />
+    );
+  else if (view === 'verifyEmail')
+    content = (
+      <VerifyEmailScreen token={token} email={me?.email ?? ''} onDone={() => loggedIn(token, 'Email verified.')} onCancel={back} onLogout={logout} />
+    );
   else if (view === 'changePassword')
     content = <ChangePasswordScreen token={token} onDone={(t) => loggedIn(t, 'Password changed.')} onCancel={back} onLogout={logout} />;
   else if (view === 'logins') content = <LoginHistoryScreen token={token} onBack={back} onLogout={logout} />;
@@ -213,6 +232,14 @@ function Main() {
         onSessions={() => {
           setNotice('');
           setView('sessions');
+        }}
+        onVerifyEmail={() => {
+          setNotice('');
+          setView('verifyEmail');
+        }}
+        onReport={() => {
+          setNotice('');
+          setView('report');
         }}
         onLogout={logout}
       />
@@ -274,10 +301,12 @@ function LoginScreen({
   onLogin,
   onRegister,
   onForgot,
+  onReport,
 }: {
   onLogin: (token: string) => Promise<void>;
   onRegister: () => void;
   onForgot: () => void;
+  onReport: () => void;
 }) {
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
@@ -297,6 +326,7 @@ function LoginScreen({
       <Button title="Log in" onPress={submit} busy={busy} disabled={!account.trim() || !password} />
       <Link title="Forgot password?" onPress={onForgot} disabled={busy} />
       <Link title="New here? Create an account" onPress={onRegister} disabled={busy} />
+      <Link title="Report a problem" onPress={onReport} disabled={busy} />
     </Form>
   );
 }
@@ -431,6 +461,141 @@ function ResetPasswordScreen({ onDone, onCancel }: { onDone: (token: string) => 
         </>
       )}
       <Link title="Back" onPress={onCancel} disabled={busy} />
+    </Form>
+  );
+}
+
+/** Email verification (when the admin has turned it on): send a code to the account's email, then enter it. */
+function VerifyEmailScreen({
+  token,
+  email,
+  onDone,
+  onCancel,
+  onLogout,
+}: {
+  token: string;
+  email: string;
+  onDone: () => void;
+  onCancel: () => void;
+  onLogout: () => void;
+}) {
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState('');
+  const { busy, error, run } = useForm();
+
+  const guard = async (action: () => Promise<void>) =>
+    run(async () => {
+      try {
+        await action();
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401 && e.message.startsWith('Please log in')) return onLogout();
+        throw e;
+      }
+    });
+
+  return (
+    <Form>
+      <Text style={styles.heading}>Verify your email</Text>
+      <Text style={styles.hint}>
+        We'll email a 6-digit code to {email}. Verified emails can be used to log in and get security alerts.
+      </Text>
+      {sent ? (
+        <>
+          <Text style={styles.status}>Code sent. Check your inbox (and spam folder).</Text>
+          <CodeField value={code} onChange={setCode} />
+        </>
+      ) : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {sent ? (
+        <>
+          <Button title="Verify" onPress={() => guard(async () => { await confirmEmailCode(token, code); onDone(); })} busy={busy} disabled={code.length !== 6} />
+          <Link title="Send a new code" onPress={() => guard(async () => { await requestEmailCode(token); })} disabled={busy} />
+        </>
+      ) : (
+        <Button title="Send code" onPress={() => guard(async () => { await requestEmailCode(token); setSent(true); })} busy={busy} />
+      )}
+      <Link title="Cancel" onPress={onCancel} disabled={busy} />
+    </Form>
+  );
+}
+
+/** Report a problem to the admin. Logged-in users also see their earlier reports and the replies. */
+function ReportScreen({ token, onBack, onLogout }: { token: string | null; onBack: () => void; onLogout: () => void }) {
+  const [message, setMessage] = useState('');
+  const [contact, setContact] = useState('');
+  const [sentNote, setSentNote] = useState('');
+  const [reports, setReports] = useState<Complaint[] | null>(null);
+  const { busy, error, setError, run } = useForm();
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    try {
+      setReports((await getComplaints(token)).complaints);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return onLogout();
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const submit = () => {
+    if (message.trim().length < 5) return setError('Describe the problem in a few words.');
+    if (!token && !isEmail(contact) && !isValidPhone(contact))
+      return setError(`Enter an email, or a phone number as ${PHONE_FORMAT}, so we can reply.`);
+    run(async () => {
+      await sendComplaint(message.trim(), contact.trim(), token);
+      setMessage('');
+      setSentNote(token ? 'Thanks, your report was sent. The reply will appear below.' : 'Thanks, your report was sent. We will contact you.');
+      await load();
+    });
+  };
+
+  return (
+    <Form>
+      <Text style={styles.heading}>Report a problem</Text>
+      <Text style={styles.hint}>Tell us what went wrong or what you'd like changed. The team reads every report.</Text>
+      <Text style={styles.label}>What happened?</Text>
+      <TextInput
+        style={[styles.input, { minHeight: 96, textAlignVertical: 'top' }]}
+        value={message}
+        onChangeText={setMessage}
+        multiline
+        maxLength={1000}
+        placeholder="e.g. USSD search doesn't find my contact"
+      />
+      {!token ? (
+        <>
+          <Text style={styles.label}>Your phone number or email (so we can reply)</Text>
+          <TextInput
+            style={styles.input}
+            value={contact}
+            onChangeText={setContact}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            placeholder="07XX XXX XXX or you@example.com"
+          />
+        </>
+      ) : null}
+      {sentNote ? <Text style={styles.status}>{sentNote}</Text> : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button title="Send report" onPress={submit} busy={busy} disabled={!message.trim()} />
+      <Link title="Back" onPress={onBack} disabled={busy} />
+      {token && reports && reports.length ? (
+        <>
+          <Text style={[styles.label, { marginTop: 16 }]}>Your reports</Text>
+          {reports.map((r) => (
+            <View key={r.id} style={{ paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border }}>
+              <Text style={styles.hint}>
+                {new Date(r.created_at * 1000).toLocaleString()} · {r.status === 'resolved' ? 'Resolved' : 'Open'}
+              </Text>
+              <Text style={styles.rowName}>{r.message}</Text>
+              {r.reply ? <Text style={styles.status}>Reply: {r.reply}</Text> : null}
+            </View>
+          ))}
+        </>
+      ) : null}
     </Form>
   );
 }
@@ -1243,6 +1408,8 @@ function SyncScreen({
   onPickContacts,
   onLoginHistory,
   onSessions,
+  onVerifyEmail,
+  onReport,
   onLogout,
 }: {
   token: string;
@@ -1257,6 +1424,8 @@ function SyncScreen({
   onPickContacts: () => void;
   onLoginHistory: () => void;
   onSessions: () => void;
+  onVerifyEmail: () => void;
+  onReport: () => void;
   onLogout: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -1420,7 +1589,15 @@ function SyncScreen({
       <View style={styles.card}>
         <Text style={styles.label}>Logged in as</Text>
         <Text style={styles.value}>{me?.phone ?? '…'}</Text>
-        {me?.email ? <Text style={styles.hint}>{me.email}</Text> : null}
+        {me?.email ? (
+          <Text style={styles.hint}>
+            {me.email}
+            {me.features?.email_verification ? (me.email_verified ? '  ✓ verified' : '  (not verified)') : ''}
+          </Text>
+        ) : null}
+        {me?.email && me.features?.email_verification && !me.email_verified ? (
+          <Link title="Verify your email" onPress={onVerifyEmail} disabled={busy} />
+        ) : null}
         <Text style={styles.label}>Your name (signs your SMS)</Text>
         <View style={styles.nameRow}>
           <TextInput
@@ -1459,6 +1636,7 @@ function SyncScreen({
           <Link title="Login attempts" onPress={onLoginHistory} disabled={busy} />
           <Link title="Change password" onPress={onChangePassword} disabled={busy} />
           <Link title="Change USSD PIN" onPress={onChangePin} disabled={busy} />
+          <Link title="Report a problem" onPress={onReport} disabled={busy} />
         </View>
       </View>
       <Text style={styles.sectionTitle}>
