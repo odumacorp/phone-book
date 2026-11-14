@@ -16,11 +16,10 @@ Typing a name on the main menu searches straight away.
 The network ends each USSD session after a few minutes (sooner if a screen sits idle); that limit
 can't be changed. A *login*, though, stays active for **40 seconds of inactivity** between screens:
 redialling from your own phone within 40 seconds shows "Welcome back: 1. Continue where you left off,
-2. Main menu, 0. Log out" with no PIN. A borrowed phone always asks for the PIN again. After 40 seconds
+2. Main menu, 0. Log out"; choosing 1 or 2 asks for the PIN first. A borrowed phone asks for the PIN straight away. After 40 seconds
 without activity the user is logged out (the saved login is deleted and the next dial says so); a PIN
 change in the app or a lockout also ends it.
 A screen that just saved/sent/deleted continues at the main menu instead, so nothing runs twice.
-Continues without a PIN appear in the app's login history as "Continued".
 
 After login, every screen offers `0. Back`, `00. Home` and `000. Log out` (000 ends the login at once), and results (saved, sent, deleted)
 keep the session open instead of ending it. Actions only run once: input typed after a result
