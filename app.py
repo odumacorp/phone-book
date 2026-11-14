@@ -396,6 +396,40 @@ def init_db():
                updated_at INTEGER NOT NULL
            )""",
         "CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints(status, created_at)",
+        f"""CREATE TABLE IF NOT EXISTS user_emails (
+               id {id_col},
+               owner TEXT NOT NULL,
+               email TEXT NOT NULL UNIQUE,
+               verified INTEGER NOT NULL DEFAULT 0,
+               created_at INTEGER NOT NULL
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_user_emails_owner ON user_emails(owner)",
+        f"""CREATE TABLE IF NOT EXISTS notifications (
+               id {id_col},
+               owner TEXT NOT NULL,
+               kind TEXT NOT NULL,
+               title TEXT NOT NULL,
+               body TEXT NOT NULL,
+               created_at INTEGER NOT NULL,
+               read_at INTEGER
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_owner ON notifications(owner, created_at)",
+        # Everything sent to users, for the admin: what, to whom, and how it was delivered
+        f"""CREATE TABLE IF NOT EXISTS notification_log (
+               id {id_col},
+               owner TEXT,
+               recipient TEXT,
+               kind TEXT NOT NULL,
+               title TEXT NOT NULL,
+               body TEXT NOT NULL,
+               inapp_id INTEGER,
+               emails TEXT,
+               email_status TEXT NOT NULL DEFAULT 'none',
+               note TEXT,
+               complaint_id INTEGER,
+               created_at INTEGER NOT NULL
+           )""",
+        "CREATE INDEX IF NOT EXISTS idx_notification_log_time ON notification_log(created_at)",
         """CREATE TABLE IF NOT EXISTS email_codes (
                phone TEXT PRIMARY KEY,
                email TEXT NOT NULL,
@@ -433,6 +467,20 @@ def init_db():
         add_column(db, "ussd_resume", "login_id", "INTEGER")  # the ussd_sessions row of this login
         add_column(db, "contacts", "enc", "INTEGER NOT NULL DEFAULT 0")  # 1 = name/phone are ciphertext
         add_column(db, "users", "email_verified", "INTEGER NOT NULL DEFAULT 0")
+        # Notification choices: the in-app inbox, and which kinds (security alerts, messages from the team)
+        add_column(db, "users", "notify_inapp", "INTEGER NOT NULL DEFAULT 1")
+        add_column(db, "users", "notify_security", "INTEGER NOT NULL DEFAULT 1")
+        add_column(db, "users", "notify_messages", "INTEGER NOT NULL DEFAULT 1")
+        add_column(db, "user_emails", "notify", "INTEGER NOT NULL DEFAULT 1")  # this email gets notifications
+        # Accounts can have up to MAX_EMAILS emails (user_emails); move the old single users.email there
+        db.execute(
+            sql(
+                "INSERT INTO user_emails (owner, email, verified, created_at) SELECT phone, email, email_verified, ? "
+                "FROM users u WHERE email IS NOT NULL AND NOT EXISTS (SELECT 1 FROM user_emails e WHERE e.email = u.email)"
+            ),
+            (int(time.time()),),
+        )
+        db.execute("UPDATE users SET email = NULL, email_verified = 0 WHERE email IS NOT NULL")
         check_contacts_key(db)
         db.commit()
     finally:
@@ -498,7 +546,8 @@ def pop_pending_call(user_phone):
 
 USER_COLUMNS = (
     "phone, pin_hash, failed_attempts, locked_until, show_others, name, "
-    "email, password_hash, pw_failed_attempts, pw_locked_until, token_epoch, email_verified"
+    "email, password_hash, pw_failed_attempts, pw_locked_until, token_epoch, email_verified, "
+    "notify_inapp, notify_security, notify_messages"
 )
 
 
@@ -1450,9 +1499,23 @@ def clean_email(raw):
     return email if len(email) <= 254 and EMAIL_RE.match(email) else None
 
 
+MAX_EMAILS = 3  # emails per account; each can be used to log in
+
+
 def email_owner(email):
-    row = fetch_one("SELECT phone FROM users WHERE email = ?", (email,))
-    return row["phone"] if row else None
+    row = fetch_one("SELECT owner FROM user_emails WHERE email = ?", (email,))
+    return row["owner"] if row else None
+
+
+def user_emails(owner):
+    return fetch_all("SELECT id, email, verified, notify FROM user_emails WHERE owner = ? ORDER BY created_at, id", (owner,))
+
+
+def emails_json(owner):
+    return [
+        {"id": r["id"], "email": r["email"], "verified": bool(r["verified"]), "notify": bool(r["notify"])}
+        for r in user_emails(owner)
+    ]
 
 
 def find_account(login):
@@ -1540,7 +1603,8 @@ def api_login():
     user = find_account(login)
     if not user:
         return api_error(NO_ACCOUNT, 401)
-    if "@" in login and feature_on("email_verification") and not user["email_verified"]:
+    email_row = fetch_one("SELECT verified FROM user_emails WHERE email = ?", (clean_email(login),)) if "@" in login else None
+    if email_row and feature_on("email_verification") and not email_row["verified"]:
         return api_error("Verify your email in the app before logging in with it. Use your phone number for now.", 401)
     error = check_password(user, password)
     if error:
@@ -1846,10 +1910,10 @@ def api_register_confirm():
         return api_error(*failed)
     if not set_pin(phone, pin):
         return api_error(ALREADY_REGISTERED, 409)
-    execute(
-        "UPDATE users SET name = ?, email = ?, password_hash = ? WHERE phone = ?",
-        (name, clean_email(body.get("email")) or None, generate_password_hash(password), phone),
-    )
+    execute("UPDATE users SET name = ?, password_hash = ? WHERE phone = ?", (name, generate_password_hash(password), phone))
+    email = clean_email(body.get("email"))
+    if email:
+        execute("INSERT INTO user_emails (owner, email, created_at) VALUES (?, ?, ?)", (phone, email, int(time.time())))
     return logged_in(get_user(phone, fresh=True))
 
 
@@ -1894,14 +1958,17 @@ def api_reset_confirm():
 def api_me():
     row = fetch_one("SELECT COUNT(*) AS n FROM contacts WHERE owner = ?", (g.phone,))
     user = get_user(g.phone)
+    emails = emails_json(g.phone)
     return jsonify({
         "phone": g.phone,
         "contacts": row["n"],
         "show_others": bool(user["show_others"]),
         "name": user["name"],
-        "email": user["email"],
-        "email_verified": bool(user["email_verified"]),
+        "email": emails[0]["email"] if emails else None,  # the first one (older app versions)
+        "emails": emails,
+        "max_emails": MAX_EMAILS,
         "features": {"email_verification": feature_on("email_verification") and email_configured()},
+        "unread_notifications": unread_count(g.phone),
     })
 
 
@@ -2040,16 +2107,10 @@ def api_set_priority(contact_id):
 @app.route("/api/settings", methods=["POST"])
 @require_auth
 def api_settings():
-    """Update show_others, name (signs the user's SMS) and/or email (app login)."""
+    """Update show_others and/or name (signs the user's SMS). Emails: /api/emails."""
     body = request.get_json(silent=True) or {}
-    if not {"show_others", "name", "email"} & set(body):
-        return api_error("Nothing to update.", 400)
-    if "email" in body:
-        email = clean_email(body["email"])
-        if email is None:
-            return api_error("Enter a valid email address, or leave it empty.", 400)
-        if email and email_owner(email) not in (None, g.phone):
-            return api_error(EMAIL_TAKEN, 409)
+    if not {"show_others", "name"} & set(body):
+        return api_error("Nothing to update." + (" Emails are managed with /api/emails." if "email" in body else ""), 400)
     if "show_others" in body:
         if not isinstance(body["show_others"], bool):
             return api_error("Expected show_others: true or false.", 400)
@@ -2059,13 +2120,8 @@ def api_settings():
         if not name:
             return api_error("Enter your name.", 400)
         execute("UPDATE users SET name = ? WHERE phone = ?", (name, g.phone))
-    if "email" in body and email != (get_user(g.phone)["email"] or ""):
-        execute("UPDATE users SET email = ?, email_verified = 0 WHERE phone = ?", (email or None, g.phone))
     user = get_user(g.phone, fresh=True)
-    return jsonify({
-        "show_others": bool(user["show_others"]), "name": user["name"], "email": user["email"],
-        "email_verified": bool(user["email_verified"]),
-    })
+    return jsonify({"show_others": bool(user["show_others"]), "name": user["name"]})
 
 
 @app.route("/api/contacts/sync", methods=["POST"])
@@ -2150,81 +2206,298 @@ def send_email_async(to, subject, body):
     threading.Thread(target=_send, daemon=True).start()
 
 
-def notify(owner, subject, body):
-    """A security notification to the account's email, when the admin has turned notifications on.
+NOTIFICATION_DAYS = 90  # the in-app inbox keeps this long
 
-    While email verification is on, only verified addresses get them.
+
+def notification_emails(owner):
+    """The account's emails that get notifications: switched on by the user (and verified, while
+    the admin has email verification on)."""
+    if not email_configured():
+        return []
+    verified_only = feature_on("email_verification")
+    return [r["email"] for r in user_emails(owner) if r["notify"] and (r["verified"] or not verified_only)]
+
+
+NOTIFICATION_LOG_DAYS = 90
+LOG_KINDS = {"security": "Security alert", "message": "Message from the team", "reply": "Reply to a report"}
+
+
+def insert_id(query, params):
+    """INSERT and return the new row's id (Postgres RETURNING / SQLite lastrowid)."""
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(sql(query + (" RETURNING id" if DATABASE_URL else "")), params)
+    new_id = cur.fetchone()["id"] if DATABASE_URL else cur.lastrowid
+    db.commit()
+    return new_id
+
+
+def log_notification(owner, recipient, kind, title, body, inapp_id=None, emails=(), note=None, complaint_id=None):
+    now = int(time.time())
+    log_id = insert_id(
+        "INSERT INTO notification_log (owner, recipient, kind, title, body, inapp_id, emails, email_status, note, "
+        "complaint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (owner, recipient, kind, title[:200], body[:2000], inapp_id, ", ".join(emails) or None,
+         "sending" if emails else "none", note, complaint_id, now),
+    )
+    execute("DELETE FROM notification_log WHERE created_at < ?", (now - NOTIFICATION_LOG_DAYS * 86400,))
+    return log_id
+
+
+def notify(owner, subject, body, kind="security", log_kind=None, complaint_id=None):
+    """Tell the account holder something, where they chose to hear it.
+
+    kind "security" (logins, password/PIN changes, lockouts) or "messages" (replies to reports and
+    messages from the team). Each goes to the in-app inbox and the user's chosen emails, unless the
+    user turned that kind off. Security emails also need the admin's "Email notifications" switch;
+    messages from the team are emailed whenever email is configured. Every one is logged for the
+    admin (log_kind: security / message / reply). Returns the emails it went to.
     """
+    log_kind = log_kind or ("security" if kind == "security" else "message")
     try:
-        if not (email_configured() and feature_on("email_notifications")):
-            return
         user = get_user(owner)
-        if not user or not user["email"]:
-            return
-        if feature_on("email_verification") and not user["email_verified"]:
-            return
-        send_email_async(user["email"], subject, body)
+        if not user:
+            return []
+        if not user["notify_security" if kind == "security" else "notify_messages"]:
+            what = "security alerts" if kind == "security" else "messages from the team"
+            log_notification(owner, owner, log_kind, subject, body, note=f"Not delivered: the user turned off {what}",
+                             complaint_id=complaint_id)
+            return []
+        now, inapp_id, notes = int(time.time()), None, []
+        if user["notify_inapp"]:
+            inapp_id = insert_id(
+                "INSERT INTO notifications (owner, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?)",
+                (owner, kind, subject[:200], body[:2000], now),
+            )
+            execute("DELETE FROM notifications WHERE owner = ? AND created_at < ?", (owner, now - NOTIFICATION_DAYS * 86400))
+        else:
+            notes.append("in-app list turned off by the user")
+        emails = []
+        if kind == "security" and not feature_on("email_notifications"):
+            notes.append("security emails are switched off in admin")
+        elif not email_configured():
+            notes.append("email isn't configured")
+        else:
+            emails = notification_emails(owner)
+            if not emails:
+                notes.append("no email chosen" + (" or verified" if feature_on("email_verification") else ""))
+        log_id = log_notification(owner, owner, log_kind, subject, body, inapp_id, emails,
+                                  "; ".join(notes).capitalize() or None, complaint_id)
+        send_emails_async(
+            [(to, subject, body + "\n\nChoose where you get notifications in the app: Notifications.") for to in emails], log_id
+        )
+        return emails
     except Exception:
-        log.exception("notification for %s failed", owner)  # never break a login over an email
+        log.exception("notification for %s failed", owner)  # never break a login over a notification
+        return []
 
 
-def email_verification_error(user):
+def send_emails_async(messages, log_id=None):
+    """Several emails, one after another in one background thread; the outcome goes in the admin log."""
+    if not messages:
+        return
+
+    def _send():
+        failures = []
+        for to, subject, body in messages:
+            try:
+                send_email(to, subject, body)
+                log.info("email sent to %s: %s", to, subject)
+            except Exception as e:
+                log.exception("email to %s failed", to)
+                failures.append(f"{to}: {type(e).__name__}: {e}"[:300])
+        if log_id is None:
+            return
+        status = "sent" if not failures else "failed" if len(failures) == len(messages) else "partial"
+        try:
+            with app.app_context():
+                execute(
+                    "UPDATE notification_log SET email_status = ?, note = COALESCE(note || '; ', '') || ? WHERE id = ?"
+                    if failures else "UPDATE notification_log SET email_status = ? WHERE id = ?",
+                    (status, "; ".join(failures), log_id) if failures else (status, log_id),
+                )
+        except Exception:
+            log.exception("could not record email status")
+
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def notifications_json(owner):
+    rows = fetch_all(
+        "SELECT id, kind, title, body, created_at, read_at FROM notifications WHERE owner = ? "
+        "ORDER BY created_at DESC, id DESC LIMIT 100",
+        (owner,),
+    )
+    return [
+        {"id": r["id"], "kind": r["kind"], "title": r["title"], "body": r["body"], "created_at": r["created_at"],
+         "read": r["read_at"] is not None}
+        for r in rows
+    ]
+
+
+def unread_count(owner):
+    return fetch_one("SELECT COUNT(*) AS n FROM notifications WHERE owner = ? AND read_at IS NULL", (owner,))["n"]
+
+
+def notification_prefs(owner):
+    user = get_user(owner, fresh=True)
+    return {
+        "inapp": bool(user["notify_inapp"]),
+        "security": bool(user["notify_security"]),
+        "messages": bool(user["notify_messages"]),
+        "emails": emails_json(owner),
+        "email_available": email_configured(),
+        "verified_only": feature_on("email_verification"),
+    }
+
+
+@app.route("/api/notifications", methods=["GET"])
+@require_auth
+def api_notifications():
+    """The in-app inbox (newest first) and where the user gets notifications."""
+    return jsonify({
+        "notifications": notifications_json(g.phone),
+        "unread": unread_count(g.phone),
+        "prefs": notification_prefs(g.phone),
+        "keep_days": NOTIFICATION_DAYS,
+    })
+
+
+@app.route("/api/notifications/read", methods=["POST"])
+@require_auth
+def api_notifications_read():
+    execute("UPDATE notifications SET read_at = ? WHERE owner = ? AND read_at IS NULL", (int(time.time()), g.phone))
+    return jsonify({"unread": 0})
+
+
+@app.route("/api/notifications/clear", methods=["POST"])
+@require_auth
+def api_notifications_clear():
+    execute("DELETE FROM notifications WHERE owner = ?", (g.phone,))
+    return jsonify({"cleared": True})
+
+
+@app.route("/api/notifications/prefs", methods=["POST"])
+@require_auth
+def api_notification_prefs():
+    """{inapp?, security?, messages?: bool} and/or {email_id, notify: bool} for one email.
+    {all: false} stops every notification (all kinds, inbox and emails); {all: true} turns them back on."""
+    body = body_json()
+    flags = {"inapp": "notify_inapp", "security": "notify_security", "messages": "notify_messages"}
+    if "all" in body:
+        if not isinstance(body["all"], bool):
+            return api_error("Expected all: true or false.", 400)
+        on = int(body["all"])
+        execute("UPDATE users SET notify_inapp = ?, notify_security = ?, notify_messages = ? WHERE phone = ?", (on, on, on, g.phone))
+        execute("UPDATE user_emails SET notify = ? WHERE owner = ?", (on, g.phone))
+    for key, column in flags.items():
+        if key in body:
+            if not isinstance(body[key], bool):
+                return api_error(f"Expected {key}: true or false.", 400)
+            execute(f"UPDATE users SET {column} = ? WHERE phone = ?", (int(body[key]), g.phone))
+    if "email_id" in body:
+        if not isinstance(body.get("notify"), bool):
+            return api_error("Expected notify: true or false.", 400)
+        if not fetch_one("SELECT 1 AS x FROM user_emails WHERE id = ? AND owner = ?", (body["email_id"], g.phone)):
+            return api_error("Email not found.", 404)
+        execute("UPDATE user_emails SET notify = ? WHERE id = ? AND owner = ?", (int(body["notify"]), body["email_id"], g.phone))
+    return jsonify(notification_prefs(g.phone))
+
+
+@app.route("/api/emails", methods=["GET"])
+@require_auth
+def api_emails():
+    return jsonify({"emails": emails_json(g.phone), "max_emails": MAX_EMAILS})
+
+
+@app.route("/api/emails", methods=["POST"])
+@require_auth
+def api_add_email():
+    """Add an email (up to MAX_EMAILS). Any of them can be used to log in."""
+    email = clean_email(body_json().get("email"))
+    if not email:
+        return api_error("Enter a valid email address.", 400)
+    owner = email_owner(email)
+    if owner == g.phone:
+        return api_error("You've already added this email.", 409)
+    if owner:
+        return api_error(EMAIL_TAKEN, 409)
+    if len(user_emails(g.phone)) >= MAX_EMAILS:
+        return api_error(f"You can add up to {MAX_EMAILS} emails. Remove one first.", 409)
+    execute("INSERT INTO user_emails (owner, email, created_at) VALUES (?, ?, ?)", (g.phone, email, int(time.time())))
+    row = fetch_one("SELECT id, email, verified FROM user_emails WHERE email = ?", (email,))
+    return jsonify({"id": row["id"], "email": row["email"], "verified": False}), 201
+
+
+@app.route("/api/emails/<int:email_id>", methods=["DELETE"])
+@require_auth
+def api_delete_email(email_id):
+    row = fetch_one("SELECT email FROM user_emails WHERE id = ? AND owner = ?", (email_id, g.phone))
+    if not row:
+        return api_error("Email not found.", 404)
+    execute("DELETE FROM user_emails WHERE id = ? AND owner = ?", (email_id, g.phone))
+    execute("DELETE FROM email_codes WHERE phone = ? AND email = ?", (g.phone, row["email"]))
+    return jsonify({"deleted": email_id})
+
+
+def email_to_verify(email_id):
+    """(the user_emails row, None) or (None, (error, status))."""
     if not (feature_on("email_verification") and email_configured()):
-        return "Email verification is not available right now.", 503
-    if not user["email"]:
-        return "Add an email address first.", 400
-    if user["email_verified"]:
-        return "Your email is already verified.", 409
-    return None
+        return None, ("Email verification is not available right now.", 503)
+    row = fetch_one("SELECT id, email, verified FROM user_emails WHERE id = ? AND owner = ?", (email_id, g.phone))
+    if not row:
+        return None, ("Email not found.", 404)
+    if row["verified"]:
+        return None, ("This email is already verified.", 409)
+    return row, None
 
 
 @app.route("/api/email/verify/request", methods=["POST"])
 @require_auth
 def api_email_verify_request():
-    """Email a 6-digit code to the account's address."""
-    user = get_user(g.phone)
-    failed = email_verification_error(user)
+    """Email a 6-digit code to one of the account's addresses ({id})."""
+    row, failed = email_to_verify(body_json().get("id"))
     if failed:
         return api_error(*failed)
     now = int(time.time())
-    row = fetch_one("SELECT sent_at FROM email_codes WHERE phone = ?", (g.phone,))
-    if row and now - row["sent_at"] < RESET_RESEND_SECONDS:
+    pending = fetch_one("SELECT sent_at FROM email_codes WHERE phone = ?", (g.phone,))
+    if pending and now - pending["sent_at"] < RESET_RESEND_SECONDS:
         return api_error("A code was just sent. Wait a minute before asking for another.", 429)
     code = f"{secrets.randbelow(10 ** 6):06d}"
     db = get_db()
     db.execute(sql("DELETE FROM email_codes WHERE phone = ?"), (g.phone,))
     db.execute(
         sql("INSERT INTO email_codes (phone, email, code_hash, expires_at, sent_at) VALUES (?, ?, ?, ?, ?)"),
-        (g.phone, user["email"], generate_password_hash(code), now + EMAIL_CODE_TTL, now),
+        (g.phone, row["email"], generate_password_hash(code), now + EMAIL_CODE_TTL, now),
     )
     db.commit()
     send_email_async(
-        user["email"], "Your Remote Phonebook verification code",
+        row["email"], "Your Remote Phonebook verification code",
         f"Your code is {code}. Enter it in the Remote Phonebook app to verify this email. It expires in 15 minutes.",
     )
-    return jsonify({"sent": True, "email": user["email"]})
+    return jsonify({"sent": True, "email": row["email"]})
 
 
 @app.route("/api/email/verify/confirm", methods=["POST"])
 @require_auth
 def api_email_verify_confirm():
-    user = get_user(g.phone)
-    failed = email_verification_error(user)
+    body = body_json()
+    row, failed = email_to_verify(body.get("id"))
     if failed:
         return api_error(*failed)
-    code = str(body_json().get("code", "")).strip()
-    row = fetch_one("SELECT email, code_hash, expires_at, attempts FROM email_codes WHERE phone = ?", (g.phone,))
-    if not row or row["expires_at"] < time.time() or row["email"] != user["email"]:
+    code = str(body.get("code", "")).strip()
+    pending = fetch_one("SELECT email, code_hash, expires_at, attempts FROM email_codes WHERE phone = ?", (g.phone,))
+    if not pending or pending["expires_at"] < time.time() or pending["email"] != row["email"]:
         return api_error("This code has expired. Ask for a new one.", 400)
-    if not check_password_hash(row["code_hash"], code):
-        if row["attempts"] + 1 >= MAX_RESET_ATTEMPTS:
+    if not check_password_hash(pending["code_hash"], code):
+        if pending["attempts"] + 1 >= MAX_RESET_ATTEMPTS:
             execute("DELETE FROM email_codes WHERE phone = ?", (g.phone,))
             return api_error("Too many wrong codes. Ask for a new one.", 429)
         execute("UPDATE email_codes SET attempts = attempts + 1 WHERE phone = ?", (g.phone,))
         return api_error("Wrong code.", 401)
     execute("DELETE FROM email_codes WHERE phone = ?", (g.phone,))
-    execute("UPDATE users SET email_verified = 1 WHERE phone = ? AND email = ?", (g.phone, row["email"]))
-    return jsonify({"email_verified": True, "email": row["email"]})
+    execute("UPDATE user_emails SET verified = 1 WHERE id = ?", (row["id"],))
+    return jsonify({"id": row["id"], "email": row["email"], "verified": True})
 
 
 # ---------------------------------------------------------------- complaints
@@ -2325,8 +2598,9 @@ def admin_stats():
         "users": one("SELECT COUNT(*) AS n FROM users"),
         "contacts": one("SELECT COUNT(*) AS n FROM contacts"),
         "encrypted": one("SELECT COUNT(*) AS n FROM contacts WHERE enc = 1"),
-        "emails": one("SELECT COUNT(*) AS n FROM users WHERE email IS NOT NULL"),
-        "verified": one("SELECT COUNT(*) AS n FROM users WHERE email IS NOT NULL AND email_verified = 1"),
+        "emails": one("SELECT COUNT(*) AS n FROM user_emails"),
+        "verified": one("SELECT COUNT(*) AS n FROM user_emails WHERE verified = 1"),
+        "with_email": one("SELECT COUNT(DISTINCT owner) AS n FROM user_emails WHERE notify = 1"),
         "open": one("SELECT COUNT(*) AS n FROM complaints WHERE status = 'open'"),
     }
 
@@ -2443,11 +2717,88 @@ def admin_test_email():
     return redirect(url_for("admin_page"))
 
 
+@app.route("/admin/notifications", methods=["GET"])
+def admin_notifications():
+    """Everything sent to users: security alerts, messages from the team and replies to reports."""
+    if not admin_enabled():
+        abort(404)
+    if not is_admin():
+        return redirect(url_for("admin_page"))
+    kind = request.args.get("kind", "all")
+    who = str(request.args.get("who") or "").strip()
+    where, params = [], []
+    if kind in LOG_KINDS:
+        where.append("l.kind = ?")
+        params.append(kind)
+    if who:
+        phone = login_phone(who)
+        where.append("(l.owner = ? OR l.recipient LIKE ? OR l.emails LIKE ?)")
+        params += [phone or who, f"%{who}%", f"%{who}%"]
+    rows = fetch_all(
+        "SELECT l.id, l.owner, l.recipient, l.kind, l.title, l.body, l.inapp_id, l.emails, l.email_status, l.note, "
+        "l.complaint_id, l.created_at, n.read_at, n.id AS still_listed, c.message AS complaint_message "
+        "FROM notification_log l LEFT JOIN notifications n ON n.id = l.inapp_id "
+        "LEFT JOIN complaints c ON c.id = l.complaint_id "
+        + ("WHERE " + " AND ".join(where) + " " if where else "")
+        + "ORDER BY l.created_at DESC, l.id DESC LIMIT 300",
+        tuple(params),
+    )
+    counts = {r["kind"]: r["n"] for r in fetch_all("SELECT kind, COUNT(*) AS n FROM notification_log GROUP BY kind")}
+    return render_template(
+        "admin.html",
+        page="notifications",
+        csrf=csrf_token(),
+        rows=rows,
+        kind=kind,
+        who=who,
+        kinds=LOG_KINDS,
+        counts=counts,
+        keep_days=NOTIFICATION_LOG_DAYS,
+        stats=admin_stats(),
+        fmt_time=lambda t: time.strftime("%d %b %Y %H:%M", time.gmtime(t + 3 * 3600)) + " EAT",
+        local=local_number,
+    )
+
+
+@app.route("/admin/message", methods=["POST"])
+def admin_message():
+    """A message from the team: to every account, or one account (phone number). It goes to each
+    user's in-app inbox and their chosen emails (unless they turned off messages from the team)."""
+    if not admin_post_ok():
+        abort(403)
+    subject = " ".join(str(request.form.get("subject") or "").split())[:150]
+    body = str(request.form.get("body") or "").strip()[:2000]
+    to = str(request.form.get("to") or "all").strip()
+    if not subject or not body:
+        session["flash"] = "Enter a subject and a message."
+        return redirect(url_for("admin_page") + "#message")
+    if to == "all":
+        owners = [r["phone"] for r in fetch_all("SELECT phone FROM users")]
+    else:
+        phone = login_phone(to)
+        if not phone or not get_user(phone):
+            session["flash"] = f"No account for {to}."
+            return redirect(url_for("admin_page") + "#message")
+        owners = [phone]
+    emailed = reached = 0
+    for owner in owners:
+        sent = notify(owner, subject, body, kind="messages")
+        emailed += len(sent)
+        reached += 1 if get_user(owner)["notify_messages"] else 0
+    session["flash"] = (
+        f"Message sent to {reached} of {len(owners)} account{'s' if len(owners) != 1 else ''} "
+        f"({emailed} email{'s' if emailed != 1 else ''}"
+        + ("" if email_configured() else "; email isn't configured, so in the app only") + ")."
+    )
+    log.info("admin message to %s: %s", to, subject)
+    return redirect(url_for("admin_page") + "#message")
+
+
 @app.route("/admin/complaints/<int:complaint_id>", methods=["POST"])
 def admin_complaint(complaint_id):
     if not admin_post_ok():
         abort(403)
-    row = fetch_one("SELECT owner, status, reply FROM complaints WHERE id = ?", (complaint_id,))
+    row = fetch_one("SELECT owner, contact, message, status, reply FROM complaints WHERE id = ?", (complaint_id,))
     if not row:
         abort(404)
     reply = str(request.form.get("reply") or "").strip()[:COMPLAINT_MAX] or row["reply"]
@@ -2456,10 +2807,24 @@ def admin_complaint(complaint_id):
         "UPDATE complaints SET reply = ?, status = ?, updated_at = ? WHERE id = ?",
         (reply, status, int(time.time()), complaint_id),
     )
-    if row["owner"] and (reply != row["reply"] or status != row["status"]):
-        notify(row["owner"], f"Your report was {'resolved' if status == 'resolved' else 'updated'}",
-               (f"Our reply: {reply}\n\n" if reply else "") + "See it in the app under Report a problem.")
-    session["flash"] = f"Report #{complaint_id} saved."
+    sent_to = []
+    if reply != row["reply"] or status != row["status"]:
+        subject = f"Your report #{complaint_id} was {'resolved' if status == 'resolved' else 'answered'}"
+        text = f"You wrote:\n{row['message']}\n\n" + (f"Our reply:\n{reply}\n\n" if reply else "")
+        if row["owner"]:
+            sent_to = notify(row["owner"], subject, text + "You can also see it in the app under Report a problem.",
+                             kind="messages", log_kind="reply", complaint_id=complaint_id)
+        elif reply and email_configured() and clean_email(row["contact"]):
+            sent_to = [clean_email(row["contact"])]
+            log_id = log_notification(None, row["contact"], "reply", subject, text, emails=sent_to, complaint_id=complaint_id)
+            send_emails_async([(sent_to[0], subject, text)], log_id)
+        elif reply:
+            log_notification(None, row["contact"], "reply", subject, text, complaint_id=complaint_id,
+                             note="Not sent: they left a phone number, not an email, and weren't logged in"
+                             if row["contact"] else "Not sent: no way to reach them")
+    session["flash"] = f"Report #{complaint_id} saved." + (
+        f" Reply emailed to {', '.join(sent_to)}." if sent_to else " (Not emailed: no email to send it to.)" if reply else ""
+    )
     return redirect(url_for("admin_page", show=request.form.get("show", "open")))
 
 

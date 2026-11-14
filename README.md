@@ -86,13 +86,20 @@ CSRF tokens on every form, and 5 wrong passwords lock that address out for 15 mi
   - **Encrypt contacts at rest:** see below.
   - **Email verification:** users confirm their email with a 6-digit code (app: *Verify your email*).
     While on, an email can only be used to log in once verified; phone-number login always works.
-  - **Email notifications:** emails the account on a new app login, password change/reset, PIN change,
-    USSD login from another phone, a USSD PIN lockout, and when the admin answers their report.
-    While verification is on, only verified emails get them.
+  - **Email notifications:** security alerts by email (new app login, password change/reset, PIN change,
+    USSD login from another phone, a USSD PIN lockout). They always appear in the app's Notifications.
   - **Send a test email** to check the SMTP settings.
+- **Message users:** a subject and message to every account (`all`) or one phone number. It goes to each
+  user's in-app Notifications and the emails they chose (whenever email is configured).
+- **Sent notifications and replies** (`/admin/notifications`): everything sent to users in the last 90 days:
+  security alerts, messages from the team and replies to reports (with the report they answer). For each: the
+  account, whether it reached the in-app list and whether the user has read it (or cleared it), which emails it
+  went to and whether they were sent or failed (with the error), or why it wasn't delivered (e.g. the user turned
+  that kind off). Filter by type, phone number or email.
 - **Reports and complaints:** users send them from the app (*Report a problem*, also on the login screen
   for people who can't log in, with a phone/email to reply to). The admin replies, resolves or reopens;
-  logged-in users see the reply in the app (and by email if notifications are on). 5 reports per hour
+  the reply goes to the user's Notifications and their chosen emails (or, for a report sent without
+  logging in, to the email they left). 5 reports per hour
   per user/address.
 
 The email switches can't be turned on until email is configured: `SMTP_HOST`, `SMTP_PORT` (587 STARTTLS
@@ -137,7 +144,12 @@ An Expo (React Native) app for managing the phone book that USSD uses.
 - **Change password** (other devices are logged out) and **Change USSD PIN** (needs the password, so a
   forgotten PIN can simply be replaced).
 - Wrong passwords lock the app login for 15 minutes after 5 tries, separately from the USSD PIN lockout.
-- Emails aren't verified (the server can't send email yet); they are only a login name and must be unique.
+- **Notifications:** an in-app list (kept 90 days; unread count on the home screen) of security alerts,
+  replies to reports and messages from the team. Users choose what to get (security alerts, messages from
+  the team), where (in the app, each of their emails), or *Stop all notifications*. While the admin has
+  email verification on, only verified emails get them.
+- **Emails:** up to 3 per account (*Add email*, *Remove*), each usable to log in; an email can be on only one
+  account. When the admin turns on email verification, each one is confirmed with a code (*Verify*).
 - **Log out** (top bar): this device, or everywhere (all app logins and any USSD session).
 - **Sessions:** each app device and USSD login with login time, logout time (and why), duration, and its own Log out.
 - **USSD logins:** shows the active USSD session with a "Log out USSD session" button, and lists every USSD login attempt on the account: the phone that dialled
@@ -182,12 +194,20 @@ API (JSON):
 - `DELETE /api/contacts/<id>`
 - `POST /api/contacts/delete` `{ids: [...]}` -> `{deleted: [...]}`; bulk delete (up to 500), ids that are not yours are ignored
 - `POST /api/contacts/<id>/priority` `{priority: true|false}`; at most 5 priority contacts
-- `POST /api/settings` `{show_others?, name?, email?}`; name signs the user's SMS; email ("" removes it) is a login;
+- `POST /api/settings` `{show_others?, name?}`; name signs the user's SMS (emails: `/api/emails`);
   when show_others is false, USSD lists/search/delete/SMS-me show only priority contacts
 - `POST /api/contacts/sync` `{contacts: [{name, phone}]}` -> `{added, skipped, total}`; numbers already saved are skipped
-- `POST /api/email/verify/request` -> emails a 6-digit code (only while the admin has email verification on)
-- `POST /api/email/verify/confirm` `{code}` -> `{email_verified: true}`; `GET /api/me` also returns `email_verified`
-  and `features.email_verification`
+- `GET /api/emails` -> `{emails: [{id, email, verified}], max_emails}`; up to 3 emails per account, each one a login
+- `POST /api/emails` `{email}` -> the new email (409 if it's on any account, or the account already has 3)
+- `DELETE /api/emails/<id>` -> removes it (it stops working as a login and gets no more alerts)
+- `POST /api/email/verify/request` `{id}` -> emails a 6-digit code to that address (only while the admin has
+  email verification on)
+- `POST /api/email/verify/confirm` `{id, code}` -> `{id, email, verified: true}`; `GET /api/me` also returns
+  `emails`, `max_emails` and `features.email_verification`
+- `GET /api/notifications` -> `{notifications: [{id, kind, title, body, created_at, read}], unread, prefs, keep_days}`;
+  `prefs` = `{inapp, security, messages, emails: [{id, email, verified, notify}], email_available, verified_only}`
+- `POST /api/notifications/read` (all read), `POST /api/notifications/clear` (empty the list)
+- `POST /api/notifications/prefs` `{inapp?, security?, messages?}`, `{email_id, notify}` or `{all: false|true}` -> `prefs`
 - `POST /api/complaints` `{message, contact?}` -> a report to the admin (token optional; without one, `contact` is required)
 - `GET /api/complaints` -> `{complaints: [{id, message, status, reply, created_at, updated_at}]}`: the user's own reports
 

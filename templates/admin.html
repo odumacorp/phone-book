@@ -54,6 +54,8 @@
   .complaint .msg { white-space: pre-wrap; margin: 6px 0 10px; overflow-wrap: anywhere; }
   .tabs a { color: var(--primary); text-decoration: none; margin-right: 12px; }
   .tabs a.active { font-weight: 700; text-decoration: underline; }
+  .nav { margin: 0 0 16px; }
+  details summary { cursor: pointer; }
   .login { max-width: 360px; margin: 12vh auto 0; }
   code { font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
 </style>
@@ -80,8 +82,61 @@
       <button class="secondary" type="submit">Log out</button>
     </form>
   </header>
+  <nav class="tabs nav">
+    <a href="/admin" class="{{ 'active' if page == 'dashboard' else '' }}">Dashboard</a>
+    <a href="/admin/notifications" class="{{ 'active' if page == 'notifications' else '' }}">Sent notifications and replies</a>
+  </nav>
 
   {% if message %}<div class="flash">{{ message }}</div>{% endif %}
+
+  {% if page == "notifications" %}
+  <section class="card">
+    <h2>Sent notifications and replies</h2>
+    <p class="muted">Everything sent to users in the last {{ keep_days }} days: where it went, whether the user has read it
+      in the app, and whether each email went out.</p>
+    <p class="tabs">
+      <a href="/admin/notifications?who={{ who|urlencode }}" class="{{ 'active' if kind not in kinds else '' }}">All ({{ counts.values()|sum }})</a>
+      {% for k, label in kinds.items() %}
+        <a href="/admin/notifications?kind={{ k }}&who={{ who|urlencode }}" class="{{ 'active' if kind == k else '' }}">{{ label }}s ({{ counts.get(k, 0) }})</a>
+      {% endfor %}
+    </p>
+    <form method="get" action="/admin/notifications" class="row" style="margin-bottom:12px">
+      {% if kind in kinds %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
+      <input name="who" value="{{ who }}" placeholder="Filter by phone number or email">
+      <button type="submit" class="secondary">Filter</button>
+      {% if who %}<a href="/admin/notifications{{ '?kind=' ~ kind if kind in kinds else '' }}" class="muted">Clear</a>{% endif %}
+    </form>
+    {% for r in rows %}
+      <div class="complaint">
+        <div class="row">
+          <span class="pill {{ 'warn' if r.kind == 'security' else 'on' if r.kind == 'reply' else 'off' }}">{{ kinds[r.kind] }}</span>
+          <span class="muted">{{ fmt_time(r.created_at) }} ·
+            {% if r.owner %}Account {{ local(r.owner) }}{% else %}Not logged in: {{ r.recipient or 'no contact' }}{% endif %}
+            {% if r.complaint_id %} · Report #{{ r.complaint_id }}{% endif %}</span>
+        </div>
+        <div style="margin-top:6px"><strong>{{ r.title }}</strong></div>
+        {% if r.complaint_message %}<div class="muted" style="margin-top:4px">Their report: “{{ r.complaint_message }}”</div>{% endif %}
+        <details style="margin-top:4px"><summary class="muted">Message</summary><div class="msg">{{ r.body }}</div></details>
+        <div class="row" style="margin-top:6px">
+          <span class="muted">In app:</span>
+          {% if r.inapp_id %}
+            {% if not r.still_listed %}<span class="pill off">Cleared by user</span>
+            {% elif r.read_at %}<span class="pill on">Read {{ fmt_time(r.read_at) }}</span>
+            {% else %}<span class="pill open">Unread</span>{% endif %}
+          {% else %}<span class="pill off">No</span>{% endif %}
+          <span class="muted">Email:</span>
+          {% if r.emails %}
+            <span class="pill {{ {'sent': 'on', 'sending': 'off', 'partial': 'warn', 'failed': 'warn'}[r.email_status] }}">{{ r.email_status|capitalize }}</span>
+            <span class="muted">{{ r.emails }}</span>
+          {% else %}<span class="pill off">No</span>{% endif %}
+        </div>
+        {% if r.note %}<div class="muted" style="margin-top:4px">{{ r.note }}</div>{% endif %}
+      </div>
+    {% else %}
+      <p class="muted">Nothing sent{{ ' matching that' if who or kind in kinds else ' yet' }}.</p>
+    {% endfor %}
+  </section>
+  {% else %}
 
   <section class="card">
     <h2>Overview</h2>
@@ -141,8 +196,9 @@
       <div>
         <strong>Email notifications</strong>
         {% if features.email_notifications %}<span class="pill on">On</span>{% else %}<span class="pill off">Off</span>{% endif %}
-        <p>Emails the account on a new app login, password or PIN change, password reset, USSD login from another phone,
-          a USSD PIN lockout, and when you answer their report.</p>
+        <p>Security alerts by email: a new app login, password or PIN change, password reset, USSD login from another
+          phone, a USSD PIN lockout. (They always appear in the user's in-app Notifications. Your replies and messages
+          below are emailed whenever email is configured.) Users choose which of their emails get them, or stop them.</p>
       </div>
       <form method="post" action="/admin/feature">
         <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -168,6 +224,24 @@
     {% endif %}
   </section>
 
+  <section class="card" id="message">
+    <h2>Message users</h2>
+    <p class="muted">Goes to each user's in-app Notifications and to the emails they chose
+      ({{ stats.with_email }} account{{ '' if stats.with_email == 1 else 's' }} get email{% if not email_ready %}; email isn't configured, so in the app only for now{% endif %}).
+      Users who turned off messages from the team won't get it.</p>
+    <form method="post" action="/admin/message">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="row">
+        <label class="muted" for="to">To</label>
+        <input id="to" name="to" value="all" placeholder="all, or a phone number (07...)" required>
+      </div>
+      <p><input name="subject" placeholder="Subject" maxlength="150" required></p>
+      <textarea name="body" placeholder="Message" maxlength="2000" required></textarea>
+      <p class="row"><button type="submit">Send message</button>
+        <span class="muted">Type <code>all</code> for every account, or one phone number.</span></p>
+    </form>
+  </section>
+
   <section class="card">
     <h2>Reports and complaints</h2>
     <p class="tabs">
@@ -187,7 +261,7 @@
         <form method="post" action="/admin/complaints/{{ c.id }}">
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <input type="hidden" name="show" value="{{ show }}">
-          <textarea name="reply" placeholder="{{ 'Reply (shown to the user in the app)' if c.owner else 'Notes (the user is not logged in: reply to them directly)' }}">{{ c.reply or '' }}</textarea>
+          <textarea name="reply" placeholder="{{ 'Reply (shown in the app and emailed to their emails)' if c.owner else ('Reply (emailed to ' ~ c.contact ~ ')' if '@' in (c.contact or '') else 'Notes (they gave a phone number: call or text them)') }}">{{ c.reply or '' }}</textarea>
           <div class="row" style="margin-top:8px">
             {% if c.status == 'open' %}
               <button type="submit" name="status" value="resolved">Save and resolve</button>
@@ -203,6 +277,7 @@
       <p class="muted">No {{ 'open ' if show != 'all' else '' }}reports.</p>
     {% endfor %}
   </section>
+  {% endif %}
 {% endif %}
 </main>
 </body>

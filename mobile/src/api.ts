@@ -13,10 +13,14 @@ export type Me = {
   contacts: number;
   show_others: boolean;
   name: string | null;
-  email: string | null;
-  email_verified?: boolean;
+  email: string | null; // the first email (older servers)
+  emails?: EmailAddress[];
+  max_emails?: number;
   features?: { email_verification?: boolean }; // switched on by the admin
+  unread_notifications?: number;
 };
+/** An email on the account (up to max_emails). Any of them can be used to log in. */
+export type EmailAddress = { id: number; email: string; verified: boolean; notify?: boolean };
 export type Contact = { id: number; name: string; phone: string; priority: boolean };
 export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean };
 export type UssdLogin = {
@@ -184,12 +188,53 @@ export function normalizePhone(raw: string): string | null {
   return '+' + phone;
 }
 
-/** Email verification (only when the admin has turned it on): a 6-digit code goes to the account's email. */
-export const requestEmailCode = (token: string) =>
-  request<{ sent: boolean; email: string }>('/api/email/verify/request', { method: 'POST' }, token);
+export const addEmail = (token: string, email: string) =>
+  request<EmailAddress>('/api/emails', { method: 'POST', body: JSON.stringify({ email }) }, token);
 
-export const confirmEmailCode = (token: string, code: string) =>
-  request<{ email_verified: boolean }>('/api/email/verify/confirm', { method: 'POST', body: JSON.stringify({ code }) }, token);
+export const deleteEmail = (token: string, id: number) =>
+  request<{ deleted: number }>(`/api/emails/${id}`, { method: 'DELETE' }, token);
+
+/** Email verification (only when the admin has turned it on): a 6-digit code goes to that email. */
+export const requestEmailCode = (token: string, id: number) =>
+  request<{ sent: boolean; email: string }>('/api/email/verify/request', { method: 'POST', body: JSON.stringify({ id }) }, token);
+
+export const confirmEmailCode = (token: string, id: number, code: string) =>
+  request<EmailAddress>('/api/email/verify/confirm', { method: 'POST', body: JSON.stringify({ id, code }) }, token);
+
+export type AppNotification = {
+  id: number;
+  kind: 'security' | 'messages';
+  title: string;
+  body: string;
+  created_at: number;
+  read: boolean;
+};
+/** Where notifications go: the in-app inbox and/or each email; and which kinds. */
+export type NotificationPrefs = {
+  inapp: boolean;
+  security: boolean;
+  messages: boolean;
+  emails: EmailAddress[];
+  email_available: boolean; // the server can send email
+  verified_only: boolean; // only verified emails get them
+};
+export type Inbox = { notifications: AppNotification[]; unread: number; prefs: NotificationPrefs; keep_days: number };
+
+export const getNotifications = (token: string) => request<Inbox>('/api/notifications', {}, token);
+
+export const markNotificationsRead = (token: string) =>
+  request<{ unread: number }>('/api/notifications/read', { method: 'POST' }, token);
+
+export const clearNotifications = (token: string) =>
+  request<{ cleared: boolean }>('/api/notifications/clear', { method: 'POST' }, token);
+
+export type PrefsChange =
+  | { inapp?: boolean; security?: boolean; messages?: boolean }
+  | { all: boolean }
+  | { email_id: number; notify: boolean };
+
+export const setNotificationPrefs = (token: string, change: PrefsChange) =>
+  request<NotificationPrefs>('/api/notifications/prefs', { method: 'POST', body: JSON.stringify(change) }, token);
 
 export type Complaint = {
   id: number;
