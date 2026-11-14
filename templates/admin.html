@@ -56,6 +56,14 @@
   .tabs a.active { font-weight: 700; text-decoration: underline; }
   .nav { margin: 0 0 16px; }
   details summary { cursor: pointer; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px; align-items: end; }
+  .filters label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+  .filters .filter-actions { align-self: end; }
+  select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+  input[type=date] { color-scheme: light dark; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+  .chip { border: 1px solid var(--line); border-radius: 99px; padding: 4px 12px; color: var(--primary); text-decoration: none; font-size: 14px; }
+  .chip.active { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
   .login { max-width: 360px; margin: 12vh auto 0; }
   code { font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
 </style>
@@ -85,6 +93,7 @@
   <nav class="tabs nav">
     <a href="/admin" class="{{ 'active' if page == 'dashboard' else '' }}">Dashboard</a>
     <a href="/admin/notifications" class="{{ 'active' if page == 'notifications' else '' }}">Sent notifications and replies</a>
+    <a href="/admin/templates" class="{{ 'active' if page == 'templates' else '' }}">Emails and notifications</a>
   </nav>
 
   {% if message %}<div class="flash">{{ message }}</div>{% endif %}
@@ -94,18 +103,37 @@
     <h2>Sent notifications and replies</h2>
     <p class="muted">Everything sent to users in the last {{ keep_days }} days: where it went, whether the user has read it
       in the app, and whether each email went out.</p>
-    <p class="tabs">
-      <a href="/admin/notifications?who={{ who|urlencode }}" class="{{ 'active' if kind not in kinds else '' }}">All ({{ counts.values()|sum }})</a>
-      {% for k, label in kinds.items() %}
-        <a href="/admin/notifications?kind={{ k }}&who={{ who|urlencode }}" class="{{ 'active' if kind == k else '' }}">{{ label }}s ({{ counts.get(k, 0) }})</a>
-      {% endfor %}
-    </p>
-    <form method="get" action="/admin/notifications" class="row" style="margin-bottom:12px">
-      {% if kind in kinds %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
-      <input name="who" value="{{ who }}" placeholder="Filter by phone number or email">
-      <button type="submit" class="secondary">Filter</button>
-      {% if who %}<a href="/admin/notifications{{ '?kind=' ~ kind if kind in kinds else '' }}" class="muted">Clear</a>{% endif %}
+    <form method="get" action="/admin/notifications" class="filters">
+      <label>Topic
+        <select name="kind">
+          <option value="all">All ({{ counts.values()|sum }})</option>
+          {% for k, label in kinds.items() %}
+            <option value="{{ k }}" {{ 'selected' if kind == k else '' }}>{{ label }}s ({{ counts.get(k, 0) }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Phone number
+        <input name="number" value="{{ number }}" placeholder="0705… or part of it" inputmode="tel">
+      </label>
+      <label>Email
+        <input name="email" value="{{ email }}" placeholder="name@… or part of it">
+      </label>
+      <label>From
+        <input type="date" name="from" value="{{ date_from }}">
+      </label>
+      <label>To
+        <input type="date" name="to" value="{{ date_to }}">
+      </label>
+      <div class="row filter-actions">
+        <button type="submit">Filter</button>
+        {% if filtered or problems %}<a href="/admin/notifications" class="muted">Clear filters</a>{% endif %}
+      </div>
     </form>
+    <div class="chips" aria-label="Date range">
+      {% for q in quick %}<a href="{{ q.url }}" class="chip {{ 'active' if q.active else '' }}">{{ q.label }}</a>{% endfor %}
+    </div>
+    {% for p in problems %}<div class="error">{{ p }}</div>{% endfor %}
+    {% if filtered %}<p class="muted">{{ rows|length }}{{ '+' if rows|length >= 300 else '' }} matching.</p>{% endif %}
     {% for r in rows %}
       <div class="complaint">
         <div class="row">
@@ -133,9 +161,72 @@
         {% if r.note %}<div class="muted" style="margin-top:4px">{{ r.note }}</div>{% endif %}
       </div>
     {% else %}
-      <p class="muted">Nothing sent{{ ' matching that' if who or kind in kinds else ' yet' }}.</p>
+      <p class="muted">Nothing sent{{ ' matching these filters' if filtered else ' yet' }}.</p>
     {% endfor %}
   </section>
+  {% elif page == "templates" %}
+  <section class="card">
+    <h2>Emails and notifications</h2>
+    <p class="muted">Edit what users receive. Each message is shown in the app's Notifications and emailed to the
+      emails the user chose. Words in braces like <code>{name}</code> are filled in for each user (the list under each
+      message). Turn a message off to stop sending it to everyone. Messages you send from <a href="/admin#message">Message users</a>
+      are written there.{% if not email_ready %} <span class="pill warn">Email not configured</span> tests can't be sent yet.{% endif %}</p>
+  </section>
+
+  <section class="card" id="email_parts">
+    <h2>Every email</h2>
+    <form method="post" action="/admin/templates/email_parts">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for p in parts %}
+        <label class="muted" for="{{ p.key }}">{{ p.label }}{% if p.custom %} <span class="pill on">Edited</span>{% endif %}</label>
+        {% if p.key == 'sender_name' %}
+          <input id="{{ p.key }}" name="{{ p.key }}" value="{{ p.value }}" maxlength="60">
+          <p class="muted">Shown as the sender: “{{ p.value }}” &lt;{{ email_from or 'your EMAIL_FROM' }}&gt;</p>
+        {% else %}
+          <textarea id="{{ p.key }}" name="{{ p.key }}" maxlength="300" style="min-height:44px">{{ p.value }}</textarea>
+          <p class="muted">{{ 'Added under security alerts, replies and messages from the team.' if p.key == 'notify_footer' else 'Added at the end of every email (leave empty for none).' }}</p>
+        {% endif %}
+      {% endfor %}
+      <div class="row">
+        <button type="submit" name="action" value="save">Save</button>
+        <button type="submit" name="action" value="reset" class="secondary">Reset to default</button>
+      </div>
+    </form>
+  </section>
+
+  {% for t in items %}
+  <section class="card" id="{{ t.key }}">
+    <form method="post" action="/admin/templates/{{ t.key }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">{{ t.label }}
+          <span class="pill {{ 'warn' if t.kind == 'security' else 'off' }}">{{ {'security': 'Security alert', 'messages': 'Message', 'email': 'Email only'}[t.kind] }}</span>
+          {% if t.custom %}<span class="pill on">Edited</span>{% endif %}
+          {% if not t.enabled %}<span class="pill open">Off</span>{% endif %}
+        </h2>
+        <label class="row muted"><input type="checkbox" name="enabled" value="1" style="width:auto" {{ 'checked' if t.enabled else '' }}
+          {{ 'disabled' if t.key == 'email_code' else '' }}> Send this</label>
+        {% if t.key == 'email_code' %}<input type="hidden" name="enabled" value="1">{% endif %}
+      </div>
+      <p><label class="muted" for="s-{{ t.key }}">Subject</label>
+        <input id="s-{{ t.key }}" name="subject" value="{{ t.subject }}" maxlength="200" required></p>
+      <label class="muted" for="b-{{ t.key }}">Text</label>
+      <textarea id="b-{{ t.key }}" name="body" maxlength="2000" required style="min-height:120px">{{ t.body }}</textarea>
+      <p class="muted">Placeholders:
+        {% for v, what in t.vars.items() %}<code>{{ '{' ~ v ~ '}' }}</code> {{ what }}{{ ', ' if not loop.last else '' }}{% endfor %}</p>
+      <details><summary class="muted">Preview (sample user, as saved)</summary>
+        <div class="stat" style="margin-top:8px"><strong>{{ t.preview_subject }}</strong><div class="msg">{{ t.preview_body }}</div></div>
+      </details>
+      <div class="row" style="margin-top:10px">
+        <button type="submit" name="action" value="save">Save</button>
+        <input type="email" name="test_to" placeholder="test@example.com" style="flex:1 1 180px;width:auto" {{ 'disabled' if not email_ready else '' }}>
+        <button type="submit" name="action" value="test" class="secondary" {{ 'disabled' if not email_ready else '' }}>Save and send test</button>
+        <button type="submit" name="action" value="reset" class="secondary" formnovalidate>Reset to default</button>
+      </div>
+      {% if t.key == 'email_code' %}<p class="muted">Always sent when a user asks for a code (it can't be turned off; turn off Email verification on the dashboard instead).</p>{% endif %}
+    </form>
+  </section>
+  {% endfor %}
   {% else %}
 
   <section class="card">

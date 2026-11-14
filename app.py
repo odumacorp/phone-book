@@ -14,6 +14,8 @@ import re
 import unicodedata
 import atexit
 import base64
+import calendar
+import datetime
 import hashlib
 import hmac
 import secrets
@@ -31,7 +33,7 @@ from xml.sax.saxutils import quoteattr
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
-from flask import Flask, request, Response, g, jsonify, send_from_directory, session, render_template, redirect, url_for, abort
+from flask import Flask, request, Response, g, jsonify, send_from_directory, session, render_template, redirect, url_for, abort, has_app_context
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -789,9 +791,7 @@ def check_pin(phone, pin):
         )
         get_user(phone, fresh=True)  # a second try in this same request must see the new count
         if locked_until:
-            notify(phone, "USSD login locked after wrong PINs",
-                   f"{MAX_PIN_ATTEMPTS} wrong PINs were entered for your account on USSD, so USSD login is locked "
-                   "for 15 minutes.\n\nIf this wasn't you, change your USSD PIN in the app.")
+            notify_event(phone, "pin_lockout", attempts=MAX_PIN_ATTEMPTS, minutes=LOCKOUT_SECONDS // 60)
             return None, "Too many wrong PINs. Try again in 15 min."
         return None, "Wrong phone number or PIN."
     if user["failed_attempts"]:
@@ -929,9 +929,7 @@ def log_login(owner, caller, network, session_id, error, resumed=False):
     ):
         return  # already logged this session (only happens without SECRET_KEY, when every screen re-checks)
     if success and not resumed and caller != owner:
-        notify(owner, "USSD login from another phone",
-               f"Your Remote Phonebook account was opened on USSD from {masked(caller)}.\n\n"
-               "If this wasn't you, end the session in the app (Sessions) and change your USSD PIN.")
+        notify_event(owner, "ussd_other_phone", caller=masked(caller))
     if resumed:
         reason = "resumed"  # own phone, within the inactivity window: no PIN asked
     elif success:
@@ -1610,8 +1608,7 @@ def api_login():
     if error:
         return api_error(error, auth_status(error))
     device = " ".join(request.headers.get("X-Device-Name", "").split())[:60] or "an unknown device"
-    notify(user["phone"], "New login to your Remote Phonebook account",
-           f"Your account was just logged into from {device}.\n\nIf this wasn't you, change your password in the app.")
+    notify_event(user["phone"], "new_login", device=device)
     return logged_in(user)
 
 
@@ -1795,9 +1792,7 @@ def api_change_password():
     error = check_password(get_user(g.phone), current)
     if error:
         return api_error("Current password is wrong." if error.startswith("Wrong") else error, auth_status(error))
-    notify(g.phone, "Your password was changed",
-           "Your Remote Phonebook password was just changed, and your other devices were logged out.\n\n"
-           "If this wasn't you, reset your password with Forgot password in the app.")
+    notify_event(g.phone, "password_changed")
     return logged_in(set_password(g.phone, new), same_session=True)
 
 
@@ -1813,9 +1808,7 @@ def api_change_pin():
     error = check_password(get_user(g.phone), str(body.get("password", "")))
     if error:
         return api_error("Password is wrong." if error.startswith("Wrong") else error, auth_status(error))
-    notify(g.phone, "Your USSD PIN was changed",
-           f"The PIN for {USSD_CODE_TEXT} on your Remote Phonebook account was just changed.\n\n"
-           "If this wasn't you, change your password and PIN in the app.")
+    notify_event(g.phone, "pin_changed")
     return logged_in(update_pin(g.phone, new_pin), same_session=True)
 
 
@@ -1947,9 +1940,7 @@ def api_reset_confirm():
     failed = use_code(user["phone"], str(body.get("code", "")).strip())
     if failed:
         return api_error(*failed)
-    notify(user["phone"], "Your password was reset",
-           "Your Remote Phonebook password was just reset with a code sent to your phone.\n\n"
-           "If this wasn't you, reset it again and contact support.")
+    notify_event(user["phone"], "password_reset")
     return logged_in(set_password(user["phone"], password))
 
 
@@ -2178,10 +2169,16 @@ def email_configured():
 def send_email(to, subject, body):
     """Send one email now; raises on failure (the admin test uses this to show the error)."""
     msg = EmailMessage()
-    msg["From"] = f"Remote Phonebook <{EMAIL_FROM}>"
+    if has_app_context():
+        sender, signature = email_part("sender_name"), email_part("signature")
+    else:  # background thread: read the admin's settings in a context of its own
+        with app.app_context():
+            sender, signature = email_part("sender_name"), email_part("signature")
+    sender = sender.replace('"', "").replace("<", "").replace(">", "")[:60]
+    msg["From"] = f'"{sender}" <{EMAIL_FROM}>'
     msg["To"] = to
     msg["Subject"] = subject
-    msg.set_content(body + "\n\n- Remote Phonebook (Oduma Corp)")
+    msg.set_content(body + (f"\n\n{signature}" if signature.strip() else ""))
     context = ssl.create_default_context()
     if SMTP_PORT == 465:
         server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=context)
@@ -2216,6 +2213,140 @@ def notification_emails(owner):
         return []
     verified_only = feature_on("email_verification")
     return [r["email"] for r in user_emails(owner) if r["notify"] and (r["verified"] or not verified_only)]
+
+
+# ---------------------------------------------------------------- message templates
+# The admin edits every notification and email at /admin/templates: on/off, subject and text with
+# {placeholders}. Edits are stored in the settings table ("tpl:<key>:subject" ...); empty = default.
+
+COMMON_VARS = {"name": "the user's name", "phone": "their phone number", "app": "Remote Phonebook", "ussd_code": USSD_CODE_TEXT}
+TEMPLATES = {
+    "new_login": {
+        "label": "New app login", "kind": "security", "vars": {"device": "the phone or browser"},
+        "subject": "New login to your {app} account",
+        "body": "Hi {name},\n\nYour account was just logged into from {device}.\n\nIf this wasn't you, change your password in the app.",
+    },
+    "password_changed": {
+        "label": "Password changed", "kind": "security", "vars": {},
+        "subject": "Your password was changed",
+        "body": "Hi {name},\n\nYour {app} password was just changed, and your other devices were logged out.\n\n"
+                "If this wasn't you, reset your password with Forgot password in the app.",
+    },
+    "password_reset": {
+        "label": "Password reset", "kind": "security", "vars": {},
+        "subject": "Your password was reset",
+        "body": "Hi {name},\n\nYour {app} password was just reset with a code sent to your phone.\n\n"
+                "If this wasn't you, reset it again and contact support.",
+    },
+    "pin_changed": {
+        "label": "USSD PIN changed", "kind": "security", "vars": {},
+        "subject": "Your USSD PIN was changed",
+        "body": "Hi {name},\n\nThe PIN for {ussd_code} on your {app} account was just changed.\n\n"
+                "If this wasn't you, change your password and PIN in the app.",
+    },
+    "ussd_other_phone": {
+        "label": "USSD login from another phone", "kind": "security", "vars": {"caller": "the phone that dialled"},
+        "subject": "USSD login from another phone",
+        "body": "Hi {name},\n\nYour {app} account was opened on USSD from {caller}.\n\n"
+                "If this wasn't you, end the session in the app (Sessions) and change your USSD PIN.",
+    },
+    "pin_lockout": {
+        "label": "USSD locked after wrong PINs", "kind": "security", "vars": {"attempts": "wrong PINs", "minutes": "lockout"},
+        "subject": "USSD login locked after wrong PINs",
+        "body": "Hi {name},\n\n{attempts} wrong PINs were entered for your account on USSD, so USSD login is locked "
+                "for {minutes} minutes.\n\nIf this wasn't you, change your USSD PIN in the app.",
+    },
+    "report_reply": {
+        "label": "Reply to a report", "kind": "messages",
+        "vars": {"report_id": "report number", "status": "resolved / answered", "report": "what they wrote", "reply": "your reply"},
+        "subject": "Your report #{report_id} was {status}",
+        "body": "Hi {name},\n\nYou wrote:\n{report}\n\nOur reply:\n{reply}\n\nYou can also see it in the app under Report a problem.",
+    },
+    "email_code": {
+        "label": "Email verification code (email only)", "kind": "email", "vars": {"code": "the 6-digit code", "minutes": "valid for", "email": "the address"},
+        "subject": "Your {app} verification code",
+        "body": "Your code is {code}. Enter it in the {app} app to verify {email}. It expires in {minutes} minutes.",
+    },
+}
+EMAIL_PARTS = {  # editable parts of every email
+    "sender_name": ("Sender name", "Remote Phonebook"),
+    "notify_footer": ("Footer on notification emails", "Choose where you get notifications in the app: Notifications."),
+    "signature": ("Signature on every email", "- Remote Phonebook (Oduma Corp)"),
+}
+SAMPLE_VARS = {
+    "name": "Jane", "phone": "0712345678", "device": "Pixel 8", "caller": "0712***678", "attempts": "5", "minutes": "15",
+    "report_id": "12", "status": "resolved", "report": "I can't add a contact", "reply": "Fixed, please try again.",
+    "code": "123456", "email": "jane@example.com",
+}
+_text_cache = {}
+
+
+def setting_text(key):
+    """A stored setting ("" when not set), cached briefly like the feature switches."""
+    cached = _text_cache.get(key)
+    if cached and time.time() - cached[1] < SETTINGS_TTL:
+        return cached[0]
+    row = fetch_one("SELECT value FROM settings WHERE key = ?", (key,))
+    value = row["value"] if row else ""
+    _text_cache[key] = (value, time.time())
+    return value
+
+
+def set_setting_text(key, value):
+    if value:
+        execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+    else:
+        execute("DELETE FROM settings WHERE key = ?", (key,))
+    _text_cache[key] = (value, time.time())
+
+
+def template_part(key, part):
+    """The admin's version of a template's subject/body, or the default."""
+    return setting_text(f"tpl:{key}:{part}") or TEMPLATES[key][part]
+
+
+def template_on(key):
+    return setting_text(f"tpl:{key}:enabled") != "0"
+
+
+NONE = "__none__"  # stored when the admin empties an email part on purpose
+
+
+def email_part(key):
+    value = setting_text(f"email:{key}")
+    return "" if value == NONE else value or EMAIL_PARTS[key][1]
+
+
+def fill(text, values):
+    """Replace {placeholders} we know; anything else in braces is left as typed."""
+    return re.sub(r"\{(\w+)\}", lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), text)
+
+
+def render_message(key, values):
+    values = {"app": "Remote Phonebook", "ussd_code": USSD_CODE_TEXT, **values}
+    return fill(template_part(key, "subject"), values), fill(template_part(key, "body"), values)
+
+
+def notify_event(owner, key, complaint_id=None, **values):
+    """Send one of the admin-editable notifications to an account."""
+    try:
+        user = get_user(owner)
+        if not user:
+            return []
+        values = {"name": user["name"] or "there", "phone": local_number(owner), **values}
+        subject, body = render_message(key, values)
+        log_kind = "reply" if key == "report_reply" else "security" if TEMPLATES[key]["kind"] == "security" else "message"
+        if not template_on(key):
+            log_notification(owner, owner, log_kind, subject, body, note="Not sent: this notification is turned off in admin",
+                             complaint_id=complaint_id)
+            return []
+        return notify(owner, subject, body, kind=TEMPLATES[key]["kind"], log_kind=log_kind, complaint_id=complaint_id)
+    except Exception:
+        log.exception("notification %s for %s failed", key, owner)
+        return []
 
 
 NOTIFICATION_LOG_DAYS = 90
@@ -2281,10 +2412,11 @@ def notify(owner, subject, body, kind="security", log_kind=None, complaint_id=No
             emails = notification_emails(owner)
             if not emails:
                 notes.append("no email chosen" + (" or verified" if feature_on("email_verification") else ""))
+        footer = email_part("notify_footer")
         log_id = log_notification(owner, owner, log_kind, subject, body, inapp_id, emails,
                                   "; ".join(notes).capitalize() or None, complaint_id)
         send_emails_async(
-            [(to, subject, body + "\n\nChoose where you get notifications in the app: Notifications.") for to in emails], log_id
+            [(to, subject, body + (f"\n\n{footer}" if footer.strip() else "")) for to in emails], log_id
         )
         return emails
     except Exception:
@@ -2471,10 +2603,8 @@ def api_email_verify_request():
         (g.phone, row["email"], generate_password_hash(code), now + EMAIL_CODE_TTL, now),
     )
     db.commit()
-    send_email_async(
-        row["email"], "Your Remote Phonebook verification code",
-        f"Your code is {code}. Enter it in the Remote Phonebook app to verify this email. It expires in 15 minutes.",
-    )
+    subject, text = render_message("email_code", {"code": code, "minutes": EMAIL_CODE_TTL // 60, "email": row["email"]})
+    send_email_async(row["email"], subject, text)
     return jsonify({"sent": True, "email": row["email"]})
 
 
@@ -2724,16 +2854,58 @@ def admin_notifications():
         abort(404)
     if not is_admin():
         return redirect(url_for("admin_page"))
-    kind = request.args.get("kind", "all")
-    who = str(request.args.get("who") or "").strip()
-    where, params = [], []
+    # Separate filters, combined when several are filled in: topic, phone number, email, date range
+    args = request.args
+    kind = args.get("kind", "all")
+    number = " ".join(str(args.get("number") or "").split())[:20]
+    email = str(args.get("email") or "").strip().lower()[:120]
+    date_from, date_to = str(args.get("from") or ""), str(args.get("to") or "")
+    where, params, problems = [], [], []
+    # Quick date ranges (Kenya time); each sets From/To and keeps the other filters
+    today = datetime.datetime.fromtimestamp(time.time() + 3 * 3600, datetime.timezone.utc).date()
+    first_of_month = today.replace(day=1)
+    last_month_end = first_of_month - datetime.timedelta(days=1)
+    one_day = datetime.timedelta(days=1)
+    ranges = [
+        ("Today", today, today),
+        ("Yesterday", today - one_day, today - one_day),
+        ("Last 7 days", today - 6 * one_day, today),
+        ("Last 30 days", today - 29 * one_day, today),
+        ("This month", first_of_month, today),
+        ("Last month", last_month_end.replace(day=1), last_month_end),
+    ]
+    keep = {k: v for k, v in (("kind", kind if kind in LOG_KINDS else ""), ("number", number), ("email", email)) if v}
+    quick = [
+        {"label": label, "url": url_for("admin_notifications", **keep, **{"from": a.isoformat(), "to": b.isoformat()}),
+         "active": (date_from, date_to) == (a.isoformat(), b.isoformat())}
+        for label, a, b in ranges
+    ]
+    quick.append({"label": "All time", "url": url_for("admin_notifications", **keep), "active": not date_from and not date_to})
     if kind in LOG_KINDS:
         where.append("l.kind = ?")
         params.append(kind)
-    if who:
-        phone = login_phone(who)
-        where.append("(l.owner = ? OR l.recipient LIKE ? OR l.emails LIKE ?)")
-        params += [phone or who, f"%{who}%", f"%{who}%"]
+    if number:
+        phone = login_phone(number)
+        if phone:
+            where.append("(l.owner = ? OR l.recipient = ? OR l.recipient = ?)")
+            params += [phone, number, local_number(phone)]
+        else:  # part of a number: match on the digits, in either 07... or +2547... form
+            digits = re.sub(r"\D", "", number)
+            tail = digits[1:] if digits.startswith("0") else digits
+            where.append("(l.owner LIKE ? OR l.recipient LIKE ?)")
+            params += [f"%{tail}%", f"%{digits}%"]
+    if email:
+        where.append("(LOWER(l.emails) LIKE ? OR LOWER(l.recipient) LIKE ?)")
+        params += [f"%{email}%", f"%{email}%"]
+    for value, op, extra in ((date_from, ">=", 0), (date_to, "<", 86400)):
+        if value:
+            try:  # dates are East Africa Time (UTC+3)
+                day = calendar.timegm(time.strptime(value, "%Y-%m-%d")) - 3 * 3600  # midnight EAT
+            except ValueError:
+                problems.append(f"{value} isn't a date.")
+                continue
+            where.append(f"l.created_at {op} ?")
+            params.append(day + extra)
     rows = fetch_all(
         "SELECT l.id, l.owner, l.recipient, l.kind, l.title, l.body, l.inapp_id, l.emails, l.email_status, l.note, "
         "l.complaint_id, l.created_at, n.read_at, n.id AS still_listed, c.message AS complaint_message "
@@ -2750,7 +2922,13 @@ def admin_notifications():
         csrf=csrf_token(),
         rows=rows,
         kind=kind,
-        who=who,
+        number=number,
+        email=email,
+        date_from=date_from,
+        date_to=date_to,
+        filtered=bool(where),
+        quick=quick,
+        problems=problems,
         kinds=LOG_KINDS,
         counts=counts,
         keep_days=NOTIFICATION_LOG_DAYS,
@@ -2758,6 +2936,78 @@ def admin_notifications():
         fmt_time=lambda t: time.strftime("%d %b %Y %H:%M", time.gmtime(t + 3 * 3600)) + " EAT",
         local=local_number,
     )
+
+
+@app.route("/admin/templates", methods=["GET"])
+def admin_templates():
+    """Edit every notification and email: on/off, subject, text; preview and test."""
+    if not admin_enabled():
+        abort(404)
+    if not is_admin():
+        return redirect(url_for("admin_page"))
+    items = []
+    for key, t in TEMPLATES.items():
+        sample = {**SAMPLE_VARS}
+        subject, body = render_message(key, sample)
+        items.append({
+            "key": key, "label": t["label"], "kind": t["kind"], "enabled": template_on(key),
+            "subject": template_part(key, "subject"), "body": template_part(key, "body"),
+            "custom": bool(setting_text(f"tpl:{key}:subject") or setting_text(f"tpl:{key}:body")),
+            "vars": {**({} if key == "email_code" else {"name": COMMON_VARS["name"], "phone": COMMON_VARS["phone"]}),
+                     "app": COMMON_VARS["app"], "ussd_code": COMMON_VARS["ussd_code"], **t["vars"]},
+            "preview_subject": subject, "preview_body": body,
+        })
+    parts = [{"key": k, "label": label, "value": email_part(k), "custom": bool(setting_text(f"email:{k}"))}
+             for k, (label, _default) in EMAIL_PARTS.items()]
+    return render_template(
+        "admin.html", page="templates", csrf=csrf_token(), items=items, parts=parts, stats=admin_stats(),
+        email_ready=email_configured(), email_from=EMAIL_FROM, message=session.pop("flash", None),
+    )
+
+
+@app.route("/admin/templates/<key>", methods=["POST"])
+def admin_save_template(key):
+    if not admin_post_ok():
+        abort(403)
+    action = request.form.get("action", "save")
+    if key == "email_parts":
+        for k in EMAIL_PARTS:
+            value = "" if action == "reset" else str(request.form.get(k) or "").strip()[:300]
+            if action != "reset" and not value:
+                value = EMAIL_PARTS[k][1] if k == "sender_name" else NONE  # a sender name is required
+            set_setting_text(f"email:{k}", "" if value == EMAIL_PARTS[k][1] else value)
+        session["flash"] = "Email sender, footer and signature " + ("reset." if action == "reset" else "saved.")
+        return redirect(url_for("admin_templates") + "#email_parts")
+    if key not in TEMPLATES:
+        abort(404)
+    if action == "reset":
+        for part in ("subject", "body", "enabled"):
+            set_setting_text(f"tpl:{key}:{part}", "")
+        session["flash"] = f"“{TEMPLATES[key]['label']}” reset to the default."
+        return redirect(url_for("admin_templates") + f"#{key}")
+    subject = " ".join(str(request.form.get("subject") or "").split())[:200]
+    body = str(request.form.get("body") or "").replace("\r\n", "\n").strip()[:2000]
+    if not subject or not body:
+        session["flash"] = "A subject and text are needed (use Reset to go back to the default)."
+        return redirect(url_for("admin_templates") + f"#{key}")
+    set_setting_text(f"tpl:{key}:subject", "" if subject == TEMPLATES[key]["subject"] else subject)
+    set_setting_text(f"tpl:{key}:body", "" if body == TEMPLATES[key]["body"] else body)
+    set_setting_text(f"tpl:{key}:enabled", "" if request.form.get("enabled") else "0")
+    if action == "test":
+        to = clean_email(request.form.get("test_to"))
+        if not to or not email_configured():
+            session["flash"] = "Saved. To send a test, enter an email address (and configure email)."
+        else:
+            test_subject, test_body = render_message(key, SAMPLE_VARS)
+            footer = email_part("notify_footer") if TEMPLATES[key]["kind"] != "email" else ""
+            try:
+                send_email(to, "[Test] " + test_subject, test_body + (f"\n\n{footer}" if footer.strip() else ""))
+                session["flash"] = f"Saved, and a test of “{TEMPLATES[key]['label']}” was sent to {to}."
+            except Exception as e:
+                session["flash"] = f"Saved, but the test email failed: {type(e).__name__}: {e}"[:300]
+    else:
+        session["flash"] = f"“{TEMPLATES[key]['label']}” saved."
+    return redirect(url_for("admin_templates") + f"#{key}")
 
 
 @app.route("/admin/message", methods=["POST"])
@@ -2809,11 +3059,16 @@ def admin_complaint(complaint_id):
     )
     sent_to = []
     if reply != row["reply"] or status != row["status"]:
-        subject = f"Your report #{complaint_id} was {'resolved' if status == 'resolved' else 'answered'}"
-        text = f"You wrote:\n{row['message']}\n\n" + (f"Our reply:\n{reply}\n\n" if reply else "")
+        values = {
+            "report_id": complaint_id, "status": "resolved" if status == "resolved" else "answered", "report": row["message"],
+            "reply": reply or ("We've marked your report as resolved." if status == "resolved" else "We've reopened your report."),
+        }
+        subject, text = render_message("report_reply", {"name": "there", "phone": row["contact"] or "", **values})
         if row["owner"]:
-            sent_to = notify(row["owner"], subject, text + "You can also see it in the app under Report a problem.",
-                             kind="messages", log_kind="reply", complaint_id=complaint_id)
+            sent_to = notify_event(row["owner"], "report_reply", complaint_id=complaint_id, **values)
+        elif reply and not template_on("report_reply"):
+            log_notification(None, row["contact"], "reply", subject, text, complaint_id=complaint_id,
+                             note="Not sent: this notification is turned off in admin")
         elif reply and email_configured() and clean_email(row["contact"]):
             sent_to = [clean_email(row["contact"])]
             log_id = log_notification(None, row["contact"], "reply", subject, text, emails=sent_to, complaint_id=complaint_id)

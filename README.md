@@ -96,6 +96,12 @@ CSRF tokens on every form, and 5 wrong passwords lock that address out for 15 mi
   account, whether it reached the in-app list and whether the user has read it (or cleared it), which emails it
   went to and whether they were sent or failed (with the error), or why it wasn't delivered (e.g. the user turned
   that kind off). Filter by type, phone number or email.
+- **Emails and notifications** (`/admin/templates`): edit every message users get: new login, password
+  changed/reset, PIN changed, USSD login from another phone, USSD lockout, reply to a report, and the email
+  verification code. For each: turn it on/off for everyone, edit the subject and text with placeholders
+  (`{name}`, `{phone}`, `{device}`, `{caller}`, `{report}`, `{reply}`, `{code}`...), preview it with a sample
+  user, send a test, or reset it to the default. Also the sender name, the footer on notification emails and
+  the signature on every email. Stored in the settings table; unknown `{words}` are left as typed.
 - **Reports and complaints:** users send them from the app (*Report a problem*, also on the login screen
   for people who can't log in, with a phone/email to reply to). The admin replies, resolves or reopens;
   the reply goes to the user's Notifications and their chosen emails (or, for a report sent without
