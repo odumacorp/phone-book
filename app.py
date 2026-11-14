@@ -871,14 +871,17 @@ def handle(caller, text, session_id="", network=""):
         return con("Welcome to Remote Phone-Book\nEnter your phone number:")
 
     if state and state["offered_in"] == session_id and trusted_resume(state, caller, offered=True):
-        # Own phone, still within the inactivity window: no PIN, just continue / main menu / log out
+        # Own phone, still within the inactivity window: continue / main menu (each needs the PIN) / log out
         if parts[0] in ("1", "2"):
             owner = state["resume_owner"]
             if len(parts) == 1:
-                log_login(owner, caller, network, session_id, None, resumed=True)
+                return con(f"Enter PIN for {masked(owner)}:")
+            mac, rest, screen_ = authenticate(owner, parts[1:], session_id, state, caller, network)
+            if screen_:
+                return screen_
             start = json.loads(state["resume_from"]) if parts[0] == "1" else []
             login_id = current_login(owner, caller, network, session_id, state)
-            return run_menu(owner, caller, resolve_nav(start + parts[1:]), session_id, state, None, login_id)
+            return run_menu(owner, caller, resolve_nav(start + rest), session_id, state, mac, login_id)
         if parts[0] != BACK:
             return end("Invalid choice. Please dial again.")
         # Log out: end the active login but keep offered_in, so this session's later inputs
