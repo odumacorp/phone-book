@@ -63,6 +63,8 @@ NAME_MAX = 12  # names are shortened on list screens so a full page + the Back/H
 LIST_SCREEN_LEN = 160  # list screens stay this far below USSD_MAX_LEN: a full 182 is refused by some networks
 MORE = "98"  # next page on the contact list (contact numbers skip 98)
 SMS_MAX = 160  # one SMS
+SMS_CHUNK = 459  # contact lists: up to 3 joined SMS parts per message
+SMS_MAX_MESSAGES = 5  # "SMS me my contacts" sends at most this many messages; the rest are in the app
 CALL_TTL = 300  # seconds a requested call stays valid while we ring the caller
 SESSION_HISTORY_DAYS = 30  # ended app/USSD sessions shown in the app
 RESUME_SECONDS = 40  # a USSD login stays active this long after the last screen (inactivity timeout)
@@ -473,6 +475,9 @@ def init_db():
         add_column(db, "users", "notify_inapp", "INTEGER NOT NULL DEFAULT 1")
         add_column(db, "users", "notify_security", "INTEGER NOT NULL DEFAULT 1")
         add_column(db, "users", "notify_messages", "INTEGER NOT NULL DEFAULT 1")
+        # What USSD "SMS me my contacts" sends: 1 all contacts, 0 only priority ones.
+        # NULL (never chosen in the app) follows show_others, as before this setting existed.
+        add_column(db, "users", "sms_all", "INTEGER")
         add_column(db, "user_emails", "notify", "INTEGER NOT NULL DEFAULT 1")  # this email gets notifications
         # Accounts can have up to MAX_EMAILS emails (user_emails); move the old single users.email there
         db.execute(
@@ -513,6 +518,11 @@ def priority_only(owner):
     return not get_user(owner)["show_others"]
 
 
+def sms_all(user):
+    """Whether "SMS me my contacts" sends all contacts (True) or only priority ones (False)."""
+    return bool(user["show_others"] if user["sms_all"] is None else user["sms_all"])
+
+
 def add_contact(owner, name, phone):
     g.action_done = True
     execute("INSERT INTO contacts (owner, name, phone, enc) VALUES (?, ?, ?, ?)", (owner, *stored_contact(name, phone)))
@@ -549,7 +559,7 @@ def pop_pending_call(user_phone):
 USER_COLUMNS = (
     "phone, pin_hash, failed_attempts, locked_until, show_others, name, "
     "email, password_hash, pw_failed_attempts, pw_locked_until, token_epoch, email_verified, "
-    "notify_inapp, notify_security, notify_messages"
+    "notify_inapp, notify_security, notify_messages, sms_all"
 )
 
 
@@ -1212,11 +1222,16 @@ def menu(owner, caller, parts):
             return screen(INVALID)
         if sms is None:
             return screen("SMS service is not available right now.")
-        rows = list_contacts(owner, only)
+        send_all = sms_all(get_user(owner))
+        rows = list_contacts(owner, priority_only=not send_all)
         if not rows:
-            return screen(none_yet)
-        send_sms_async(caller, "Your contacts:\n" + format_contacts(rows))
-        return screen("You will receive your contacts by SMS shortly.")
+            return screen("You have no contacts yet." if send_all else NO_PRIORITY)
+        messages = contact_sms(rows, "Your contacts" if send_all else "Your priority contacts")
+        for text in messages:
+            send_sms_async(caller, text)
+        what = f"your {len(rows)} contacts" if send_all else f"your {len(rows)} priority contacts"
+        count = f" in {len(messages)} messages" if len(messages) > 1 else ""
+        return screen(f"You will receive {what} by SMS{count} shortly.")
 
     # 2. Emergency numbers: 2 -> pick -> 1 call now (dial it yourself) / 2 add to contacts
     if choice == "emergency":
@@ -1243,13 +1258,38 @@ def menu(owner, caller, parts):
     return screen(INVALID)
 
 
+def contact_sms(rows, title):
+    """Contacts as SMS texts of at most SMS_CHUNK characters each (no more than SMS_MAX_MESSAGES)."""
+    lines = [f"{r['name']} {r['phone']}" for r in rows]
+    messages, current, sent = [], f"{title}:", 0
+    for i, line in enumerate(lines):
+        if len(current) + 1 + len(line) > SMS_CHUNK:
+            if len(messages) + 1 == SMS_MAX_MESSAGES:  # last message: say what didn't fit
+                break
+            messages.append(current)
+            current = f"{title} (cont.):"
+        current += "\n" + line
+        sent = i + 1
+    if sent < len(lines):
+        more = f"\n+{len(lines) - sent} more in the Remote Phonebook app"
+        while len(current) + len(more) > SMS_CHUNK and "\n" in current:
+            current = current.rsplit("\n", 1)[0]
+            sent -= 1
+            more = f"\n+{len(lines) - sent} more in the Remote Phonebook app"
+        current += more
+    messages.append(current)
+    return messages
+
+
 def dial_yourself(number):
     # Ending the USSD session frees the phone to dial straight away
     return f"Dial {number} now from your phone. It is free."
 
 
 PICK_HINT = "Reply no. or phone no."
-QUICK_REPLIES = {"1": "Please call me."}
+# Picking a ready message needs no typing: the network ends a USSD session left idle for about
+# 20 seconds, and typing a message can take longer than that (the phone then hangs on "USSD code running...")
+QUICK_REPLIES = {"1": "Please call me.", "3": "I'm on my way.", "4": "I'm safe.", "5": "I'll call you later."}
 TYPE_OWN = "2"
 NAME_MAX_LEN = 30
 
@@ -1309,7 +1349,7 @@ def contact_menu(owner, caller, contact, rest):
         if len(rest) == 1:
             return screen("Calling isn't available yet.\n2. Send SMS\n3. Copy number")
         return contact_menu(owner, caller, contact, rest[1:])
-    if len(rest) > (3 if action == "2" else 1):
+    if len(rest) > 1 and action != "2":
         return screen(INVALID)
 
     # Call: Africa's Talking rings the caller, then /voice bridges them to the contact
@@ -1324,17 +1364,20 @@ def contact_menu(owner, caller, contact, rest):
     # Send SMS: pick a quick reply (no typing, so the session doesn't time out), or type one
     if action == "2":
         if len(rest) == 1:
-            replies = "\n".join(f"{n}. {text}" for n, text in QUICK_REPLIES.items())
-            return screen(f"SMS {name}:\n{replies}\n{TYPE_OWN}. Type a message\nOr just type it now")
+            options = {**QUICK_REPLIES, TYPE_OWN: "Type a message"}
+            lines = "\n".join(f"{n}. {options[n]}" for n in sorted(options))
+            return screen(f"SMS {plain_text(name)[:NAME_MAX].rstrip()}:\n{lines}\nOr type it now")
         choice = rest[1].strip()
         if choice == TYPE_OWN:
             if len(rest) == 2:
-                return screen(f"Type your message to {name}:")
-            message = rest[2].strip()
-        elif len(rest) > 2:
-            return screen(INVALID)
+                return screen(f"Type your message to {plain_text(name)[:NAME_MAX].rstrip()} and send it quickly:")
+            message = "*".join(rest[2:]).strip()  # a typed * arrives as a separator: put it back
+        elif choice in QUICK_REPLIES:
+            if len(rest) > 2:
+                return screen(INVALID)
+            message = QUICK_REPLIES[choice]
         else:
-            message = QUICK_REPLIES.get(choice, choice)  # anything else is the message itself
+            message = "*".join(rest[1:]).strip()  # anything else is the message itself
         sign = signature(owner)
         message = message[: SMS_MAX - len(sign) - 1]  # message + signature fit in one SMS
         if not message:
@@ -1954,6 +1997,7 @@ def api_me():
         "phone": g.phone,
         "contacts": row["n"],
         "show_others": bool(user["show_others"]),
+        "sms_all": sms_all(user),
         "name": user["name"],
         "email": emails[0]["email"] if emails else None,  # the first one (older app versions)
         "emails": emails,
@@ -2002,6 +2046,7 @@ def api_contacts():
         ],
         "max_priority": MAX_PRIORITY,
         "show_others": bool(get_user(g.phone)["show_others"]),
+        "sms_all": sms_all(get_user(g.phone)),
     })
 
 
@@ -2098,21 +2143,25 @@ def api_set_priority(contact_id):
 @app.route("/api/settings", methods=["POST"])
 @require_auth
 def api_settings():
-    """Update show_others and/or name (signs the user's SMS). Emails: /api/emails."""
+    """Update show_others, sms_all and/or name (signs the user's SMS). Emails: /api/emails."""
     body = request.get_json(silent=True) or {}
-    if not {"show_others", "name"} & set(body):
+    if not {"show_others", "sms_all", "name"} & set(body):
         return api_error("Nothing to update." + (" Emails are managed with /api/emails." if "email" in body else ""), 400)
     if "show_others" in body:
         if not isinstance(body["show_others"], bool):
             return api_error("Expected show_others: true or false.", 400)
         execute("UPDATE users SET show_others = ? WHERE phone = ?", (int(body["show_others"]), g.phone))
+    if "sms_all" in body:
+        if not isinstance(body["sms_all"], bool):
+            return api_error("Expected sms_all: true or false.", 400)
+        execute("UPDATE users SET sms_all = ? WHERE phone = ?", (int(body["sms_all"]), g.phone))
     if "name" in body:
         name = clean_name(body["name"])
         if not name:
             return api_error("Enter your name.", 400)
         execute("UPDATE users SET name = ? WHERE phone = ?", (name, g.phone))
     user = get_user(g.phone, fresh=True)
-    return jsonify({"show_others": bool(user["show_others"]), "name": user["name"]})
+    return jsonify({"show_others": bool(user["show_others"]), "sms_all": sms_all(user), "name": user["name"]})
 
 
 @app.route("/api/contacts/sync", methods=["POST"])
