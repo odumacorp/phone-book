@@ -12,6 +12,7 @@ export type Me = {
   phone: string;
   contacts: number;
   show_others: boolean;
+  sms_all?: boolean; // what USSD "SMS me my contacts" sends: all contacts, or only priority ones
   name: string | null;
   email: string | null; // the first email (older servers)
   emails?: EmailAddress[];
@@ -22,7 +23,7 @@ export type Me = {
 /** An email on the account (up to max_emails). Any of them can be used to log in. */
 export type EmailAddress = { id: number; email: string; verified: boolean; notify?: boolean };
 export type Contact = { id: number; name: string; phone: string; priority: boolean };
-export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean };
+export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean; sms_all?: boolean };
 export type UssdLogin = {
   at: number; // unix seconds
   phone: string; // the phone that dialled
@@ -158,6 +159,10 @@ export const setName = (token: string, name: string) =>
 /** Whether non-priority contacts appear on USSD (*384*88041#). */
 export const setShowOthers = (token: string, showOthers: boolean) =>
   request<{ show_others: boolean }>('/api/settings', { method: 'POST', body: JSON.stringify({ show_others: showOthers }) }, token);
+
+/** Whether USSD "SMS me my contacts" texts all contacts (true) or only the priority ones (false). */
+export const setSmsAll = (token: string, smsAll: boolean) =>
+  request<{ sms_all: boolean }>('/api/settings', { method: 'POST', body: JSON.stringify({ sms_all: smsAll }) }, token);
 
 export type EmergencyNumber = { number: string; label: string; saved: boolean };
 
