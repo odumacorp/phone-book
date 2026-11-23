@@ -34,6 +34,7 @@
     <a href="/admin" class="{{ 'active' if page == 'dashboard' else '' }}">Dashboard</a>
     <a href="/admin/notifications" class="{{ 'active' if page == 'notifications' else '' }}">Sent notifications and replies</a>
     <a href="/admin/templates" class="{{ 'active' if page == 'templates' else '' }}">Emails and notifications</a>
+    <a href="/platform/" title="Organisations, prices, USSD codes, staff, settings and audit log">Platform →</a>
   </nav>
 
   {% if message %}<div class="flash">{{ message }}</div>{% endif %}

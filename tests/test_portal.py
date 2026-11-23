@@ -121,3 +121,13 @@ def test_staff_cannot_lock_themselves_out(staff_client):
     resp = client.post(f"/platform/staff/{me}", data={"csrf": csrf, "action": "role", "role": "platform_super_admin", "on": "0"})
     assert "can" in client.get(resp.headers["Location"]).get_data(as_text=True)
     assert client.get("/platform/staff").status_code == 200
+
+
+def test_admin_page_links_to_platform(client):
+    page = client.get("/admin").get_data(as_text=True)
+    token = re.search(r'name="csrf" value="([^"]+)"', page).group(1)
+    client.post("/admin/login", data={"csrf": token, "password": "admin-pass"})
+    dash = client.get("/admin").get_data(as_text=True)
+    assert 'href="/platform/"' in dash
+    assert client.get("/platform/").status_code == 200  # same login, no second password
+    assert client.get("/platform/pricing").status_code == 200
