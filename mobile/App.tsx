@@ -68,6 +68,7 @@ import {
   setName,
   setPriority,
   setShowOthers,
+  setSmsAll,
   syncContacts,
 } from './src/api';
 import {
@@ -1688,6 +1689,7 @@ function SyncScreen({
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [maxPriority, setMaxPriority] = useState(5);
   const [showOthers, setShowOthersState] = useState(true);
+  const [smsAll, setSmsAllState] = useState(true);
   const [query, setQuery] = useState('');
   const [name, setNameText] = useState(me?.name ?? '');
   const [savedName, setSavedName] = useState(me?.name ?? '');
@@ -1739,6 +1741,7 @@ function SyncScreen({
       setContacts(list.contacts);
       setMaxPriority(list.max_priority);
       setShowOthersState(list.show_others);
+      setSmsAllState(list.sms_all ?? list.show_others);
     } catch (e) {
       failed(e, 'Could not load your contacts.');
     }
@@ -1845,6 +1848,17 @@ function SyncScreen({
     }
   };
 
+  const toggleSmsAll = async (value: boolean) => {
+    setSmsAllState(value);
+    setError('');
+    try {
+      await setSmsAll(token, value);
+    } catch (e) {
+      setSmsAllState(!value);
+      failed(e, 'Could not save the setting.');
+    }
+  };
+
   const visible = useMemo(() => {
     const sorted = [...(contacts ?? [])].sort(
       (a, b) => Number(b.priority) - Number(a.priority) || a.name.localeCompare(b.name),
@@ -1914,6 +1928,17 @@ function SyncScreen({
             </Text>
           </View>
           <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
+        </View>
+        <View style={styles.switchRow}>
+          <View style={styles.switchText}>
+            <Text style={styles.switchLabel}>Send all contacts by SMS</Text>
+            <Text style={styles.hint}>
+              {smsAll
+                ? `"SMS me my contacts" on ${USSD_CODE} texts all your contacts to the phone you dialled from.`
+                : `"SMS me my contacts" on ${USSD_CODE} texts only your ${maxPriority} priority contacts to the phone you dialled from.`}
+            </Text>
+          </View>
+          <Switch value={smsAll} onValueChange={toggleSmsAll} trackColor={{ true: COLORS.primary }} />
         </View>
         <View style={styles.linkRow}>
           <Link
