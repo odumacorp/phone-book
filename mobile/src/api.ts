@@ -20,6 +20,7 @@ export type Me = {
   features?: { email_verification?: boolean }; // switched on by the admin
   unread_notifications?: number;
   ussd_code?: string; // the USSD code users dial
+  organisations?: number; // organisations this person belongs to
 };
 /** An email on the account (up to max_emails). Any of them can be used to log in. */
 export type EmailAddress = { id: number; email: string; verified: boolean; notify?: boolean };
@@ -288,3 +289,20 @@ export const getComplaints = (token: string) => request<{ complaints: Complaint[
 
 export const syncContacts = (token: string, contacts: SyncContact[]) =>
   request<SyncResult>('/api/contacts/sync', { method: 'POST', body: JSON.stringify({ contacts }) }, token);
+
+/** An organisation the user belongs to (school, SACCO, employer...). */
+export type OrgSummary = { id: number; name: string; notices: number; urgent: number };
+export type OrgContact = { id: number; name: string; phone: string; title: string | null; group: string | null };
+export type OrgNotice = { id: number; title: string; body: string; urgent: boolean; pinned: boolean; at: number };
+export type OrgDetail = {
+  org: { id: number; name: string };
+  notices: OrgNotice[];
+  contacts: OrgContact[];
+  emergency: OrgContact[];
+};
+
+/** The user's organisations, with how many notices each has for them. */
+export const getOrgs = (token: string) => request<{ orgs: OrgSummary[] }>('/api/orgs', {}, token);
+
+/** What an organisation shares with this user: notices, contacts and emergency contacts. */
+export const getOrg = (token: string, id: number) => request<OrgDetail>(`/api/orgs/${id}`, {}, token);

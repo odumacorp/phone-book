@@ -54,6 +54,11 @@ import {
   getLogins,
   getSessions,
   getMe,
+  getOrg,
+  getOrgs,
+  type OrgContact,
+  type OrgDetail,
+  type OrgSummary,
   isValidPhone,
   loadConfig,
   loadToken,
@@ -105,7 +110,8 @@ type View_ =
   | 'verifyEmail'
   | 'addEmail'
   | 'notifications'
-  | 'report';
+  | 'report'
+  | 'orgs';
 
 export default function App() {
   return (
@@ -225,6 +231,7 @@ function Main() {
   else if (view === 'logins') content = <LoginHistoryScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'sessions') content = <SessionsScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'emergency') content = <EmergencyScreen token={token} onBack={back} onLogout={logout} />;
+  else if (view === 'orgs') content = <OrganisationsScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'addContact')
     content = <AddContactScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
   else if (view === 'editContact' && editing)
@@ -253,6 +260,10 @@ function Main() {
         onEmergency={() => {
           setNotice('');
           setView('emergency');
+        }}
+        onOrgs={() => {
+          setNotice('');
+          setView('orgs');
         }}
         onAddContact={() => {
           setNotice('');
@@ -1589,6 +1600,160 @@ function callNumber(phone: string) {
 }
 
 /** Free emergency and help lines: call straight from the phone, or add to the contacts. */
+/** The user's organisations (school, SACCO, employer...): their notices, emergency contacts and contacts. */
+function OrganisationsScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+  const [orgs, setOrgs] = useState<OrgSummary[] | null>(null);
+  const [detail, setDetail] = useState<OrgDetail | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+
+  const fail = (e: unknown, fallback: string) => {
+    if (e instanceof ApiError && e.status === 401) return onLogout();
+    setError(e instanceof Error ? e.message : fallback);
+  };
+
+  const open = useCallback(
+    async (id: number) => {
+      setError('');
+      setNotice('');
+      try {
+        setDetail(await getOrg(token, id));
+      } catch (e) {
+        fail(e, 'Could not load this organisation.');
+      }
+    },
+    [token],
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = (await getOrgs(token)).orgs;
+        setOrgs(list);
+        if (list.length === 1) open(list[0].id); // only one: open it straight away
+      } catch (e) {
+        fail(e, 'Could not load your organisations.');
+      }
+    })();
+  }, [token, open]);
+
+  const save = async (c: OrgContact) => {
+    setError('');
+    try {
+      await addContact(token, c.name, c.phone);
+      setNotice(`${c.name} added to your contacts.`);
+      setSaved((s) => new Set(s).add(c.phone));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setSaved((s) => new Set(s).add(c.phone));
+        return setNotice(e.message);
+      }
+      fail(e, 'Could not add the contact.');
+    }
+  };
+
+  const contactRow = (c: OrgContact, urgent = false) => (
+    <View key={c.id} style={styles.sessionRow}>
+      <View style={styles.rowText}>
+        <Text style={styles.rowName}>{c.name}</Text>
+        <Text style={styles.rowPhone}>
+          {c.title ? `${c.title} · ` : ''}
+          {c.phone}
+        </Text>
+      </View>
+      {saved.has(c.phone) ? (
+        <Text style={styles.savedTag}>Saved</Text>
+      ) : (
+        <Pressable onPress={() => save(c)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Save ${c.name} to my contacts`}>
+          <Text style={styles.showLink}>Save</Text>
+        </Pressable>
+      )}
+      <Pressable
+        style={[styles.callButton, !urgent && styles.callButtonCalm]}
+        onPress={() => callNumber(c.phone)}
+        accessibilityRole="button"
+        accessibilityLabel={`Call ${c.name}`}
+      >
+        <Text style={styles.callButtonText}>Call</Text>
+      </Pressable>
+    </View>
+  );
+
+  const header = (
+    <View style={styles.card}>
+      <Text style={styles.heading}>{detail ? detail.org.name : 'My organisations'}</Text>
+      <Text style={styles.hint}>
+        {detail
+          ? `Notices and contacts from ${detail.org.name}. Also on ${ussdCode()}: choose 7. My organisations.`
+          : 'Organisations you belong to, such as your school, SACCO or employer.'}
+      </Text>
+      {notice ? <Text style={styles.status}>{notice}</Text> : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Link
+        title={detail && orgs && orgs.length > 1 ? 'All organisations' : 'Back'}
+        onPress={() => (detail && orgs && orgs.length > 1 ? setDetail(null) : onBack())}
+      />
+    </View>
+  );
+
+  if (!detail) {
+    return (
+      <ScrollView style={styles.list} contentContainerStyle={styles.formScroll}>
+        {header}
+        {orgs === null ? <ActivityIndicator color={COLORS.primary} /> : null}
+        {orgs?.length === 0 ? <Text style={styles.hint}>You are not in any organisation yet.</Text> : null}
+        {orgs && orgs.length > 1
+          ? orgs.map((o) => (
+              <Pressable key={o.id} style={styles.sessionRow} onPress={() => open(o.id)} accessibilityRole="button">
+                <View style={styles.rowText}>
+                  <Text style={styles.rowName}>{o.name}</Text>
+                  <Text style={styles.rowPhone}>
+                    {o.notices ? `${o.notices} notice${o.notices === 1 ? '' : 's'}` : 'No notices'}
+                    {o.urgent ? ` · ${o.urgent} urgent` : ''}
+                  </Text>
+                </View>
+                <Text style={styles.showLink}>Open</Text>
+              </Pressable>
+            ))
+          : null}
+      </ScrollView>
+    );
+  }
+
+  const groups = new Map<string, OrgContact[]>();
+  for (const c of detail.contacts) {
+    const g = c.group || 'Contacts';
+    groups.set(g, [...(groups.get(g) ?? []), c]);
+  }
+
+  return (
+    <ScrollView style={styles.list} contentContainerStyle={styles.formScroll}>
+      {header}
+      <Text style={styles.sectionTitle}>Notices</Text>
+      {detail.notices.length === 0 ? <Text style={styles.hint}>No notices right now.</Text> : null}
+      {detail.notices.map((n) => (
+        <View key={n.id} style={[styles.card, n.urgent && styles.urgentCard]}>
+          <Text style={styles.noticeTitle}>
+            {n.urgent ? 'URGENT: ' : ''}
+            {n.title}
+          </Text>
+          <Text style={styles.noticeBody}>{n.body}</Text>
+          <Text style={styles.rowPhone}>{new Date(n.at * 1000).toLocaleDateString()}</Text>
+        </View>
+      ))}
+      {detail.emergency.length ? <Text style={styles.sectionTitle}>Emergency contacts</Text> : null}
+      {detail.emergency.map((c) => contactRow(c, true))}
+      {[...groups.entries()].map(([g, list]) => (
+        <View key={g}>
+          <Text style={styles.sectionTitle}>{g}</Text>
+          {list.map((c) => contactRow(c))}
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
 function EmergencyScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
   const [numbers, setNumbers] = useState<EmergencyNumber[] | null>(null);
   const [error, setError] = useState('');
@@ -1677,6 +1842,7 @@ function SyncScreen({
   onChangePin,
   onChangePassword,
   onEmergency,
+  onOrgs,
   onAddContact,
   onEditContact,
   onPickContacts,
@@ -1695,6 +1861,7 @@ function SyncScreen({
   onChangePin: () => void;
   onChangePassword: () => void;
   onEmergency: () => void;
+  onOrgs: () => void;
   onAddContact: () => void;
   onEditContact: (contact: Contact) => void;
   onPickContacts: () => void;
@@ -1938,6 +2105,13 @@ function SyncScreen({
         <Pressable style={styles.emergencyButton} onPress={onEmergency} accessibilityRole="button">
           <Text style={styles.emergencyButtonText}>Emergency numbers</Text>
         </Pressable>
+        {me?.organisations ? (
+          <Pressable style={styles.orgButton} onPress={onOrgs} accessibilityRole="button">
+            <Text style={styles.orgButtonText}>
+              My organisations{me.organisations > 1 ? ` (${me.organisations})` : ''}
+            </Text>
+          </Pressable>
+        ) : null}
         <Button title="Choose contacts from phone" onPress={onPickContacts} disabled={busy} />
         <View style={styles.buttonRow}>
           <SecondaryButton title="Add contact" onPress={onAddContact} disabled={busy} />
@@ -2276,6 +2450,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   emergencyButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  orgButton: { backgroundColor: '#eaf2ff', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+  orgButtonText: { color: COLORS.primary, fontSize: 16, fontWeight: '700' },
+  urgentCard: { borderLeftWidth: 4, borderLeftColor: COLORS.error },
+  noticeTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
+  noticeBody: { fontSize: 15, color: COLORS.text, lineHeight: 22 },
+  callButtonCalm: { backgroundColor: COLORS.primary },
   emergencyNumber: { fontSize: 22, fontWeight: '700', color: COLORS.text },
   callButton: { backgroundColor: COLORS.error, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 18 },
   callButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
