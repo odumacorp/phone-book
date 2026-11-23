@@ -1,8 +1,9 @@
 {% extends "platform/base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
+<div class="page-head"><h1>Overview</h1><p>A quick look at the organisations on Remote Phonebook and the platform's setup.</p></div>
 {% if no_staff %}
-  <div class="card warn">You're logged in with the admin password. <a href="/platform/staff">Create staff accounts</a> (with roles) so each
+  <div class="tip">You're logged in with the admin password. <a href="/platform/staff">Create staff accounts</a> (with roles) so each
     person logs in as themselves and their actions are audited by name.</div>
 {% endif %}
 <div class="card">

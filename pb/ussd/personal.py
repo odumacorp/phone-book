@@ -3,7 +3,8 @@ from pb.contacts import add_contact, delete_contact, find_contact_by_phone, list
 from pb.messaging import send_sms_async, sms, start_call_async, voice
 from pb.text import EMERGENCY_NUMBERS, con, end, format_contacts, is_service_number, local_number, normalize_contact_phone, position_of
 from pb.users import get_user
-from pb.ussd.screens import INVALID, MAIN_MENU, MENU_ACTIONS, NO_PRIORITY, screen
+from pb.ussd.orgs import has_organisations, organisations_menu
+from pb.ussd.screens import INVALID, MAIN_MENU, MEMBER_MENU, MENU_ACTIONS, NO_PRIORITY, screen
 
 
 # ---------------------------------------------------------------- menu logic
@@ -12,11 +13,15 @@ from pb.ussd.screens import INVALID, MAIN_MENU, MENU_ACTIONS, NO_PRIORITY, scree
 
 def menu(owner, caller, parts):
     if not parts:
-        return con(MAIN_MENU)
+        return con(MEMBER_MENU if has_organisations(owner) else MAIN_MENU)
 
     choice, rest = MENU_ACTIONS.get(parts[0]), parts[1:]
     if parts[0].strip() and not parts[0].strip().isdigit():
         return menu(owner, caller, ["4"] + parts)  # typed a name on the main menu: search straight away
+    # 7. My organisations: notices, contacts and emergency contacts from the user's organisations
+    if choice == "orgs":
+        return organisations_menu(owner, caller, rest, contact_menu)
+
     only = priority_only(owner)
     none_yet = NO_PRIORITY if only else "You have no contacts yet."
 

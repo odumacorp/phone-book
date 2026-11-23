@@ -1,7 +1,7 @@
 {% extends "platform/base.html" %}
 {% block title %}{{ item.name }}{% endblock %}
 {% block content %}
-<p><a href="/platform/pricing">← All prices</a></p>
+<a class="crumb" href="/platform/pricing">← All prices</a>
 <div class="card">
   <h2>{{ item.name }} <span class="muted">(USSD code fee, added on top of the plan)</span></h2>
   <form method="post" action="/platform/pricing/code_fee/{{ item.code_type }}"><input type="hidden" name="csrf" value="{{ csrf }}">

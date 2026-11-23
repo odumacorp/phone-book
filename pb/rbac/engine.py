@@ -273,6 +273,14 @@ def revoke(granter, tenant_id, assignment_id, as_platform=False):
     audit("role.revoke", tenant_id, ("principal", row["principal"]), {"role": row["key"], "scope": list(scope)}, actor=granter)
 
 
+def role_keys(principal, tenant_id):
+    """The keys of the roles a principal holds in a tenant (any scope)."""
+    return {r["key"] for r in fetch_all(
+        "SELECT r.key FROM role_assignments ra JOIN roles r ON r.id = ra.role_id WHERE ra.tenant_id = ? AND ra.principal = ?",
+        (tenant_id, principal),
+    )}
+
+
 def tenant_assignments(tenant_id):
     return fetch_all(
         "SELECT ra.id, ra.principal, ra.scope_type, ra.scope_id, r.key, r.name FROM role_assignments ra "

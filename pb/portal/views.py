@@ -1,7 +1,7 @@
 """Platform portal pages. Each view: check the permission (needs), validate the form, call the service, flash, redirect."""
 import json
 
-from flask import abort, g, render_template, request
+from flask import abort, g, redirect, render_template, request, url_for
 
 from pb.audit import audit_entries
 from pb.auth import staff as staff_auth
@@ -9,7 +9,7 @@ from pb.billing import catalogue, ussd_codes
 from pb.db import fetch_one
 from pb.features import feature_on, set_feature
 from pb.messaging import sms
-from pb.portal import bp, done, failed, needs
+from pb.portal import bp, done, failed, is_staff, needs
 from pb.rbac import engine as rbac
 from pb.rbac.catalogue import ALL_PERMISSIONS, SYSTEM_ROLES
 from pb.tenancy import tenants as tenancy
@@ -33,6 +33,8 @@ def _can_open_tenant(t):
 
 @bp.route("/", methods=["GET"])
 def dashboard():
+    if not is_staff():
+        return redirect(url_for("platform.org_home"))  # organisation admins: their workspace
     counts = {}
     if rbac.can_anywhere(g.principal, "platform.tenants.view") or rbac.can(g.principal, "platform.tenants.view_own"):
         rows = tenancy.tenants(reseller_id=_reseller_id())

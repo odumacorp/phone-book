@@ -1,0 +1,10 @@
+{# Who can see this: everyone, or chosen roles. Needs: choices, selected #}
+<label class="field" style="margin-bottom:4px">Who can see this</label>
+<div class="checks">
+  <label><input type="radio" name="audience_mode" value="everyone" {{ 'checked' if not selected }} onclick="this.form.querySelectorAll('.aud input').forEach(i=>i.checked=false)"> Everyone in the organisation</label>
+  <label><input type="radio" name="audience_mode" value="some" {{ 'checked' if selected }}> Only some people:</label>
+</div>
+<div class="checks aud" style="margin-left:24px">
+  {% for key, name in choices %}<label><input type="checkbox" name="audience" value="{{ key }}" {{ 'checked' if key in selected }}
+    onclick="this.form.querySelector('[name=audience_mode][value=some]').checked=true"> {{ name }}</label>{% endfor %}
+</div>

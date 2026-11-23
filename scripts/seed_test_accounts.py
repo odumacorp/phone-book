@@ -168,9 +168,12 @@ def write_list(rows):
         "",
         "### Organisations",
         "",
-        "Each organisation is active and on the shared code with its org code. Until Phase 2 (USSD) and Phase 4 (organisation",
-        "portal) these people log in like personal users; their roles and permissions show on the organisation's page in",
-        "`/platform` and are what later phases check.",
+        "Each organisation is active and on the shared code with its org code.",
+        "",
+        "- **Owners and admins** log in at http://localhost:8000/platform with their phone number and `" + USER_PASSWORD + "`: they land in",
+        "  their organisation's workspace to post notices and add contacts, emergency contacts and members.",
+        "- **Everyone** sees what their organisation shares: on USSD choose `7. My organisations`; in the app tap *My organisations*.",
+        "  Notices and contacts can be limited to some roles (e.g. Clients only).",
     ]
     for org_name, edition, plan, org_code, tenant_id, people, reseller in rows["orgs"]:
         out += [

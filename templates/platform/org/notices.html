@@ -1,0 +1,52 @@
+{% extends "platform/base.html" %}
+{% set section = 'notices' %}
+{% block title %}Notices · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Notices</h1>
+  <p>Short messages for your members: news, reminders, meeting dates. On USSD members see the title first and open it to read
+    the rest, so put the key facts in the title.</p></div>
+
+<div class="card" id="form">
+  <h2>{{ 'Edit notice' if editing else 'Post a notice' }}</h2>
+  <form method="post" action="/platform/org/{{ org.id }}/notices">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if editing %}<input type="hidden" name="notice_id" value="{{ editing.id }}">{% endif %}
+    <label class="field">Title <small>Up to 80 characters. Example: "AGM on Sat 14 Dec, 10am, main hall"</small>
+      <input name="title" maxlength="80" required value="{{ editing.title if editing else '' }}"></label>
+    <label class="field">Message <small>Plain text. Long messages are split into pages on USSD.</small>
+      <textarea name="body" maxlength="2000" required>{{ editing.body if editing else '' }}</textarea></label>
+    {% set selected = editing_audience %}
+    {% include "platform/org/_audience.html" with context %}
+    <div class="checks">
+      <label><input type="checkbox" name="pinned" value="1" {{ 'checked' if editing and editing.pinned }}> Keep at the top</label>
+      <label><input type="checkbox" name="is_emergency" value="1" {{ 'checked' if editing and editing.is_emergency }}> Urgent (shown first, marked URGENT)</label>
+    </div>
+    <label class="field" style="max-width:320px">Show for how many days? <small>Leave empty to keep it until you delete it.</small>
+      <input name="expires_days" inputmode="numeric" placeholder="e.g. 30"></label>
+    <div class="row">
+      <button type="submit">{{ 'Save changes' if editing else 'Post notice' }}</button>
+      {% if editing %}<a class="btn secondary" href="/platform/org/{{ org.id }}/notices">Cancel</a>{% endif %}
+    </div>
+  </form>
+</div>
+<div class="card">
+  <h2>Posted notices</h2>
+  {% for n in rows %}
+  <div class="list-item">
+    <div style="min-width:0">
+      <h3>{{ n.title }}{% if n.is_emergency %}<span class="pill bad">Urgent</span>{% endif %}{% if n.pinned %}<span class="pill on">At the top</span>{% endif %}
+        {% if n.expires_at and n.expires_at < now %}<span class="pill off">Expired</span>{% endif %}</h3>
+      <div class="body">{{ n.body }}</div>
+      <div class="muted">Seen by: {{ n.audience_text }} · posted {{ fmt_date(n.publish_at) }}{{ ' · until ' ~ fmt_date(n.expires_at) if n.expires_at }}</div>
+    </div>
+    <div class="row" style="flex-wrap:nowrap">
+      <a class="btn secondary small" href="/platform/org/{{ org.id }}/notices?edit={{ n.id }}#form">Edit</a>
+      <form method="post" action="/platform/org/{{ org.id }}/notices/{{ n.id }}/delete" class="inline" onsubmit="return confirm('Delete this notice? Members will no longer see it.')">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Delete</button></form>
+    </div>
+  </div>
+  {% else %}
+  <div class="empty"><b>No notices yet</b>Post your first notice above. Members see it straight away.</div>
+  {% endfor %}
+</div>
+{% endblock %}

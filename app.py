@@ -15,7 +15,7 @@ import os
 
 from pb.web import app
 from pb import admin, jobs, website  # noqa: F401  (importing a module registers its routes)
-from pb.api import account, auth, complaints, contacts, notifications  # noqa: F401
+from pb.api import account, auth, complaints, contacts, notifications, orgs  # noqa: F401
 from pb.ussd import routes  # noqa: F401
 from pb.portal import bp as platform_portal
 from pb.schema import init_db

@@ -1,10 +1,9 @@
 {% extends "platform/base.html" %}
 {% block title %}Prices{% endblock %}
 {% block content %}
+<div class="page-head"><h1>Prices</h1><p>Every plan, add-on and USSD code fee in one list. Click one to change it. Each change is
+  kept in its history. The starting figures are placeholders until confirmed.</p></div>
 <div class="card">
-  <h2>All prices</h2>
-  <p class="muted">Every plan, add-on and USSD code fee. Pick one to edit it; changes are kept in its history and the audit log.
-    The seeded figures are placeholders until confirmed.</p>
   <table>
     <tr><th>Item</th><th>Type</th><th>Price</th><th>Status</th><th>Last changed</th><th></th></tr>
     {% for i in items %}
@@ -19,7 +18,7 @@
 </div>
 {% if manage %}
 <details class="card">
-  <summary><b>Add a plan</b></summary>
+  <summary>➕ Add a plan</summary>
   <form method="post" action="/platform/pricing/plans/new" style="margin-top:12px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="grid2">

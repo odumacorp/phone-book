@@ -90,7 +90,19 @@ contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must 
 ## Platform portal (`/platform`)
 
 For Oduma Corp staff: organisations (tenants), prices, USSD codes, staff accounts, platform settings and the audit log.
-Plans and editions: `docs/packages-plan.md`.
+And for **organisation owners, admins and operators**: their organisation's workspace. Plans and editions: `docs/packages-plan.md`.
+
+### Organisation workspace (`/platform/org`)
+Organisation admins log in at `/platform` with their Remote Phonebook account (phone number or email + password; an SMS
+code too when OTP is on). They can post **notices** (pinned, urgent, expiring), and add **contacts** (in groups),
+**emergency contacts** and **members** with a role. Each item can be shown to everyone or only some roles (e.g. Clients).
+What each person can do follows their role (e.g. publishers post notices; admins do everything but billing).
+Members see it at once:
+- **USSD:** main menu `7. My organisations` (shown only to members) → Notices / Contacts / Emergency contacts. Notices
+  open page by page and can be texted to the phone; contacts open call / SMS / copy. Organisations set to "own phone only"
+  are closed to borrowed phones.
+- **App and website:** *My organisations* on the home screen, with Call and Save-to-my-contacts buttons.
+Platform staff can open any workspace from the organisation's page (*Open workspace*) to help set it up.
 
 - **Logging in:** staff accounts (email + password; 5 wrong passwords lock the account for 15 minutes). The `/admin`
   password also works as a break-glass Super Admin: log in at `/admin`, then open `/platform`. Create the first staff

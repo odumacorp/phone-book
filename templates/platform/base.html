@@ -6,35 +6,49 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{% block title %}Platform{% endblock %} · Remote Phonebook</title>
 <link rel="icon" href="/favicon.png">
-{% include "_style.html" %}
-<style> main { max-width: 1100px; } </style>
+{% include "platform/_style.html" %}
 </head>
 <body>
-<main>
-  <header>
-    <h1>Remote Phonebook · Platform</h1>
-    <div class="row">
-      <span class="muted">{{ staff_user.name }}</span>
-      <form method="post" action="/platform/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="secondary" type="submit">Log out</button></form>
+<div class="layout">
+  <aside class="side">
+    <div class="brand"><img src="/favicon.png" alt="">Remote Phonebook</div>
+    <nav>
+    {% if org is defined and org %}
+      <h6>{{ org.name }}</h6>
+      <a class="item {{ 'active' if section == 'overview' }}" href="/platform/org/{{ org.id }}"><span class="icon">🏠</span>Home</a>
+      {% if 'notices' in areas %}<a class="item {{ 'active' if section == 'notices' }}" href="/platform/org/{{ org.id }}/notices"><span class="icon">📢</span>Notices</a>{% endif %}
+      {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contacts' }}" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span>Contacts</a>{% endif %}
+      {% if 'emergency' in areas %}<a class="item {{ 'active' if section == 'emergency' }}" href="/platform/org/{{ org.id }}/emergency"><span class="icon">🚨</span>Emergency contacts</a>{% endif %}
+      {% if 'members' in areas %}<a class="item {{ 'active' if section == 'members' }}" href="/platform/org/{{ org.id }}/members"><span class="icon">👥</span>Members</a>{% endif %}
+      {% if 'settings' in areas %}<a class="item {{ 'active' if section == 'settings' }}" href="/platform/org/{{ org.id }}/settings"><span class="icon">⚙️</span>Settings</a>{% endif %}
+      {% if not is_staff %}<a class="item" href="/platform/org"><span class="icon">↔️</span>Switch organisation</a>{% endif %}
+    {% endif %}
+    {% if is_staff %}
+      <h6>Oduma Corp</h6>
+      <a class="item {{ 'active' if page == 'dashboard' }}" href="/platform/"><span class="icon">📊</span>Overview</a>
+      {% if allowed('platform.tenants.view') or allowed('platform.tenants.manage') or allowed('platform.tenants.view_own') %}
+        <a class="item {{ 'active' if page == 'tenants' }}" href="/platform/tenants"><span class="icon">🏢</span>Organisations</a>{% endif %}
+      {% if allowed('platform.pricing.view') %}<a class="item {{ 'active' if page == 'pricing' }}" href="/platform/pricing"><span class="icon">💰</span>Prices</a>{% endif %}
+      {% if allowed('platform.ussd_codes.manage') or allowed('platform.tenants.view') %}
+        <a class="item {{ 'active' if page == 'codes' }}" href="/platform/ussd-codes"><span class="icon">#️⃣</span>USSD codes</a>{% endif %}
+      {% if allowed('platform.staff.manage') %}<a class="item {{ 'active' if page == 'staff' }}" href="/platform/staff"><span class="icon">🧑‍💼</span>Staff</a>{% endif %}
+      {% if allowed('platform.flags.manage') %}<a class="item {{ 'active' if page == 'settings' }}" href="/platform/settings"><span class="icon">⚙️</span>Settings</a>{% endif %}
+      {% if allowed('platform.audit.view') %}<a class="item {{ 'active' if page == 'audit' }}" href="/platform/audit"><span class="icon">🕘</span>Activity log</a>{% endif %}
+      {% if allowed('platform.flags.manage') %}<a class="item" href="/admin"><span class="icon">📱</span>Phone book admin</a>{% endif %}
+    {% endif %}
+    </nav>
+    <div class="who">
+      Logged in as <b>{{ staff_user.name }}</b>
+      <form method="post" action="/platform/logout" style="margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="secondary small" type="submit">Log out</button></form>
     </div>
-  </header>
-  <nav class="tabs nav">
-    <a href="/platform/" class="{{ 'active' if page == 'dashboard' }}">Dashboard</a>
-    {% if allowed('platform.tenants.view') or allowed('platform.tenants.manage') or allowed('platform.tenants.view_own') %}
-      <a href="/platform/tenants" class="{{ 'active' if page == 'tenants' }}">Organisations</a>{% endif %}
-    {% if allowed('platform.pricing.view') %}<a href="/platform/pricing" class="{{ 'active' if page == 'pricing' }}">Prices</a>{% endif %}
-    {% if allowed('platform.ussd_codes.manage') or allowed('platform.tenants.view') %}
-      <a href="/platform/ussd-codes" class="{{ 'active' if page == 'codes' }}">USSD codes</a>{% endif %}
-    {% if allowed('platform.staff.manage') %}<a href="/platform/staff" class="{{ 'active' if page == 'staff' }}">Staff</a>{% endif %}
-    {% if allowed('platform.flags.manage') %}<a href="/platform/settings" class="{{ 'active' if page == 'settings' }}">Settings</a>{% endif %}
-    {% if allowed('platform.audit.view') %}<a href="/platform/audit" class="{{ 'active' if page == 'audit' }}">Audit log</a>{% endif %}
-    {% if allowed('platform.flags.manage') %}<a href="/admin">Phone book admin</a>{% endif %}
-  </nav>
-  {% for category, message in get_flashed_messages(with_categories=true) %}
-    <div class="{{ 'error' if category == 'error' else 'flash' }}">{{ message }}</div>
-  {% endfor %}
-  {% block content %}{% endblock %}
-</main>
+  </aside>
+  <main class="content">
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+      <div class="{{ 'error' if category == 'error' else 'flash' }}">{{ message }}</div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
 </body>
 </html>

@@ -1,0 +1,37 @@
+{% extends "platform/base.html" %}
+{% set section = 'members' %}
+{% block title %}Members · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Members</h1>
+  <p>People in your organisation. Members see your notices and contacts after logging in with this phone number on USSD or in
+    the app. If they don't have an account yet, they can register in the app with the same number.</p></div>
+
+<div class="card">
+  <h2>Add a member</h2>
+  <form method="post" action="/platform/org/{{ org.id }}/members">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2">
+      <label class="field">Phone number<input name="phone" inputmode="tel" required placeholder="0712 345 678"></label>
+      <label class="field">Name<input name="name" maxlength="80" placeholder="Optional"></label>
+      <label class="field">Role <small>Decides what they can see and do</small>
+        <select name="role">{% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == 'member' }}>{{ name }}</option>{% endfor %}</select></label>
+    </div>
+    <button type="submit">Add member</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>{{ rows|length }} member{{ '' if rows|length == 1 else 's' }}</h2>
+  {% if rows %}
+  <table>
+    <tr><th>Name</th><th>Phone</th><th>Role</th><th>Joined</th><th></th></tr>
+    {% for m in rows %}
+    <tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td>{{ m.roles|join(', ') }}</td><td class="muted">{{ fmt_date(m.joined_at) }}</td>
+      <td style="text-align:right"><form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/remove" class="inline"
+        onsubmit="return confirm('Remove {{ m.display_name or local(m.user_phone) }} from {{ org.name }}?')">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Remove</button></form></td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty"><b>No members yet</b>Add your first member above.</div>{% endif %}
+</div>
+{% endblock %}

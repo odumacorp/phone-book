@@ -1,0 +1,14 @@
+{% extends "platform/base.html" %}
+{% block title %}Your organisations{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Your organisations</h1><p>Choose the organisation you want to manage.</p></div>
+{% if rows %}
+<div class="actions">
+  {% for o in rows %}<a class="action" href="/platform/org/{{ o.tenant_id }}"><span class="icon">🏢</span><b>{{ o.name }}</b><span>Manage {{ o.areas|join(', ') }}</span></a>{% endfor %}
+</div>
+{% else %}
+<div class="card empty"><b>Nothing to manage yet</b>
+  Your account isn't an admin or operator of any organisation. Ask your organisation's owner to give you a role,
+  or contact Oduma Corp. To see your organisations' notices and contacts, use the Remote Phonebook app or USSD.</div>
+{% endif %}
+{% endblock %}

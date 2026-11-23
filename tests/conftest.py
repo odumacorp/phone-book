@@ -216,7 +216,7 @@ def ctx():
 
 def csrf_of(client, path="/platform/login"):
     import re
-    page = client.get(path).get_data(as_text=True)
+    page = client.get(path, follow_redirects=True).get_data(as_text=True)
     return re.search(r'name="csrf" value="([^"]+)"', page).group(1)
 
 

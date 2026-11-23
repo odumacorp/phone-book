@@ -1,6 +1,7 @@
 {% extends "platform/base.html" %}
 {% block title %}Audit log{% endblock %}
 {% block content %}
+<div class="page-head"><h1>Activity log</h1><p>Who changed what, and when: prices, roles, organisations, codes, notices and contacts.</p></div>
 <div class="card">
   <form class="filters" method="get">
     <label>Organisation id<input name="tenant" value="{{ args.get('tenant', '') }}" inputmode="numeric"></label>

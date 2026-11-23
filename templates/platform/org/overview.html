@@ -1,0 +1,39 @@
+{% extends "platform/base.html" %}
+{% set section = 'overview' %}
+{% block title %}{{ org.name }}{% endblock %}
+{% block content %}
+{% if staff_help %}<a class="crumb" href="/platform/tenants/{{ org.id }}">← Back to the organisation's platform page</a>{% endif %}
+<div class="page-head">
+  <h1>{{ org.name }}</h1>
+  <p>Add the notices and contacts your members need. They see them straight away on USSD (any phone, no internet) and in
+    the Remote Phonebook app.</p>
+</div>
+{% if org.status in ('suspended', 'closed') %}<div class="error">This organisation is {{ org.status }}: members can't see anything until Oduma Corp reactivates it.</div>{% endif %}
+
+<div class="stats" style="margin-bottom:18px">
+  {% if 'notices' in areas %}<a class="stat" href="/platform/org/{{ org.id }}/notices"><b>{{ counts.notices }}</b><span>Notices</span></a>{% endif %}
+  {% if 'contacts' in areas %}<a class="stat" href="/platform/org/{{ org.id }}/contacts"><b>{{ counts.contacts }}</b><span>Contacts</span></a>{% endif %}
+  {% if 'emergency' in areas %}<a class="stat" href="/platform/org/{{ org.id }}/emergency"><b>{{ counts.emergency }}</b><span>Emergency contacts</span></a>{% endif %}
+  {% if 'members' in areas %}<a class="stat" href="/platform/org/{{ org.id }}/members"><b>{{ counts.members }}</b><span>Members</span></a>{% endif %}
+</div>
+
+<div class="two">
+  <div>
+    <h2 style="margin-bottom:12px">What would you like to do?</h2>
+    <div class="actions">
+      {% if 'notices' in areas %}<a class="action" href="/platform/org/{{ org.id }}/notices"><span class="icon">📢</span><b>Post a notice</b><span>News, reminders, meeting dates, urgent alerts</span></a>{% endif %}
+      {% if 'contacts' in areas %}<a class="action" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span><b>Add a contact</b><span>Offices, staff, advocates, helpdesks</span></a>{% endif %}
+      {% if 'emergency' in areas %}<a class="action" href="/platform/org/{{ org.id }}/emergency"><span class="icon">🚨</span><b>Add an emergency contact</b><span>Nurse, security, ambulance, claims hotline</span></a>{% endif %}
+      {% if 'members' in areas %}<a class="action" href="/platform/org/{{ org.id }}/members"><span class="icon">👥</span><b>Add a member</b><span>So they can see your notices and contacts</span></a>{% endif %}
+    </div>
+  </div>
+  <div>
+    <div class="phone">
+      <pre>{{ org.name[:22] }}
+{% for label in preview %}{{ loop.index }}. {{ label }}
+{% endfor %}0.Back 00.Home</pre>
+      <div class="cap">{% if dial %}What members see when they dial <b>{{ dial }}</b>, or choose "My organisations" on {{ main_code }}{% else %}What members see under "My organisations" on {{ main_code }}{% endif %}</div>
+    </div>
+  </div>
+</div>
+{% endblock %}

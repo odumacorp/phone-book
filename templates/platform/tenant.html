@@ -1,10 +1,14 @@
 {% extends "platform/base.html" %}
 {% block title %}{{ t.name }}{% endblock %}
 {% block content %}
-<p><a href="/platform/tenants">← Organisations</a></p>
+<a class="crumb" href="/platform/tenants">← All organisations</a>
+<div class="page-head row" style="justify-content:space-between">
+  <div><h1>{{ t.name }}</h1><p>Everything about this organisation. To add its notices, contacts and members, open its workspace.</p></div>
+  {% if manage %}<a class="btn" href="/platform/org/{{ t.id }}">Open workspace →</a>{% endif %}
+</div>
 <div class="card">
-  <h2>{{ t.name }} <span class="pill {{ 'on' if t.status == 'active' else 'warn' if t.status in ('trial', 'grace') else 'off' }}">{{ statuses[t.status] }}</span></h2>
-  <p class="muted">Edition <b>{{ t.edition }}</b> · Plan <b>{{ t.plan_key }}</b> · Org code <b>{{ t.org_code or 'none yet' }}</b> ·
+  <h2>Plan and status <span class="pill {{ 'on' if t.status == 'active' else 'warn' if t.status in ('trial', 'grace') else 'off' }}">{{ statuses[t.status] }}</span></h2>
+  <p class="muted">Edition <b>{{ edition_name(t.edition) }}</b> · Plan <b>{{ plan_name(t.plan_key) }}</b> · Org code <b>{{ t.org_code or 'none yet' }}</b> ·
     {{ member_count }} members · created {{ fmt_date(t.created_at) }}</p>
   {% if manage %}
   <form method="post" action="/platform/tenants/{{ t.id }}/update">
@@ -34,7 +38,7 @@
     <select name="code_id" style="flex:2 1 260px">
       {% for c in codes %}<option value="{{ c.id }}">{{ c.code }} · {{ c.code_type }}{{ ' (main)' if c.is_main }}{{ ' · ' ~ c.tenants ~ ' orgs' if c.code_type == 'shared' }}</option>{% endfor %}
     </select>
-    <input name="org_code" placeholder="Org code (shared codes; blank = automatic)" inputmode="numeric" maxlength="6">
+    <input name="org_code" placeholder="Org code (optional)" title="For shared codes. Leave empty to pick one automatically." inputmode="numeric" maxlength="6">
     <button type="submit">{{ 'Change code' if allocations else 'Assign code' }}</button>
   </form>
   <p class="muted">The fee for the code type (from Prices) is copied onto the assignment. Add bought codes on the <a href="/platform/ussd-codes">USSD codes</a> page.</p>
@@ -66,10 +70,12 @@
   <h2>Settings</h2>
   {% for key, value in settings.items() %}
   <div class="feature">
-    <div><b><code>{{ key }}</code></b> = <b>{{ value }}</b><p>{{ setting_help[key][1] }}</p></div>
+    <div><b>{{ {'allow_other_phone': 'Use from another phone', 'otp': 'SMS code for sensitive screens', 'language': 'Language'}[key] }}</b>
+      <span class="pill off">{{ {'1': 'allowed', '0': 'own phone only', 'inherit': 'platform default', 'on': 'on', 'off': 'off', 'en': 'English', 'sw': 'Kiswahili'}[value] }}</span>
+      <p>{{ setting_help[key][1] }}</p></div>
     {% if manage %}<form method="post" action="/platform/tenants/{{ t.id }}/setting" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="key" value="{{ key }}">
-      <select name="value">{% for c in setting_choices[key] %}<option value="{{ c }}" {{ 'selected' if c == value }}>{{ c }}</option>{% endfor %}</select>
+      <select name="value">{% for c in setting_choices[key] %}<option value="{{ c }}" {{ 'selected' if c == value }}>{{ {'1': 'Allowed', '0': 'Own phone only', 'inherit': 'Platform default', 'on': 'On', 'off': 'Off', 'en': 'English', 'sw': 'Kiswahili'}[c] }}</option>{% endfor %}</select>
       <button class="secondary" type="submit">Set</button></form>{% endif %}
   </div>
   {% endfor %}
@@ -78,12 +84,12 @@
 <div class="card">
   <h2>People with roles</h2>
   <table>
-    <tr><th>Who</th><th>Role</th><th>Scope</th><th></th></tr>
+    <tr><th>Phone</th><th>Role</th><th>Where</th><th></th></tr>
     {% for a in assignments %}
-    <tr><td>{{ a.principal }}</td><td>{{ a.name }}</td><td>{{ a.scope_type }}{{ ' #' ~ a.scope_id if a.scope_id }}</td>
+    <tr><td>{{ local(a.principal[5:]) if a.principal.startswith('user:') else a.principal }}</td><td>{{ a.name }}</td><td>{{ 'Whole organisation' if a.scope_type == 'tenant' else a.scope_type ~ ' #' ~ a.scope_id }}</td>
       <td>{% if manage %}<form method="post" action="/platform/tenants/{{ t.id }}/revoke" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="assignment" value="{{ a.id }}"><button class="secondary" type="submit">Remove</button></form>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="4" class="muted">Nobody yet. Appoint the owner: they appoint admins from the organisation portal (Phase 4).</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="4" class="muted">Nobody yet. Appoint the owner below; they can then add admins and members from the workspace.</td></tr>{% endfor %}
   </table>
   {% if manage %}
   <form method="post" action="/platform/tenants/{{ t.id }}/owner" class="row" style="margin-top:12px">
@@ -98,7 +104,7 @@
 <div class="card">
   <h2>Members <span class="muted">(first 50)</span></h2>
   <table><tr><th>Name</th><th>Phone</th><th>Status</th><th>Joined</th></tr>
-    {% for m in members %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ m.user_phone }}</td><td>{{ m.status }}</td><td>{{ fmt_date(m.joined_at) }}</td></tr>
+    {% for m in members %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td>{{ m.status }}</td><td>{{ fmt_date(m.joined_at) }}</td></tr>
     {% else %}<tr><td colspan="4" class="muted">No members yet.</td></tr>{% endfor %}
   </table>
 </div>
