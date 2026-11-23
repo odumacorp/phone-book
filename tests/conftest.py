@@ -15,9 +15,11 @@ import time
 import pytest
 
 _tmp = tempfile.mkdtemp(prefix="pb-tests-")
+# TEST_DATABASE_URL runs the suite on Postgres (a throwaway database: every table is emptied per test)
+PG_URL = os.environ.get("TEST_DATABASE_URL", "")
 os.environ.update({
-    "DATABASE_URL": "",
-    "DATABASE_URL_UNPOOLED": "",
+    "DATABASE_URL": PG_URL,
+    "DATABASE_URL_UNPOOLED": PG_URL,
     "DB_PATH": os.path.join(_tmp, "test.db"),
     "AT_API_KEY": "",
     "AT_VOICE_NUMBER": "",
@@ -64,6 +66,14 @@ class FakeSMS:
 
 
 def _wipe_database():
+    if PG_URL:
+        import psycopg
+        with psycopg.connect(PG_URL, autocommit=True) as db:
+            tables = [r[0] for r in db.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")]
+            tables = [t for t in tables if t != "schema_migrations"]
+            if tables:
+                db.execute("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY")
+        return
     db = sqlite3.connect(os.environ["DB_PATH"])
     tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
     for table in tables:
@@ -82,9 +92,13 @@ def clean_state():
     yield
 
 
+def _pb_modules():
+    return [m for name, m in list(sys.modules.items()) if name == "pb" or name.startswith("pb.")]
+
+
 def _caches():
     """Per-process caches that must not leak between tests."""
-    return [getattr(app_module, "_settings_cache", {}), getattr(app_module, "_admin_failures", {})]
+    return [getattr(m, n) for m in _pb_modules() for n in ("_settings_cache", "_admin_failures") if hasattr(m, n)]
 
 
 @pytest.fixture
@@ -101,8 +115,8 @@ def fake_sms(monkeypatch):
 
 
 def sms_targets():
-    """Modules holding the Africa's Talking SMS client."""
-    return [app_module]
+    """Modules holding the Africa's Talking SMS client (each `from pb.messaging import sms` is its own reference)."""
+    return [m for m in _pb_modules() if hasattr(m, "sms")]
 
 
 _session_ids = itertools.count(1)

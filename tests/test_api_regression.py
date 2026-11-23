@@ -1,7 +1,7 @@
 """Today's app API, website and admin behaviour, pinned down before the code is reorganised."""
 import re
 
-from conftest import auth
+from conftest import app_module, auth
 
 
 def test_health_and_website(client):
@@ -110,9 +110,10 @@ def test_encrypted_contacts_still_work_on_ussd(register, client, dial):
     csrf = admin_login(client)
     resp = client.post("/admin/feature", data={"csrf": csrf, "name": "encrypt_contacts", "on": "1"})
     assert resp.status_code == 302
-    import sqlite3, os
-    row = sqlite3.connect(os.environ["DB_PATH"]).execute("SELECT name, enc FROM contacts").fetchone()
-    assert row[1] == 1 and row[0] != "Juma"  # stored as ciphertext
+    from pb.db import fetch_one
+    with app_module.app.app_context():
+        row = fetch_one("SELECT name, enc FROM contacts")
+    assert row["enc"] == 1 and row["name"] != "Juma"  # stored as ciphertext
     s = dial("+254712345678")
     s.send("0712345678")
     s.send("1234")

@@ -58,6 +58,19 @@ python app.py               # http://localhost:8000
 ngrok http 8000             # gives you a public https URL
 ```
 
+## Code layout and tests
+
+`app.py` is only the entry point (`gunicorn app:app`); the code is in `pb/`:
+`config` (env + constants), `web` (the Flask app), `db` / `schema` (database), `ussd/` (session, screens,
+personal menu, routes), `api/` (app endpoints), `notify` (email, templates, notifications), `admin`, `website`.
+Plans for packages and enterprise editions: `docs/packages-plan.md`.
+
+```bash
+pip install -r requirements-dev.txt
+pytest                                                    # SQLite
+TEST_DATABASE_URL=postgresql://user@host/throwaway pytest # Postgres (empties every table!)
+```
+
 ## Connect to Africa's Talking
 
 1. Dashboard -> USSD -> Service Codes -> Create Channel, channel `88041` on `*384#`
