@@ -1,0 +1,38 @@
+{% extends "platform/base.html" %}
+{% block title %}Organisations{% endblock %}
+{% block content %}
+{% if can_create %}
+<details class="card">
+  <summary><b>New organisation</b></summary>
+  <form method="post" action="/platform/tenants" style="margin-top:12px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2">
+      <label class="field">Name<input name="name" required maxlength="80"></label>
+      <label class="field">Edition<select name="edition">{% for e in editions %}<option value="{{ e.key }}">{{ e.name }}</option>{% endfor %}</select></label>
+      <label class="field">Plan<select name="plan">{% for p in plans %}<option value="{{ p.key }}">{{ p.name }}{{ '' if p.active else ' (inactive)' }}</option>{% endfor %}</select></label>
+      <label class="field">Owner's phone (optional)<input name="owner_phone" placeholder="07..." inputmode="tel"></label>
+      <label class="field">Owner's name (optional)<input name="owner_name" maxlength="80"></label>
+    </div>
+    <button type="submit">Create (starts as a trial)</button>
+  </form>
+</details>
+{% endif %}
+<div class="card">
+  <form class="filters" method="get">
+    <label>Search<input name="q" value="{{ q }}" placeholder="Name or org code"></label>
+    <label>Status<select name="status"><option value="">All</option>
+      {% for k, v in statuses.items() %}<option value="{{ k }}" {{ 'selected' if status == k }}>{{ v }}</option>{% endfor %}</select></label>
+    <div class="filter-actions"><button type="submit">Filter</button></div>
+  </form>
+  <table>
+    <tr><th>Organisation</th><th>Edition</th><th>Plan</th><th>Status</th><th>Org code</th><th class="num">Members</th><th>Created</th></tr>
+    {% for t in rows %}
+    <tr>
+      <td><a href="/platform/tenants/{{ t.id }}">{{ t.name }}</a></td><td>{{ t.edition }}</td><td>{{ t.plan_key }}</td>
+      <td><span class="pill {{ 'on' if t.status == 'active' else 'warn' if t.status in ('trial', 'grace') else 'off' }}">{{ statuses[t.status] }}</span></td>
+      <td>{{ t.org_code or '-' }}</td><td class="num">{{ t.members }}</td><td>{{ fmt_date(t.created_at) }}</td>
+    </tr>
+    {% else %}<tr><td colspan="7" class="muted">No organisations yet.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

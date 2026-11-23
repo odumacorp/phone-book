@@ -97,3 +97,13 @@ def add_column(db, table, column, definition):
         db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
     elif column not in [row[1] for row in db.execute(f"PRAGMA table_info({table})")]:
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def insert_id(query, params):
+    """INSERT and return the new row's id (Postgres RETURNING / SQLite lastrowid)."""
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(sql(query + (" RETURNING id" if DATABASE_URL else "")), params)
+    new_id = cur.fetchone()["id"] if DATABASE_URL else cur.lastrowid
+    db.commit()
+    return new_id

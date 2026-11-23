@@ -1,0 +1,35 @@
+{% extends "platform/base.html" %}
+{% block title %}Prices{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>All prices</h2>
+  <p class="muted">Every plan, add-on and USSD code fee. Pick one to edit it; changes are kept in its history and the audit log.
+    The seeded figures are placeholders until confirmed.</p>
+  <table>
+    <tr><th>Item</th><th>Type</th><th>Price</th><th>Status</th><th>Last changed</th><th></th></tr>
+    {% for i in items %}
+    <tr>
+      <td><a href="/platform/pricing/{{ i.kind }}/{{ i.key }}">{{ i.name }}</a></td><td>{{ i.group }}</td><td>{{ i.price }}</td>
+      <td>{% if i.active %}<span class="pill on">Active</span>{% else %}<span class="pill off">Inactive</span>{% endif %}</td>
+      <td class="muted">{{ fmt_date(i.updated_at) }}{{ ' · ' ~ i.updated_by if i.updated_by }}</td>
+      <td><a class="btn" href="/platform/pricing/{{ i.kind }}/{{ i.key }}" style="text-decoration:none">{{ 'Edit' if manage else 'View' }}</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% if manage %}
+<details class="card">
+  <summary><b>Add a plan</b></summary>
+  <form method="post" action="/platform/pricing/plans/new" style="margin-top:12px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2">
+      <label class="field">Key (e.g. enterprise_lite)<input name="key" required pattern="[a-z][a-z0-9_]{2,40}"></label>
+      <label class="field">Name<input name="name" required maxlength="80"></label>
+      <label class="field">For<select name="audience">{% for k, v in audiences.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+      <label class="field">Pricing model<select name="model">{% for k, v in models.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    </div>
+    <button type="submit">Add (inactive)</button>
+  </form>
+</details>
+{% endif %}
+{% endblock %}

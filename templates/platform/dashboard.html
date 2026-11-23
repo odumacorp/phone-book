@@ -1,0 +1,25 @@
+{% extends "platform/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+{% if no_staff %}
+  <div class="card warn">You're logged in with the admin password. <a href="/platform/staff">Create staff accounts</a> (with roles) so each
+    person logs in as themselves and their actions are audited by name.</div>
+{% endif %}
+<div class="card">
+  <h2>Organisations</h2>
+  <div class="stats">
+    {% for key, label in statuses.items() %}
+      <a class="stat" href="/platform/tenants?status={{ key }}" style="text-decoration:none;color:inherit"><b>{{ stats.tenants.get(key, 0) }}</b><span>{{ label }}</span></a>
+    {% endfor %}
+  </div>
+</div>
+<div class="card">
+  <h2>Platform</h2>
+  <div class="stats">
+    <div class="stat"><b><code>{{ stats.main_code }}</code></b><span>Main USSD code</span></div>
+    <div class="stat"><b>{{ stats.codes_available }}</b><span>USSD codes available to assign</span></div>
+    <div class="stat"><b>{{ stats.staff }}</b><span>Active staff accounts</span></div>
+    <div class="stat"><b>{{ 'On' if stats.otp else 'Off' }}</b><span>OTP (second factor)</span></div>
+  </div>
+</div>
+{% endblock %}

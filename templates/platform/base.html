@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block title %}Platform{% endblock %} · Remote Phonebook</title>
+<link rel="icon" href="/favicon.png">
+{% include "_style.html" %}
+<style> main { max-width: 1100px; } </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Remote Phonebook · Platform</h1>
+    <div class="row">
+      <span class="muted">{{ staff_user.name }}</span>
+      <form method="post" action="/platform/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="secondary" type="submit">Log out</button></form>
+    </div>
+  </header>
+  <nav class="tabs nav">
+    <a href="/platform/" class="{{ 'active' if page == 'dashboard' }}">Dashboard</a>
+    {% if allowed('platform.tenants.view') or allowed('platform.tenants.manage') or allowed('platform.tenants.view_own') %}
+      <a href="/platform/tenants" class="{{ 'active' if page == 'tenants' }}">Organisations</a>{% endif %}
+    {% if allowed('platform.pricing.view') %}<a href="/platform/pricing" class="{{ 'active' if page == 'pricing' }}">Prices</a>{% endif %}
+    {% if allowed('platform.ussd_codes.manage') or allowed('platform.tenants.view') %}
+      <a href="/platform/ussd-codes" class="{{ 'active' if page == 'codes' }}">USSD codes</a>{% endif %}
+    {% if allowed('platform.staff.manage') %}<a href="/platform/staff" class="{{ 'active' if page == 'staff' }}">Staff</a>{% endif %}
+    {% if allowed('platform.flags.manage') %}<a href="/platform/settings" class="{{ 'active' if page == 'settings' }}">Settings</a>{% endif %}
+    {% if allowed('platform.audit.view') %}<a href="/platform/audit" class="{{ 'active' if page == 'audit' }}">Audit log</a>{% endif %}
+    {% if allowed('platform.flags.manage') %}<a href="/admin">Phone book admin</a>{% endif %}
+  </nav>
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="{{ 'error' if category == 'error' else 'flash' }}">{{ message }}</div>
+  {% endfor %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

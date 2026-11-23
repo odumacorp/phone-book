@@ -1,0 +1,20 @@
+{% extends "platform/base.html" %}
+{% block title %}{{ item.name }}{% endblock %}
+{% block content %}
+<p><a href="/platform/pricing">← All prices</a></p>
+<div class="card">
+  <h2>{{ item.name }} <span class="muted">(add-on for {{ item.audience }}{{ ', module ' ~ item.module_key if item.module_key }})</span></h2>
+  <form method="post" action="/platform/pricing/addon/{{ item.key }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset {{ '' if manage else 'disabled' }} style="border:0;padding:0;margin:0">
+    <div class="grid2">
+      <label class="field">Name<input name="name" value="{{ item.name }}" maxlength="80"></label>
+      <label class="field">Price (KES)<input name="price" value="{{ '%.2f'|format(item.price / 100) }}" inputmode="decimal"></label>
+      <label class="field">Billed<select name="billing_interval">{% for k, v in intervals.items() %}<option value="{{ k }}" {{ 'selected' if (item.billing_interval or '') == k }}>{{ v }}</option>{% endfor %}</select></label>
+      <label class="field">Status<select name="active"><option value="1" {{ 'selected' if item.active }}>Active (can be bought)</option><option value="0" {{ 'selected' if not item.active }}>Inactive</option></select></label>
+    </div>
+    {% if manage %}<button type="submit">Save</button>{% endif %}
+    </fieldset>
+  </form>
+</div>
+{% include "platform/_price_history.html" %}
+{% endblock %}

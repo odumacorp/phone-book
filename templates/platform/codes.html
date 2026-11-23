@@ -1,0 +1,46 @@
+{% extends "platform/base.html" %}
+{% block title %}USSD codes{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Codes</h2>
+  <p class="muted">Codes Oduma Corp has bought. The <b>main</b> code carries the personal phone book and every shared-code organisation
+    (members dial <code>main code + *org code#</code>). Extensions and dedicated shortcodes belong to one organisation.</p>
+  <table>
+    <tr><th>Code</th><th>Type</th><th>Provider</th><th>Status</th><th class="num">Organisations</th><th>Note</th><th></th></tr>
+    {% for c in codes %}
+    <tr><td><code>{{ c.code }}</code>{% if c.is_main %} <span class="pill on">main</span>{% endif %}</td><td>{{ code_types[c.code_type] }}</td>
+      <td>{{ c.provider or '-' }}</td><td><span class="pill {{ 'on' if c.status == 'available' else 'warn' if c.status == 'in_use' else 'off' }}">{{ c.status.replace('_', ' ') }}</span></td>
+      <td class="num">{{ c.tenants }}</td><td class="muted">{{ c.note or '' }}{{ ' · costs ' ~ kes(c.monthly_cost) ~ '/month' if c.monthly_cost }}</td>
+      <td>{% if manage and c.status != 'retired' %}
+        {% if c.code_type == 'shared' and not c.is_main %}<form method="post" action="/platform/ussd-codes/{{ c.id }}/main" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="secondary" type="submit" onclick="return confirm('Make {{ c.code }} the main code? The personal phone book and shared-code organisations move to it.')">Make main</button></form>{% endif %}
+        {% if not c.is_main and not c.tenants %}<form method="post" action="/platform/ussd-codes/{{ c.id }}/retire" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="secondary" type="submit">Retire</button></form>{% endif %}
+      {% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% if manage %}
+<div class="card">
+  <h2>Add a bought code</h2>
+  <form method="post" action="/platform/ussd-codes"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2">
+      <label class="field">Code as dialled<input name="code" placeholder="*384*88041*5#" required></label>
+      <label class="field">Type<select name="code_type">{% for k, v in code_types.items() %}<option value="{{ k }}">{{ v }} (customer pays {{ kes(fees[k].setup_fee) }} + {{ kes(fees[k].monthly_fee) }}/month)</option>{% endfor %}</select></label>
+      <label class="field">Provider<input name="provider" placeholder="Africa's Talking"></label>
+      <label class="field">Our monthly cost (KES, optional)<input name="monthly_cost" inputmode="decimal"></label>
+      <label class="field">Note<input name="note" maxlength="200"></label>
+    </div>
+    <button type="submit">Add to the list</button>
+  </form>
+</div>
+{% endif %}
+<div class="card">
+  <h2>Assigned</h2>
+  <table><tr><th>Organisation</th><th>Members dial</th><th>Type</th><th class="num">Setup</th><th class="num">Monthly</th><th>Since</th></tr>
+    {% for a in allocations %}<tr><td><a href="/platform/tenants/{{ a.tenant_id }}">{{ a.tenant_name }}</a></td><td><code>{{ dial(a) }}</code></td>
+      <td>{{ a.code_type }}</td><td class="num">{{ kes(a.setup_fee) }}</td><td class="num">{{ kes(a.monthly_fee) }}</td><td>{{ fmt_date(a.starts_at) }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No organisation has a code yet.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

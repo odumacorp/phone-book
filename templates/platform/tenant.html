@@ -1,0 +1,110 @@
+{% extends "platform/base.html" %}
+{% block title %}{{ t.name }}{% endblock %}
+{% block content %}
+<p><a href="/platform/tenants">← Organisations</a></p>
+<div class="card">
+  <h2>{{ t.name }} <span class="pill {{ 'on' if t.status == 'active' else 'warn' if t.status in ('trial', 'grace') else 'off' }}">{{ statuses[t.status] }}</span></h2>
+  <p class="muted">Edition <b>{{ t.edition }}</b> · Plan <b>{{ t.plan_key }}</b> · Org code <b>{{ t.org_code or 'none yet' }}</b> ·
+    {{ member_count }} members · created {{ fmt_date(t.created_at) }}</p>
+  {% if manage %}
+  <form method="post" action="/platform/tenants/{{ t.id }}/update">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2">
+      <label class="field">Name<input name="name" value="{{ t.name }}" maxlength="80"></label>
+      <label class="field">Status<select name="status">{% for k, v in statuses.items() %}<option value="{{ k }}" {{ 'selected' if t.status == k }}>{{ v }}</option>{% endfor %}</select></label>
+      <label class="field">Plan<select name="plan_key">{% for p in plans %}<option value="{{ p.key }}" {{ 'selected' if t.plan_key == p.key }}>{{ p.name }}</option>{% endfor %}</select></label>
+    </div>
+    <button type="submit">Save</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>USSD code</h2>
+  {% for a in allocations %}
+    <div class="feature"><div><b><code>{{ dial[loop.index0] }}</code></b> <span class="pill on">{{ a.code_type }}</span>
+      <p>Since {{ fmt_date(a.starts_at) }} · setup {{ kes(a.setup_fee) }} · {{ kes(a.monthly_fee) }}/month</p></div>
+      {% if manage_codes %}<form method="post" action="/platform/tenants/{{ t.id }}/code/release"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="allocation" value="{{ a.id }}"><button class="secondary" type="submit">Release</button></form>{% endif %}
+    </div>
+  {% else %}<p class="muted">No code assigned: members can't reach this organisation on USSD yet.</p>{% endfor %}
+  {% if manage_codes %}
+  <form method="post" action="/platform/tenants/{{ t.id }}/code" class="row" style="margin-top:10px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <select name="code_id" style="flex:2 1 260px">
+      {% for c in codes %}<option value="{{ c.id }}">{{ c.code }} · {{ c.code_type }}{{ ' (main)' if c.is_main }}{{ ' · ' ~ c.tenants ~ ' orgs' if c.code_type == 'shared' }}</option>{% endfor %}
+    </select>
+    <input name="org_code" placeholder="Org code (shared codes; blank = automatic)" inputmode="numeric" maxlength="6">
+    <button type="submit">{{ 'Change code' if allocations else 'Assign code' }}</button>
+  </form>
+  <p class="muted">The fee for the code type (from Prices) is copied onto the assignment. Add bought codes on the <a href="/platform/ussd-codes">USSD codes</a> page.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Modules</h2>
+  {% if manage %}
+  <form method="post" action="/platform/tenants/{{ t.id }}/edition" class="row" style="margin-bottom:12px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <select name="edition" style="flex:1 1 200px">{% for e in editions %}<option value="{{ e.key }}" {{ 'selected' if t.edition == e.key }}>{{ e.name }}{{ '' if e.active else ' (inactive)' }}</option>{% endfor %}</select>
+    <button class="secondary" type="submit">Apply edition preset</button>
+  </form>
+  {% endif %}
+  {% for m in modules %}
+  <div class="feature">
+    <div><b>{{ m.name }}</b> {% if m.enabled %}<span class="pill on">On</span>{% else %}<span class="pill off">Off</span>{% endif %}
+      {% if m.core %}<span class="pill off">core</span>{% endif %}{% if m.source == 'addon' and not m.enabled %}<span class="pill warn">add-on</span>{% endif %}
+      <p>{{ m.description }}</p></div>
+    {% if manage %}<form method="post" action="/platform/tenants/{{ t.id }}/module"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="module" value="{{ m.key }}"><input type="hidden" name="on" value="{{ '0' if m.enabled else '1' }}">
+      <button type="submit" class="{{ 'secondary' if m.enabled }}">{{ 'Turn off' if m.enabled else 'Turn on' }}</button></form>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>Settings</h2>
+  {% for key, value in settings.items() %}
+  <div class="feature">
+    <div><b><code>{{ key }}</code></b> = <b>{{ value }}</b><p>{{ setting_help[key][1] }}</p></div>
+    {% if manage %}<form method="post" action="/platform/tenants/{{ t.id }}/setting" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="key" value="{{ key }}">
+      <select name="value">{% for c in setting_choices[key] %}<option value="{{ c }}" {{ 'selected' if c == value }}>{{ c }}</option>{% endfor %}</select>
+      <button class="secondary" type="submit">Set</button></form>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>People with roles</h2>
+  <table>
+    <tr><th>Who</th><th>Role</th><th>Scope</th><th></th></tr>
+    {% for a in assignments %}
+    <tr><td>{{ a.principal }}</td><td>{{ a.name }}</td><td>{{ a.scope_type }}{{ ' #' ~ a.scope_id if a.scope_id }}</td>
+      <td>{% if manage %}<form method="post" action="/platform/tenants/{{ t.id }}/revoke" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="assignment" value="{{ a.id }}"><button class="secondary" type="submit">Remove</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">Nobody yet. Appoint the owner: they appoint admins from the organisation portal (Phase 4).</td></tr>{% endfor %}
+  </table>
+  {% if manage %}
+  <form method="post" action="/platform/tenants/{{ t.id }}/owner" class="row" style="margin-top:12px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="phone" placeholder="Owner's phone 07..." inputmode="tel" required>
+    <input name="name" placeholder="Name (optional)">
+    <button type="submit">Appoint owner</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Members <span class="muted">(first 50)</span></h2>
+  <table><tr><th>Name</th><th>Phone</th><th>Status</th><th>Joined</th></tr>
+    {% for m in members %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ m.user_phone }}</td><td>{{ m.status }}</td><td>{{ fmt_date(m.joined_at) }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No members yet.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Recent activity</h2>
+  {% include "platform/_audit_table.html" %}
+</div>
+{% endblock %}

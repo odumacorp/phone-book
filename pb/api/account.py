@@ -4,6 +4,7 @@ from flask import g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from pb.api.auth import ALREADY_REGISTERED, EMAIL_TAKEN, NO_ACCOUNT, api_error, auth_status, body_json, check_password, find_account, logged_in, password_error, pin_error, require_auth, revoke_app_session, set_password, token_version
+from pb.billing.ussd_codes import main_code
 from pb.config import MAX_RESET_ATTEMPTS, RESET_CODE_TTL, RESET_RESEND_SECONDS, RESUME_SECONDS, SECRET_KEY, SESSION_HISTORY_DAYS, TOKEN_MAX_AGE
 from pb.contacts import sms_all
 from pb.db import execute, fetch_all, fetch_one, get_db, sql
@@ -348,6 +349,12 @@ def api_reset_confirm():
     return logged_in(set_password(user["phone"], password))
 
 
+@app.route("/api/config", methods=["GET"])
+def api_config():
+    """Public settings the app needs before logging in."""
+    return jsonify({"ussd_code": main_code()})
+
+
 @app.route("/api/me", methods=["GET"])
 @require_auth
 def api_me():
@@ -365,6 +372,7 @@ def api_me():
         "max_emails": MAX_EMAILS,
         "features": {"email_verification": feature_on("email_verification") and email_configured()},
         "unread_notifications": unread_count(g.phone),
+        "ussd_code": main_code(),
     })
 
 

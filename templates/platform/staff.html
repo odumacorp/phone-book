@@ -1,0 +1,39 @@
+{% extends "platform/base.html" %}
+{% block title %}Staff{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Staff accounts</h2>
+  <table><tr><th>Name</th><th>Email</th><th>Roles</th><th>Last login</th><th></th></tr>
+    {% for s in rows %}
+    <tr><td>{{ s.name }}{% if not s.active %} <span class="pill off">inactive</span>{% endif %}</td><td>{{ s.email }}</td>
+      <td>{% for r in roles %}
+        <form method="post" action="/platform/staff/{{ s.id }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="action" value="role"><input type="hidden" name="role" value="{{ r.key }}">
+          <input type="hidden" name="on" value="{{ '0' if r.key in s.roles else '1' }}">
+          <button type="submit" class="{{ '' if r.key in s.roles else 'secondary' }}" title="{{ 'Remove' if r.key in s.roles else 'Give' }} {{ r.name }}" style="padding:2px 8px;font-size:13px;margin:2px">{{ r.name }}</button></form>
+      {% endfor %}</td>
+      <td class="muted">{{ fmt_time(s.last_login) }}</td>
+      <td><form method="post" action="/platform/staff/{{ s.id }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="action" value="active"><input type="hidden" name="on" value="{{ '0' if s.active else '1' }}">
+        <button class="secondary" type="submit">{{ 'Deactivate' if s.active else 'Reactivate' }}</button></form>
+        <details><summary class="muted">New password</summary>
+          <form method="post" action="/platform/staff/{{ s.id }}" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="action" value="password"><input type="password" name="password" minlength="10" required autocomplete="new-password">
+            <button class="secondary" type="submit">Set</button></form></details></td></tr>
+    {% else %}<tr><td colspan="5" class="muted">No staff accounts yet.</td></tr>{% endfor %}
+  </table>
+  <p class="muted">Filled buttons are roles the person has; click to give or remove one. You can only give roles whose permissions you hold.</p>
+</div>
+<div class="card">
+  <h2>Add a staff member</h2>
+  <form method="post" action="/platform/staff"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2">
+      <label class="field">Name<input name="name" required maxlength="80"></label>
+      <label class="field">Email<input name="email" type="email" required></label>
+      <label class="field">Password (10+ characters; they can't change it themselves yet)<input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
+    </div>
+    <div class="row" style="margin-bottom:10px">{% for r in roles %}<label><input type="checkbox" name="roles" value="{{ r.key }}" style="width:auto"> {{ r.name }}</label>{% endfor %}</div>
+    <button type="submit">Create</button>
+  </form>
+</div>
+{% endblock %}

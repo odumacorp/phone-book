@@ -1,0 +1,15 @@
+{% extends "platform/base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="filters" method="get">
+    <label>Organisation id<input name="tenant" value="{{ args.get('tenant', '') }}" inputmode="numeric"></label>
+    <label>Who<input name="actor" value="{{ args.get('actor', '') }}" placeholder="staff:3, user:+2547..."></label>
+    <label>Action starts with<input name="action" value="{{ args.get('action', '') }}" placeholder="pricing., role., tenant."></label>
+    <div class="filter-actions"><button type="submit">Filter</button></div>
+  </form>
+  {% set audit_rows = rows %}
+  {% include "platform/_audit_table.html" %}
+  <p class="muted">Newest 200 matching entries.</p>
+</div>
+{% endblock %}

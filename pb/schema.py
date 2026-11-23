@@ -5,6 +5,7 @@ from pb.config import DATABASE_URL, DATABASE_URL_UNPOOLED
 from pb.crypto import check_contacts_key
 from pb.db import add_column, connect, sql
 from pb.migrations import run_migrations
+from pb.rbac.catalogue import sync_system_roles
 
 
 def init_db():
@@ -187,6 +188,7 @@ def init_db():
         db.execute("UPDATE users SET email = NULL, email_verified = 0 WHERE email IS NOT NULL")
         check_contacts_key(db)
         run_migrations(db)
+        sync_system_roles(db, sql)
         db.commit()
     finally:
         db.close()

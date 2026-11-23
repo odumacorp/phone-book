@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">
+<title>Platform login · Remote Phonebook</title>
+{% include "_style.html" %}
+</head>
+<body><main>
+  <div class="card login">
+    <h1>Remote Phonebook · Platform</h1>
+    <p class="muted">Oduma Corp staff. Admins with the phone book admin password can <a href="/admin">log in there</a> and come back.</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/platform/login">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="field">Email<input name="email" type="email" autocomplete="username" required></label>
+      <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Log in</button>
+    </form>
+  </div>
+</main></body>
+</html>

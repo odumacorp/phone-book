@@ -84,10 +84,29 @@ def _wipe_database():
     db.close()
 
 
+def _reseed():
+    """Seeds (editions, plans, prices, the main USSD code, system roles) come from idempotent migrations: re-run them."""
+    import importlib
+    from pb.db import connect, sql
+    from pb.migrations import Helpers, available
+    from pb.rbac.catalogue import sync_system_roles
+    db = connect()
+    try:
+        for _version, name in available():
+            importlib.import_module(f"pb.migrations.{name}").up(db, Helpers(db))
+        sync_system_roles(db, sql)
+        db.commit()
+    finally:
+        db.close()
+
+
 @pytest.fixture(autouse=True)
 def clean_state():
     _wipe_database()
+    _reseed()
     app_module.app.config["TESTING"] = True
+    from pb.billing import ussd_codes
+    ussd_codes._main_cache.clear()
     for cache in _caches():
         cache.clear()
     yield
@@ -186,3 +205,38 @@ def login_ussd(dial, caller, phone="0712345678", pin="1234"):
     s.send(phone)
     s.send(pin)
     return s
+
+
+@pytest.fixture
+def ctx():
+    """An app context, for calling services directly."""
+    with app_module.app.test_request_context():
+        yield
+
+
+def csrf_of(client, path="/platform/login"):
+    import re
+    page = client.get(path).get_data(as_text=True)
+    return re.search(r'name="csrf" value="([^"]+)"', page).group(1)
+
+
+@pytest.fixture
+def make_staff():
+    """Create a staff account with platform roles (as the CLI would). Returns its id."""
+    def _make(email="boss@oduma.co.ke", roles=("platform_super_admin",), password="staff-pass-123", name="Boss"):
+        from pb.auth.staff import create_staff
+        with app_module.app.test_request_context():
+            return create_staff("cli", email, name, password, list(roles))
+    return _make
+
+
+@pytest.fixture
+def staff_client(client, make_staff):
+    """A test client logged in to /platform as a staff member with the given roles. Returns (client, csrf)."""
+    def _login(roles=("platform_super_admin",), email="boss@oduma.co.ke"):
+        make_staff(email=email, roles=roles)
+        token = csrf_of(client)
+        resp = client.post("/platform/login", data={"csrf": token, "email": email, "password": "staff-pass-123"})
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/platform/")
+        return client, csrf_of(client, "/platform/")
+    return _login

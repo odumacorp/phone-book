@@ -17,8 +17,10 @@ from pb.web import app
 from pb import admin, jobs, website  # noqa: F401  (importing a module registers its routes)
 from pb.api import account, auth, complaints, contacts, notifications  # noqa: F401
 from pb.ussd import routes  # noqa: F401
+from pb.portal import bp as platform_portal
 from pb.schema import init_db
 
+app.register_blueprint(platform_portal)
 init_db()
 
 if __name__ == "__main__":

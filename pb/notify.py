@@ -6,8 +6,9 @@ import time
 from email.message import EmailMessage
 from flask import has_app_context
 
-from pb.config import DATABASE_URL, EMAIL_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER, log
-from pb.db import execute, fetch_all, fetch_one, get_db, sql
+from pb.billing.ussd_codes import main_code
+from pb.config import EMAIL_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER, log
+from pb.db import execute, fetch_all, fetch_one, insert_id
 from pb.features import SETTINGS_TTL, feature_on
 from pb.text import local_number
 from pb.users import emails_json, get_user, user_emails
@@ -18,7 +19,6 @@ from pb.web import app
 # Verification codes and security notifications by email. Both are off until the admin turns
 # them on at /admin, and both need SMTP_* settings, so the prototype never depends on email.
 
-USSD_CODE_TEXT = "*384*88041#"
 EMAIL_CODE_TTL = 15 * 60
 
 
@@ -79,7 +79,7 @@ def notification_emails(owner):
 # The admin edits every notification and email at /admin/templates: on/off, subject and text with
 # {placeholders}. Edits are stored in the settings table ("tpl:<key>:subject" ...); empty = default.
 
-COMMON_VARS = {"name": "the user's name", "phone": "their phone number", "app": "Remote Phonebook", "ussd_code": USSD_CODE_TEXT}
+COMMON_VARS = {"name": "the user's name", "phone": "their phone number", "app": "Remote Phonebook", "ussd_code": "the main USSD code (set in /platform)"}
 TEMPLATES = {
     "new_login": {
         "label": "New app login", "kind": "security", "vars": {"device": "the phone or browser"},
@@ -186,7 +186,7 @@ def fill(text, values):
 
 
 def render_message(key, values):
-    values = {"app": "Remote Phonebook", "ussd_code": USSD_CODE_TEXT, **values}
+    values = {"app": "Remote Phonebook", "ussd_code": main_code(), **values}
     return fill(template_part(key, "subject"), values), fill(template_part(key, "body"), values)
 
 
@@ -211,16 +211,6 @@ def notify_event(owner, key, complaint_id=None, **values):
 
 NOTIFICATION_LOG_DAYS = 90
 LOG_KINDS = {"security": "Security alert", "message": "Message from the team", "reply": "Reply to a report"}
-
-
-def insert_id(query, params):
-    """INSERT and return the new row's id (Postgres RETURNING / SQLite lastrowid)."""
-    db = get_db()
-    cur = db.cursor()
-    cur.execute(sql(query + (" RETURNING id" if DATABASE_URL else "")), params)
-    new_id = cur.fetchone()["id"] if DATABASE_URL else cur.lastrowid
-    db.commit()
-    return new_id
 
 
 def log_notification(owner, recipient, kind, title, body, inapp_id=None, emails=(), note=None, complaint_id=None):

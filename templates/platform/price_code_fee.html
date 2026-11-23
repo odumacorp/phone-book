@@ -1,0 +1,21 @@
+{% extends "platform/base.html" %}
+{% block title %}{{ item.name }}{% endblock %}
+{% block content %}
+<p><a href="/platform/pricing">← All prices</a></p>
+<div class="card">
+  <h2>{{ item.name }} <span class="muted">(USSD code fee, added on top of the plan)</span></h2>
+  <form method="post" action="/platform/pricing/code_fee/{{ item.code_type }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset {{ '' if manage else 'disabled' }} style="border:0;padding:0;margin:0">
+    <div class="grid2">
+      <label class="field">Name<input name="name" value="{{ item.name }}" maxlength="80"></label>
+      <label class="field">Setup fee, once (KES)<input name="setup_fee" value="{{ '%.2f'|format(item.setup_fee / 100) }}" inputmode="decimal"></label>
+      <label class="field">Monthly fee (KES)<input name="monthly_fee" value="{{ '%.2f'|format(item.monthly_fee / 100) }}" inputmode="decimal"></label>
+      <label class="field">Note on invoices<input name="note" value="{{ item.note or '' }}" maxlength="200"></label>
+    </div>
+    {% if manage %}<button type="submit">Save</button>{% endif %}
+    <p class="muted">New fees apply to codes assigned from now on; organisations keep the fee they were assigned with.</p>
+    </fieldset>
+  </form>
+</div>
+{% include "platform/_price_history.html" %}
+{% endblock %}

@@ -87,6 +87,29 @@ gunicorn -w 2 -b 0.0.0.0:8000 app:app
 Set `DATABASE_URL` to a Postgres connection string (e.g. Neon) in production. Without it,
 contacts are stored in SQLite (`phonebook.db`, or `DB_PATH`). `SECRET_KEY` must be set for app logins.
 
+## Platform portal (`/platform`)
+
+For Oduma Corp staff: organisations (tenants), prices, USSD codes, staff accounts, platform settings and the audit log.
+Plans and editions: `docs/packages-plan.md`.
+
+- **Logging in:** staff accounts (email + password; 5 wrong passwords lock the account for 15 minutes). The `/admin`
+  password also works as a break-glass Super Admin: log in at `/admin`, then open `/platform`. Create the first staff
+  account there (Staff), or from the shell: `flask --app app platform create-staff`.
+- **Roles:** Platform Super Admin (everything), Platform Support (view organisations, audit log), Platform Finance
+  (prices read-only, finance), Reseller (only the organisations they onboard). Staff can only give roles whose
+  permissions they hold.
+- **Prices:** every plan, add-on and USSD code fee is listed on one page; pick one to edit it. Changes are audited
+  with old and new values and shown in each item's history. The seeded figures are placeholders.
+- **USSD codes:** add each code after buying it (shared, dedicated extension, dedicated shortcode), then assign it from
+  the organisation's page. The main code (`*384*88041#` for testing) can be changed; the app and website read it from the
+  server (`/api/config`). Shared-code organisations get an org code (`*384*88041*2045#`).
+- **Organisations:** created from an edition preset (Schools, Insurance, Law firms, SACCOs, Companies; Churches, Chamas,
+  Hospitals, Estates and County offices are inactive until turned on in Settings) and a plan. On plans without edition
+  modules (Starter), those modules are added switched off as add-ons. Each has settings such as
+  `allow_other_phone` (default on) and `otp` (inherit/on/off).
+- **OTP:** off by default. When on (Settings), app and website logins need a 6-digit SMS code. Needs `AT_API_KEY`, and
+  app version with the code step (older apps can't log in while it's on).
+
 ## Admin page (`/admin`)
 
 Set `ADMIN_PASSWORD` (and `SECRET_KEY`) on the server, then open `/admin` (e.g.

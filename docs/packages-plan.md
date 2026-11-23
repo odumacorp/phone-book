@@ -74,6 +74,15 @@ Status: **approved (2026-11-23), with the decisions below.** Section 9 keeps the
 
 ---
 
+### Phase 1 notes (2026-11-23)
+- The portal is server-rendered Flask at `/platform` (Q10 default). `/admin` stays for the personal phone book's
+  switches, templates and complaints; its password is a break-glass Super Admin in `/platform`.
+- **Postgres Row-Level Security is deferred to Phase 4**, when tenant content tables arrive. `execute()` commits after
+  every statement, so a per-transaction `SET LOCAL app.tenant_id` wouldn't survive. RLS needs a transaction-scoped helper first.
+  Until then isolation is enforced by `TenantRepo` plus a test that fails on raw queries to tenant tables.
+- Permissions are a catalogue in code; system roles are synced into the database at every start.
+- Supervisors also hold the Member permissions, so they can give people the Member role in their departments.
+
 ## 3. Target code layout
 
 ```
@@ -258,7 +267,7 @@ draft version. Publishing archives the previous version, so rolling back means r
 | # | Phase | Contents | Rough size |
 |---|---|---|---|
 | 0 ✅ | **Groundwork** (done 2026-11-23) | pytest and a regression suite for the current USSD and API; split `app.py` into `pb/` (no behaviour change); migrations framework; job tick endpoint | 1 week |
-| 1 | **Foundation** | tenants, editions, modules, flags; users and memberships; staff accounts; RBAC engine and seeded roles; audit log; OTP (built, off); plans, pricing and code-allocation tables; Super Admin portal (tenants, plans, flags, codes, staff); tenant-isolation tests | 2–3 weeks |
+| 1 ✅ | **Foundation** (done 2026-11-23) | tenants, editions, modules, flags; users and memberships; staff accounts; RBAC engine and seeded roles; audit log; OTP (built, off); plans, pricing and code-allocation tables; Super Admin portal (tenants, plans, flags, codes, staff); tenant-isolation tests | 2–3 weeks |
 | 2 | **USSD core** | router (shared, extension, dedicated), generalised session and PIN flows, `screens.py`, consent screen, portal USSD simulator, i18n plumbing | 1–2 weeks |
 | 3 | **Billing** | provider interface and Daraja (sandbox first), **restore-to-device in the app** plus pay-per-restore, Individual subscriptions, enterprise subscriptions, seats, code fees, invoices, proration, grace and suspension, Finance portal | 2–3 weeks |
 | 4 | **Shared enterprise modules** | members and departments and groups (with CSV import), directory and visibility rules, onboarding contact sync, announcements (scheduled, expiring, reads, SMS), emergency contacts and broadcast, retention settings and job, operator portal | 3 weeks |

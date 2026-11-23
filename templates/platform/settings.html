@@ -1,0 +1,30 @@
+{% extends "platform/base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Security</h2>
+  <div class="feature">
+    <div><b>OTP by SMS (second factor)</b> {% if otp %}<span class="pill on">On</span>{% else %}<span class="pill off">Off</span>{% endif %}
+      <p>When on, app and website logins also need a 6-digit code texted to the account's phone, and sensitive USSD screens
+        (results, financial details) ask for one where the organisation hasn't turned it off. Organisations can also force it on
+        or off for themselves (their page → Settings → otp). Older app versions can't enter the code: update the app first.</p>
+      {% if not sms_ready %}<p><span class="pill warn">SMS isn't configured</span> Set AT_API_KEY on the server first.</p>{% endif %}</div>
+    <form method="post" action="/platform/settings"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="otp">
+      <input type="hidden" name="on" value="{{ '0' if otp else '1' }}">
+      <button type="submit" class="{{ 'secondary' if otp }}" {{ 'disabled' if not sms_ready and not otp }}>{{ 'Turn off' if otp else 'Turn on' }}</button></form>
+  </div>
+</div>
+<div class="card">
+  <h2>Editions</h2>
+  <p class="muted">Preset bundles of modules. Inactive editions can't be chosen for new organisations.</p>
+  {% for e in editions %}
+  <div class="feature">
+    <div><b>{{ e.name }}</b> {% if e.active %}<span class="pill on">Active</span>{% else %}<span class="pill off">Inactive</span>{% endif %}
+      <p>{{ e.modules|join(', ') }}</p></div>
+    <form method="post" action="/platform/settings"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="edition">
+      <input type="hidden" name="edition" value="{{ e.key }}"><input type="hidden" name="on" value="{{ '0' if e.active else '1' }}">
+      <button type="submit" class="{{ 'secondary' if e.active }}">{{ 'Turn off' if e.active else 'Turn on' }}</button></form>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

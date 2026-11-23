@@ -6,6 +6,7 @@ from functools import wraps
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from pb.auth.otp import login_needs_otp, send_otp, verify_otp
 from pb.config import LOCKOUT_SECONDS, MAX_PIN_ATTEMPTS, SECRET_KEY, TOKEN_MAX_AGE
 from pb.db import execute, fetch_one, get_db, sql
 from pb.features import feature_on
@@ -204,6 +205,35 @@ def api_login():
     error = check_password(user, password)
     if error:
         return api_error(error, auth_status(error))
+    if login_needs_otp(user["phone"]):
+        # Second factor (only when the Super Admin has turned OTP on): the token comes from /api/login/otp
+        ticket, error = send_otp(user["phone"], "app_login")
+        if error:
+            return api_error(error, 429 if "Wait" in error or "Too many" in error else 503)
+        return jsonify({"otp_required": True, "ticket": ticket, "phone_hint": masked_phone(user["phone"])})
+    return finish_login(user)
+
+
+def finish_login(user):
     device = " ".join(request.headers.get("X-Device-Name", "").split())[:60] or "an unknown device"
     notify_event(user["phone"], "new_login", device=device)
     return logged_in(user)
+
+
+def masked_phone(phone):
+    return "0" + phone[4:7] + "***" + phone[-3:] if phone.startswith("+254") else phone[:4] + "***" + phone[-3:]
+
+
+@app.route("/api/login/otp", methods=["POST"])
+def api_login_otp():
+    """Login step 2 when OTP is on: the ticket from /api/login + the 6-digit code texted to the phone."""
+    if not SECRET_KEY:
+        return api_error("App login is not configured on the server.", 503)
+    body = body_json()
+    phone, error = verify_otp(body.get("ticket"), body.get("code"), "app_login")
+    if error:
+        return api_error(error, 401)
+    user = get_user(phone)
+    if not user:
+        return api_error(NO_ACCOUNT, 401)
+    return finish_login(user)

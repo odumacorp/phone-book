@@ -1,0 +1,11 @@
+<div class="card">
+  <h2>History</h2>
+  <table><tr><th>When</th><th>Who</th><th>Change</th></tr>
+    {% for h in history %}
+    <tr><td style="white-space:nowrap">{{ fmt_time(h.created_at) }}</td><td>{{ h.actor }}</td>
+      <td>{% for field, change in h.changes.items() %}<div><code>{{ field }}</code>:
+        {% if change is sequence and change is not string and change|length == 2 %}{{ change[0] if change[0] is not none else '-' }} → <b>{{ change[1] if change[1] is not none else '-' }}</b>{% else %}{{ change }}{% endif %}</div>{% endfor %}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">No changes since it was seeded.</td></tr>{% endfor %}
+  </table>
+  <p class="muted">Amounts are in cents (KES × 100).</p>
+</div>

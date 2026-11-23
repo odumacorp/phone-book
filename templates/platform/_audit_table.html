@@ -1,0 +1,7 @@
+<table>
+  <tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Details</th></tr>
+  {% for r in audit_rows %}
+  <tr><td style="white-space:nowrap">{{ fmt_time(r.created_at) }}</td><td>{{ r.actor }}</td><td><code>{{ r.action }}</code></td>
+    <td>{{ r.target_type or '' }}{{ ' ' ~ r.target_id if r.target_id }}</td><td><code>{{ r.details or '' }}</code></td></tr>
+  {% else %}<tr><td colspan="5" class="muted">Nothing yet.</td></tr>{% endfor %}
+</table>

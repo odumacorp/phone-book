@@ -1,0 +1,65 @@
+{% extends "platform/base.html" %}
+{% block title %}{{ item.name }}{% endblock %}
+{% block content %}
+<p><a href="/platform/pricing">← All prices</a></p>
+<div class="card">
+  <h2>{{ item.name }} <span class="muted">({{ item.key }}, {{ item.audience }})</span></h2>
+  <form method="post" action="/platform/pricing/plan/{{ item.key }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset {{ '' if manage else 'disabled' }} style="border:0;padding:0;margin:0">
+    <div class="grid2">
+      <label class="field">Name<input name="name" value="{{ item.name }}" maxlength="80"></label>
+      <label class="field">Pricing model<select name="model">{% for k, v in models.items() %}<option value="{{ k }}" {{ 'selected' if item.model == k }}>{{ v }}</option>{% endfor %}</select></label>
+      <label class="field">Billed<select name="billing_interval">{% for k, v in intervals.items() %}<option value="{{ k }}" {{ 'selected' if (item.billing_interval or '') == k }}>{{ v }}</option>{% endfor %}</select></label>
+      <label class="field">Price (KES){% if item.model == 'per_transaction' %} per restore{% elif item.model == 'seat' %} per month, base{% endif %}
+        <input name="base_price" value="{{ '%.2f'|format(item.base_price / 100) if item.base_price is not none else '' }}" inputmode="decimal"></label>
+      <label class="field">Members included<input name="included_members" value="{{ item.included_members if item.included_members is not none else '' }}" inputmode="numeric"></label>
+      <label class="field">Each extra member (KES)<input name="per_member_price" value="{{ '%.2f'|format(item.per_member_price / 100) if item.per_member_price is not none else '' }}" inputmode="decimal"></label>
+      <label class="field">Annual discount (%)<input name="annual_discount_pct" value="{{ item.annual_discount_pct }}" inputmode="numeric"></label>
+      <label class="field">Free trial (days)<input name="trial_days" value="{{ item.trial_days }}" inputmode="numeric"></label>
+      <label class="field">Order on lists<input name="sort" value="{{ item.sort }}" inputmode="numeric"></label>
+      <label class="field">Status<select name="active"><option value="1" {{ 'selected' if item.active }}>Active (can be chosen)</option><option value="0" {{ 'selected' if not item.active }}>Inactive</option></select></label>
+    </div>
+    {% if manage %}<button type="submit">Save prices</button>{% endif %}
+    </fieldset>
+  </form>
+</div>
+
+<div class="card">
+  <h2>What's included</h2>
+  <p class="muted">1 = included, 0 = not; numbers are limits (blank = unlimited); edition_modules is "included" or "addon".</p>
+  <table><tr><th>Feature</th><th>Value</th><th></th></tr>
+    {% for f, v in features.items() %}
+    <tr><td><code>{{ f }}</code></td><td>
+      {% if manage %}<form method="post" action="/platform/pricing/plan/{{ item.key }}/feature" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="feature" value="{{ f }}"><input name="value" value="{{ v }}" style="max-width:160px"><button class="secondary" type="submit">Save</button></form>
+      {% else %}{{ v if v != '' else 'unlimited' }}{% endif %}</td>
+      <td>{% if manage %}<form method="post" action="/platform/pricing/plan/{{ item.key }}/feature" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="feature" value="{{ f }}"><input type="hidden" name="delete" value="1"><button class="secondary" type="submit">Remove</button></form>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% if manage %}
+  <form method="post" action="/platform/pricing/plan/{{ item.key }}/feature" class="row" style="margin-top:10px"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="feature" placeholder="feature_key" required><input name="value" placeholder="value"><button type="submit">Add feature</button></form>
+  {% endif %}
+</div>
+
+{% if item.model == 'seat' %}
+<div class="card">
+  <h2>Volume tiers</h2>
+  <p class="muted">From this many members, each extra member costs this instead of the plan's per-member price.</p>
+  <table><tr><th class="num">From members</th><th class="num">Per member</th><th></th></tr>
+    {% for t in tiers %}<tr><td class="num">{{ '{:,}'.format(t.from_members) }}</td><td class="num">{{ kes(t.per_member_price) }}</td>
+      <td>{% if manage %}<form method="post" action="/platform/pricing/plan/{{ item.key }}/tier" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="delete" value="{{ t.id }}"><button class="secondary" type="submit">Remove</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">No tiers.</td></tr>{% endfor %}
+  </table>
+  {% if manage %}
+  <form method="post" action="/platform/pricing/plan/{{ item.key }}/tier" class="row" style="margin-top:10px"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="from_members" placeholder="From members, e.g. 5000" inputmode="numeric" required><input name="per_member_price" placeholder="KES per member" inputmode="decimal" required>
+    <button type="submit">Add tier</button></form>
+  {% endif %}
+</div>
+{% endif %}
+{% include "platform/_price_history.html" %}
+{% endblock %}
