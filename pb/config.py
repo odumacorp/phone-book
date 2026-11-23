@@ -16,6 +16,7 @@ DB_PATH = os.getenv("DB_PATH", os.path.join(ROOT, "phonebook.db"))
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 CONTACTS_KEY = os.getenv("CONTACTS_KEY", "")  # encrypts contacts at rest; never stored in the database
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")  # /admin is disabled until this is set
+TICK_SECRET = os.getenv("TICK_SECRET", "")  # POST /internal/tick (background jobs) is disabled until set
 # Email (for verification codes and notifications), sent over SMTP: e.g. Gmail with an app password,
 # Brevo, Mailgun or SendGrid SMTP. Nothing is sent until the admin turns the email features on.
 SMTP_HOST = os.getenv("SMTP_HOST", "")

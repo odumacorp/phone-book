@@ -25,6 +25,7 @@ os.environ.update({
     "AT_VOICE_NUMBER": "",
     "SECRET_KEY": "test-secret-key",
     "ADMIN_PASSWORD": "admin-pass",
+    "TICK_SECRET": "tick-secret",
     "CONTACTS_KEY": base64.urlsafe_b64encode(b"k" * 32).decode(),
     "SMTP_HOST": "",
     "SMTP_USER": "",

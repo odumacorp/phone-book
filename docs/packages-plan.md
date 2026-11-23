@@ -48,8 +48,9 @@ Status: **approved (2026-11-23), with the decisions below.** Section 9 keeps the
 ## 2. Guiding decisions
 
 1. **Split `app.py` into a package and keep Flask and raw SQL.** Adding about 35 tables and 7 modules to a
-   3,200-line file isn't workable. I'll create a `pb/` package of Flask blueprints and move the existing code into it
-   unchanged (Phase 0). `app.py` stays as the entry point (`app:app`), so Render and gunicorn don't change. Keeping raw SQL
+   3,200-line file isn't workable. I'll create a `pb/` package and move the existing code into it unchanged (Phase 0).
+   Moved code keeps registering routes on the shared `app` object, so endpoint names don't change; new modules use
+   blueprints. `app.py` stays as the entry point (`app:app`), so Render and gunicorn don't change. Keeping raw SQL
    (rather than adopting SQLAlchemy) matches the codebase and keeps the SQLite and Postgres support.
 2. **Numbered migrations.** I'll add a `schema_migrations` table and `pb/migrations/NNNN_name.py` files that run in order at
    startup under the existing advisory lock. The current `init_db()` becomes migration `0001`, and since it is idempotent,
@@ -227,7 +228,8 @@ Money is stored as **integer cents (KES × 100)**. Timestamps are integer epoch 
 ### 5.4 Background jobs
 There's no job runner today. Scheduled posts, retention, renewals, reconciliation and dunning need one. **Plan:** a
 `/internal/tick` endpoint protected by a secret, called every minute by a Render Cron Job (or any external cron). Each job
-takes a Postgres advisory lock so it never runs twice. Messages are sent through the existing async helpers.
+is claimed with one atomic `UPDATE` on `job_runs` so it never runs twice. That works through Neon's pooler, where
+session-level advisory locks aren't reliable. Messages are sent through the existing async helpers.
 
 ### 5.5 Custom USSD service builder (Phase 6)
 The menu tree is stored as JSON in `ussd_menu_versions`. The editor is a portal page (tree, drag to reorder, item form). Validation
@@ -255,7 +257,7 @@ draft version. Publishing archives the previous version, so rolling back means r
 
 | # | Phase | Contents | Rough size |
 |---|---|---|---|
-| 0 | **Groundwork** | pytest and a regression suite for the current USSD and API; split `app.py` into `pb/` (no behaviour change); migrations framework; job tick endpoint | 1 week |
+| 0 ✅ | **Groundwork** (done 2026-11-23) | pytest and a regression suite for the current USSD and API; split `app.py` into `pb/` (no behaviour change); migrations framework; job tick endpoint | 1 week |
 | 1 | **Foundation** | tenants, editions, modules, flags; users and memberships; staff accounts; RBAC engine and seeded roles; audit log; OTP (built, off); plans, pricing and code-allocation tables; Super Admin portal (tenants, plans, flags, codes, staff); tenant-isolation tests | 2–3 weeks |
 | 2 | **USSD core** | router (shared, extension, dedicated), generalised session and PIN flows, `screens.py`, consent screen, portal USSD simulator, i18n plumbing | 1–2 weeks |
 | 3 | **Billing** | provider interface and Daraja (sandbox first), **restore-to-device in the app** plus pay-per-restore, Individual subscriptions, enterprise subscriptions, seats, code fees, invoices, proration, grace and suspension, Finance portal | 2–3 weeks |
