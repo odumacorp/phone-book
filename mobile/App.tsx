@@ -55,7 +55,11 @@ import {
   getSessions,
   getMe,
   isValidPhone,
+  loadConfig,
   loadToken,
+  loginOtp,
+  type OtpChallenge,
+  ussdCode,
   login,
   logoutApp,
   logoutAppSession,
@@ -83,7 +87,6 @@ import {
 import { DialogProvider, useDialog } from './src/dialog';
 import { isWeb } from './src/platform';
 
-const USSD_CODE = '*384*88041#';
 const BATCH_SIZE = 1000;
 
 type View_ =
@@ -124,7 +127,7 @@ function Main() {
 
   useEffect(() => {
     (async () => {
-      const saved = await loadToken();
+      const [saved] = await Promise.all([loadToken(), loadConfig()]);
       if (saved) {
         try {
           setMe(await getMe(saved));
@@ -358,13 +361,37 @@ function LoginScreen({
 }) {
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
+  const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
+  const [code, setCode] = useState('');
   const { busy, error, setError, run } = useForm();
 
   const submit = () => {
     if (!isEmail(account) && !isValidPhone(account))
       return setError(`Enter your email, or your phone number as ${PHONE_FORMAT}.`);
-    run(async () => onLogin(await login(account.trim(), password)));
+    run(async () => {
+      const result = await login(account.trim(), password);
+      if (typeof result === 'string') return onLogin(result);
+      setCode('');
+      setChallenge(result); // OTP is on: ask for the code texted to the phone
+    });
   };
+
+  if (challenge) {
+    return (
+      <Form>
+        <Text style={styles.hint}>We texted a 6-digit code to {challenge.phone_hint}. Enter it to finish logging in.</Text>
+        <CodeField value={code} onChange={setCode} />
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <Button
+          title="Log in"
+          onPress={() => run(async () => onLogin(await loginOtp(challenge.ticket, code.trim())))}
+          busy={busy}
+          disabled={code.trim().length !== 6}
+        />
+        <Link title="Start again" onPress={() => { setChallenge(null); setError(''); }} disabled={busy} />
+      </Form>
+    );
+  }
 
   return (
     <Form>
@@ -423,7 +450,7 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void;
             autoComplete="name"
             maxLength={30}
           />
-          <Text style={styles.hint}>Added to the end of every SMS you send from {USSD_CODE}.</Text>
+          <Text style={styles.hint}>Added to the end of every SMS you send from {ussdCode()}.</Text>
           <PhoneField value={phone} onChange={setPhone} />
           <Text style={styles.hint}>We will text a 6-digit code to confirm it is yours.</Text>
           <Text style={styles.label}>Email (optional)</Text>
@@ -450,7 +477,7 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void;
           <Text style={styles.hint}>For logging in to this app.</Text>
           <PinField label="4-digit USSD PIN" value={pin} onChange={setPin} />
           <PinField label="Confirm USSD PIN" value={confirmPin} onChange={setConfirmPin} />
-          <Text style={styles.hint}>For dialling {USSD_CODE}, where you log in with your phone number and this PIN.</Text>
+          <Text style={styles.hint}>For dialling {ussdCode()}, where you log in with your phone number and this PIN.</Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button
             title="Create account"
@@ -921,7 +948,7 @@ function ChangePinScreen({
   return (
     <Form>
       <Text style={styles.heading}>Change USSD PIN</Text>
-      <Text style={styles.hint}>The PIN you use when dialling {USSD_CODE}. Forgot it? Just set a new one here.</Text>
+      <Text style={styles.hint}>The PIN you use when dialling {ussdCode()}. Forgot it? Just set a new one here.</Text>
       <PasswordField label="Your app password" value={password} onChange={setPassword} />
       <PinField label="New PIN" value={pin} onChange={setPin} />
       <PinField label="Confirm new PIN" value={confirm} onChange={setConfirm} />
@@ -1036,7 +1063,7 @@ function SessionsScreen({ token, onBack, onLogout }: { token: string; onBack: ()
   const sections: { title: string; items: SessionItem[] }[] = data
     ? [
         { title: 'This app', items: data.app.map((s) => ({ kind: 'app' as const, s })) },
-        { title: `USSD (${USSD_CODE})`, items: data.ussd.map((s) => ({ kind: 'ussd' as const, s })) },
+        { title: `USSD (${ussdCode()})`, items: data.ussd.map((s) => ({ kind: 'ussd' as const, s })) },
       ]
     : [];
   const rows = sections.flatMap((sec) => [
@@ -1164,7 +1191,7 @@ function LoginHistoryScreen({ token, onBack, onLogout }: { token: string; onBack
           <View style={styles.card}>
             <Text style={styles.heading}>USSD login attempts</Text>
             <Text style={styles.hint}>
-              Every time someone logs in to your phone book by dialling {USSD_CODE}, or tries to. Kept for {keepDays} days.
+              Every time someone logs in to your phone book by dialling {ussdCode()}, or tries to. Kept for {keepDays} days.
               Pull down to refresh.
             </Text>
             {logins && logins.length ? (
@@ -1923,8 +1950,8 @@ function SyncScreen({
             <Text style={styles.switchLabel}>Show other contacts on USSD</Text>
             <Text style={styles.hint}>
               {showOthers
-                ? `${USSD_CODE} shows all your contacts, priority ones first.`
-                : `${USSD_CODE} shows only your ${maxPriority} priority contacts.`}
+                ? `${ussdCode()} shows all your contacts, priority ones first.`
+                : `${ussdCode()} shows only your ${maxPriority} priority contacts.`}
             </Text>
           </View>
           <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
@@ -1934,8 +1961,8 @@ function SyncScreen({
             <Text style={styles.switchLabel}>Send all contacts by SMS</Text>
             <Text style={styles.hint}>
               {smsAll
-                ? `"SMS me my contacts" on ${USSD_CODE} texts all your contacts to the phone you dialled from.`
-                : `"SMS me my contacts" on ${USSD_CODE} texts only your ${maxPriority} priority contacts to the phone you dialled from.`}
+                ? `"SMS me my contacts" on ${ussdCode()} texts all your contacts to the phone you dialled from.`
+                : `"SMS me my contacts" on ${ussdCode()} texts only your ${maxPriority} priority contacts to the phone you dialled from.`}
             </Text>
           </View>
           <Switch value={smsAll} onValueChange={toggleSmsAll} trackColor={{ true: COLORS.primary }} />

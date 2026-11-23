@@ -19,6 +19,7 @@ export type Me = {
   max_emails?: number;
   features?: { email_verification?: boolean }; // switched on by the admin
   unread_notifications?: number;
+  ussd_code?: string; // the USSD code users dial
 };
 /** An email on the account (up to max_emails). Any of them can be used to log in. */
 export type EmailAddress = { id: number; email: string; verified: boolean; notify?: boolean };
@@ -73,8 +74,36 @@ async function saveToken(path: string, body: object, token?: string): Promise<st
   return res.token;
 }
 
-/** Log in with an email address or a phone number, plus the password chosen at registration. */
-export const login = (login: string, password: string) => saveToken('/api/login', { login, password });
+/** A login that needs the SMS code (only when OTP is switched on by the platform). */
+export type OtpChallenge = { otp_required: true; ticket: string; phone_hint: string };
+
+/** Log in with an email address or a phone number, plus the password chosen at registration.
+ * Returns the token, or an OtpChallenge to finish with loginOtp(). */
+export async function login(login: string, password: string): Promise<string | OtpChallenge> {
+  const res = await request<{ token?: string } & Partial<OtpChallenge>>('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ login, password }),
+  });
+  if (res.otp_required && res.ticket) return { otp_required: true, ticket: res.ticket, phone_hint: res.phone_hint ?? '' };
+  await tokenStore.set(TOKEN_KEY, res.token!);
+  return res.token!;
+}
+
+/** Login step 2 when OTP is on: the 6-digit code texted to the account's phone. */
+export const loginOtp = (ticket: string, code: string) => saveToken('/api/login/otp', { ticket, code });
+
+let ussdCodeValue = '*384*88041#';
+/** The USSD code users dial (set on the server; loaded at startup by loadConfig). */
+export const ussdCode = () => ussdCodeValue;
+/** Public settings from the server. Offline or older servers: keep the defaults. */
+export async function loadConfig() {
+  try {
+    const config = await request<{ ussd_code?: string }>('/api/config');
+    if (config.ussd_code) ussdCodeValue = config.ussd_code;
+  } catch {
+    // keep the default
+  }
+}
 
 export type Registration = {
   phone: string;
