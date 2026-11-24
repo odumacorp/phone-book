@@ -1,6 +1,8 @@
 {% extends "platform/base.html" %}
 {% set section = 'emergency' if emergency else 'contacts' %}
-{% block title %}{{ 'Emergency contacts' if emergency else 'Contacts' }} · {{ org.name }}{% endblock %}
+{% block title %}{{ 'Emergency contacts' if emergency else 'Contacts' }} · {{ org.name }}{{ combo_script() }}
+{% endblock %}
+{% from "platform/org/_combo.html" import combo, combo_script %}
 {% block content %}
 <div class="page-head">
   <h1>{{ 'Emergency contacts' if emergency else 'Contacts' }}</h1>
@@ -15,15 +17,21 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     {% if editing %}<input type="hidden" name="contact_id" value="{{ editing.id }}">{% endif %}
     <div class="grid2">
-      <label class="field">Name <small>Person or office, e.g. "School nurse"</small><input name="name" maxlength="60" required value="{{ editing.name if editing else '' }}"></label>
-      <label class="field">Phone number <small>e.g. 0712 345 678, or a short code like 999</small><input name="phone" inputmode="tel" required value="{{ editing.phone if editing else '' }}"></label>
-      <label class="field">Role or title <small>Optional, e.g. "Bursar"</small><input name="title" maxlength="60" value="{{ editing.title or '' if editing else '' }}"></label>
-{% if not emergency %}
-      <label class="field">Group <small>Optional. Members browse contacts by group on USSD.</small>
-        <input name="group_name" maxlength="40" list="groups" value="{{ editing.group_name or '' if editing else '' }}">
-        <datalist id="groups">{% for g_ in groups %}<option value="{{ g_ }}">{% endfor %}</datalist></label>
+      {% if emergency %}
+      <label class="field">Name <small>Pick a suggestion or type, e.g. "School nurse"</small>
+        <input name="name" maxlength="60" required list="names" value="{{ editing.name if editing else '' }}">
+        <datalist id="names">{% for _t, items in name_lists %}{% for n in items %}<option value="{{ n }}">{% endfor %}{% endfor %}</datalist></label>
+      {% else %}
+      <label class="field">Name <small>Person or office, e.g. "Mrs Achieng"</small><input name="name" maxlength="60" required value="{{ editing.name if editing else '' }}"></label>
+      {% endif %}
+      <label class="field">Phone number <small>e.g. 0712 345 678, or a short code like 999</small><input name="phone" inputmode="tel" required value="{{ local(editing.phone) if editing else '' }}"></label>
+      {{ combo('title', 'Role or title', 'Optional', title_lists, editing.title if editing else '', 'e.g. Bursar') }}
+      {% if not emergency %}
+      {{ combo('group_name', 'Group or department', 'Members browse contacts by group on USSD', group_lists, editing.group_name if editing else '', 'e.g. Finance office', 40) }}
       {% endif %}
     </div>
+    {% if not emergency and can_structure %}<p class="muted" style="margin:-6px 0 12px">Need a new group? Add it in
+      <a href="/platform/org/{{ org.id }}/groups">Groups and departments</a>, or choose "Other" and type it.</p>{% endif %}
     {% set selected = editing_audience %}
     {% include "platform/org/_audience.html" with context %}
     <div class="row">
@@ -51,4 +59,5 @@
   <div class="empty"><b>No {{ 'emergency contacts' if emergency else 'contacts' }} yet</b>Add the first one above.</div>
   {% endif %}
 </div>
+{{ combo_script() }}
 {% endblock %}

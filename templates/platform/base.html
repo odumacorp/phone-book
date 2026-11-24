@@ -20,6 +20,7 @@
       {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contacts' }}" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span>Contacts</a>{% endif %}
       {% if 'emergency' in areas %}<a class="item {{ 'active' if section == 'emergency' }}" href="/platform/org/{{ org.id }}/emergency"><span class="icon">🚨</span>Emergency contacts</a>{% endif %}
       {% if 'members' in areas %}<a class="item {{ 'active' if section == 'members' }}" href="/platform/org/{{ org.id }}/members"><span class="icon">👥</span>Members</a>{% endif %}
+      {% if 'structure' in areas %}<a class="item {{ 'active' if section == 'structure' }}" href="/platform/org/{{ org.id }}/groups"><span class="icon">🗂️</span>Groups and departments</a>{% endif %}
       {% if 'settings' in areas %}<a class="item {{ 'active' if section == 'settings' }}" href="/platform/org/{{ org.id }}/settings"><span class="icon">⚙️</span>Settings</a>{% endif %}
       {% if not is_staff %}<a class="item" href="/platform/org"><span class="icon">↔️</span>Switch organisation</a>{% endif %}
     {% endif %}

@@ -15,6 +15,13 @@
       <label class="field">Name<input name="name" maxlength="80" placeholder="Optional"></label>
       <label class="field">Role <small>Decides what they can see and do</small>
         <select name="role">{% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == 'member' }}>{{ name }}</option>{% endfor %}</select></label>
+      {% if can_structure %}
+      <label class="field">Department or group <small>Optional{% if not departments and not groups %}: <a href="/platform/org/{{ org.id }}/groups">create some first</a>{% endif %}</small>
+        <select name="placement"><option value="">None</option>
+          {% if departments %}<optgroup label="Departments">{% for d in departments %}<option value="d:{{ d.id }}">{{ d.name }}</option>{% endfor %}</optgroup>{% endif %}
+          {% if groups %}<optgroup label="Groups">{% for x in groups %}<option value="g:{{ x.id }}">{{ x.name }}</option>{% endfor %}</optgroup>{% endif %}
+        </select></label>
+      {% endif %}
     </div>
     <button type="submit">Add member</button>
   </form>
@@ -24,9 +31,9 @@
   <h2>{{ rows|length }} member{{ '' if rows|length == 1 else 's' }}</h2>
   {% if rows %}
   <table>
-    <tr><th>Name</th><th>Phone</th><th>Role</th><th>Joined</th><th></th></tr>
+    <tr><th>Name</th><th>Phone</th><th>Role</th><th>Department / group</th><th>Joined</th><th></th></tr>
     {% for m in rows %}
-    <tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td>{{ m.roles|join(', ') }}</td><td class="muted">{{ fmt_date(m.joined_at) }}</td>
+    <tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td>{{ m.roles|join(', ') }}</td><td>{{ m.placed|join(', ') or '-' }}</td><td class="muted">{{ fmt_date(m.joined_at) }}</td>
       <td style="text-align:right"><form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/remove" class="inline"
         onsubmit="return confirm('Remove {{ m.display_name or local(m.user_phone) }} from {{ org.name }}?')">
         <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Remove</button></form></td></tr>

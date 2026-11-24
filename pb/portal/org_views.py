@@ -9,7 +9,7 @@ import time
 from flask import abort, g, redirect, render_template, request, url_for
 
 from pb.billing import ussd_codes
-from pb.org import content
+from pb.org import content, structure, suggestions
 from pb.portal import bp, done, failed, is_staff
 from pb.rbac import engine as rbac
 from pb.tenancy import tenants as tenancy
@@ -19,6 +19,7 @@ AREAS = {  # area: (permission, module)
     "contacts": ("contacts.manage", "directory"),
     "emergency": ("emergency.manage", "emergency"),
     "members": ("members.manage", "members"),
+    "structure": ("departments.manage", "members"),
     "settings": ("tenant.settings.manage", None),
 }
 AUDIENCE_ROLES = ["member", "guardian", "client", "teacher", "content_publisher", "department_supervisor", "org_admin", "auditor"]
@@ -145,8 +146,19 @@ def _contacts_page(tenant_id, emergency):
     editing = content.contact(tenant_id, int(request.args["edit"])) if request.args.get("edit", "").isdigit() else None
     if editing and bool(editing["is_emergency"]) != emergency:
         editing = None
-    groups = sorted({c["group_name"] for c in rows if c["group_name"]})
-    return page("platform/org/contacts.html", rows=rows, choices=choices, editing=editing, emergency=emergency, groups=groups,
+    edition = g.org["edition"]
+    defined = structure.names(tenant_id)
+    used_groups = sorted({c["group_name"] for c in rows if c["group_name"]} - set(defined), key=str.lower)
+    every_group = set(defined) | set(used_groups)
+    group_lists = [("Your departments and groups", defined), ("Used on contacts", used_groups),
+                   ("Suggested for you", [x for x in suggestions.group_options(edition, []) if x not in every_group])]
+    used_titles = sorted({c["title"] for c in content.contacts(tenant_id) if c["title"]}, key=str.lower)
+    title_lists = [("Used on contacts", used_titles),
+                   ("Suggested for you", [t for t in suggestions.title_options(edition) if t.lower() not in {u.lower() for u in used_titles}])]
+    name_lists = [("Suggested", suggestions.emergency_options(edition, [c["name"] for c in rows]))] if emergency else []
+    return page("platform/org/contacts.html", rows=rows, choices=choices, editing=editing, emergency=emergency,
+                group_lists=group_lists, title_lists=title_lists, name_lists=name_lists,
+                can_structure="structure" in g.org_areas,
                 editing_audience=content.audience_roles(editing["audience"]) if editing else [],
                 endpoint="platform.org_emergency" if emergency else "platform.org_contacts")
 
@@ -204,7 +216,11 @@ def org_members(tenant_id):
     open_workspace(tenant_id)
     require_area("members")
     choices = [(k, n) for k, n in audience_choices(tenant_id)]
-    return page("platform/org/members.html", rows=content.member_rows(tenant_id), choices=choices)
+    placements = structure.placements_by_member(tenant_id)
+    rows = [dict(m, placed=placements.get(m["id"], [])) for m in content.member_rows(tenant_id)]
+    return page("platform/org/members.html", rows=rows, choices=choices,
+                departments=structure.departments(tenant_id), groups=structure.groups(tenant_id),
+                can_structure="structure" in g.org_areas)
 
 
 @bp.route("/org/<int:tenant_id>/members", methods=["POST"])
@@ -212,8 +228,10 @@ def org_member_add(tenant_id):
     open_workspace(tenant_id)
     require_area("members")
     try:
-        content.add_member_with_role(g.principal, tenant_id, request.form.get("phone"), request.form.get("name"),
-                                     request.form.get("role") or "member")
+        membership_id = content.add_member_with_role(g.principal, tenant_id, request.form.get("phone"), request.form.get("name"),
+                                                     request.form.get("role") or "member")
+        if request.form.get("placement"):
+            structure.place_member(g.principal, tenant_id, membership_id, request.form.get("placement"))
     except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
         return failed(str(e), "platform.org_members", tenant_id=tenant_id)
     return done("Member added. They see your notices and contacts once they log in with that number.", "platform.org_members",
@@ -229,6 +247,67 @@ def org_member_remove(tenant_id, membership_id):
     except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
         return failed(str(e), "platform.org_members", tenant_id=tenant_id)
     return done("Member removed.", "platform.org_members", tenant_id=tenant_id)
+
+
+# ---------------------------------------------------------------- groups and departments
+
+@bp.route("/org/<int:tenant_id>/groups", methods=["GET"])
+def org_structure(tenant_id):
+    open_workspace(tenant_id)
+    require_area("structure")
+    edition = g.org["edition"]
+    depts, grps = structure.departments(tenant_id), structure.groups(tenant_id)
+    every = [d["name"] for d in depts] + [x["name"] for x in grps]
+    editing_dept = next((d for d in depts if str(d["id"]) == request.args.get("dept")), None)
+    editing_group = next((x for x in grps if str(x["id"]) == request.args.get("group")), None)
+    return page("platform/org/structure.html", departments=depts, groups=grps, kinds=structure.GROUP_KINDS,
+                dept_suggestions=suggestions.department_suggestions(edition, every)[:16],
+                group_suggestions=suggestions.group_suggestions(edition, every)[:16],
+                editing_dept=editing_dept, editing_group=editing_group)
+
+
+def _structure_action(tenant_id, fn, message):
+    open_workspace(tenant_id)
+    require_area("structure")
+    try:
+        fn()
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_structure", tenant_id=tenant_id)
+    return done(message, "platform.org_structure", tenant_id=tenant_id)
+
+
+def _int_or_none(value):
+    return int(value) if str(value or "").isdigit() else None
+
+
+@bp.route("/org/<int:tenant_id>/departments", methods=["POST"])
+def org_department_save(tenant_id):
+    f = request.form
+    dept_id = _int_or_none(f.get("department_id"))
+    return _structure_action(tenant_id, lambda: structure.save_department(
+        g.principal, tenant_id, f.get("name"), _int_or_none(f.get("parent_id")), dept_id),
+        "Department saved." if dept_id else f"Department {' '.join((f.get('name') or '').split())} added.")
+
+
+@bp.route("/org/<int:tenant_id>/departments/<int:department_id>/delete", methods=["POST"])
+def org_department_delete(tenant_id, department_id):
+    return _structure_action(tenant_id, lambda: structure.delete_department(g.principal, tenant_id, department_id),
+                             "Department deleted. Its members are still in the organisation.")
+
+
+@bp.route("/org/<int:tenant_id>/groups", methods=["POST"])
+def org_group_save(tenant_id):
+    f = request.form
+    group_id = _int_or_none(f.get("group_id"))
+    return _structure_action(tenant_id, lambda: structure.save_group(
+        g.principal, tenant_id, f.get("name"), f.get("kind") or "custom", _int_or_none(f.get("department_id")), group_id),
+        "Group saved." if group_id else f"Group {' '.join((f.get('name') or '').split())} added.")
+
+
+@bp.route("/org/<int:tenant_id>/groups/<int:group_id>/delete", methods=["POST"])
+def org_group_delete(tenant_id, group_id):
+    return _structure_action(tenant_id, lambda: structure.delete_group(g.principal, tenant_id, group_id),
+                             "Group deleted. Its members are still in the organisation.")
 
 
 # ---------------------------------------------------------------- settings

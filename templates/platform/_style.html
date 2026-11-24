@@ -64,6 +64,8 @@
   input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary-soft); border-color: var(--primary); }
   textarea { min-height: 120px; resize: vertical; }
   input[type=checkbox], input[type=radio] { width: 18px; height: 18px; padding: 0; vertical-align: -3px; flex: 0 0 auto; accent-color: var(--primary); }
+  .combo input.combo-text { margin-top: 8px; }
+  optgroup { font-weight: 600; color: var(--muted); }
   .checks.aud { display: none; }
   form:has(input[name=audience_mode][value=some]:checked) .checks.aud { display: flex; }
   label.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600; margin-bottom: 14px; }

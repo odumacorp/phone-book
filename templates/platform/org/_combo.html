@@ -1,0 +1,28 @@
+{#- A dropdown of choices with "Other… (type your own)". The text box carries the value that's submitted. -#}
+{% macro combo(name, label, hint, lists, value, placeholder='', maxlength=60, none_label='None') %}
+{% set ns = namespace(found=false) %}
+{% for _title, items in lists %}{% if value and value in items %}{% set ns.found = true %}{% endif %}{% endfor %}
+<label class="field combo">{{ label }} {% if hint %}<small>{{ hint }}</small>{% endif %}
+  <select data-combo-for="{{ name }}" aria-label="{{ label }}">
+    <option value="">{{ none_label }}</option>
+    {% for title, items in lists if items %}
+      <optgroup label="{{ title }}">{% for item in items %}<option {{ 'selected' if item == value }}>{{ item }}</option>{% endfor %}</optgroup>
+    {% endfor %}
+    <option value="__other__" {{ 'selected' if value and not ns.found }}>Other… (type your own)</option>
+  </select>
+  <input name="{{ name }}" value="{{ value or '' }}" maxlength="{{ maxlength }}" placeholder="{{ placeholder }}"
+         class="combo-text" {% if not value or ns.found %}hidden{% endif %}>
+</label>
+{% endmacro %}
+
+{% macro combo_script() %}
+<script>
+document.querySelectorAll('select[data-combo-for]').forEach((select) => {
+  const input = select.parentElement.querySelector('input.combo-text');
+  select.addEventListener('change', () => {
+    if (select.value === '__other__') { input.hidden = false; input.value = ''; input.focus(); }
+    else { input.hidden = true; input.value = select.value; }
+  });
+});
+</script>
+{% endmacro %}

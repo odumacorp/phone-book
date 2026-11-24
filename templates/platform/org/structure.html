@@ -1,0 +1,90 @@
+{% extends "platform/base.html" %}
+{% set section = 'structure' %}
+{% block title %}Groups and departments · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Groups and departments</h1>
+  <p>Organise {{ org.name }} your way. <b>Departments</b> are offices or units (e.g. Finance, Sales), and can sit inside each other.
+    <b>Groups</b> are sets of people (e.g. Form 2, Youth, Corporate clients). Both appear in the Group list when you add a contact,
+    and you can place members in them.</p></div>
+
+<div class="grid2" style="gap:18px;align-items:start">
+  <div class="card" id="dept">
+    <h2>Departments</h2>
+    <form method="post" action="/platform/org/{{ org.id }}/departments">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if editing_dept %}<input type="hidden" name="department_id" value="{{ editing_dept.id }}">{% endif %}
+      <label class="field">{{ 'Rename department' if editing_dept else 'New department' }}
+        <input name="name" maxlength="40" required value="{{ editing_dept.name if editing_dept else '' }}" placeholder="e.g. Finance office"></label>
+      {% if departments %}
+      <label class="field">Inside another department? <small>Optional</small>
+        <select name="parent_id"><option value="">No, it's a main department</option>
+          {% for d in departments if not editing_dept or d.id != editing_dept.id %}<option value="{{ d.id }}" {{ 'selected' if editing_dept and editing_dept.parent_id == d.id }}>{{ d.name }}</option>{% endfor %}
+        </select></label>
+      {% endif %}
+      <div class="row"><button type="submit">{{ 'Save' if editing_dept else 'Add department' }}</button>
+        {% if editing_dept %}<a class="btn secondary" href="/platform/org/{{ org.id }}/groups">Cancel</a>{% endif %}</div>
+    </form>
+    {% if dept_suggestions and not editing_dept %}
+    <p class="muted" style="margin:16px 0 6px">Quick add:</p>
+    <div class="row">{% for name in dept_suggestions %}
+      <form method="post" action="/platform/org/{{ org.id }}/departments" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="name" value="{{ name }}"><button class="secondary small" type="submit">+ {{ name }}</button></form>{% endfor %}</div>
+    {% endif %}
+    <div style="margin-top:18px">
+    {% for d in departments %}
+      <div class="list-item">
+        <div><b>{{ d.name }}</b>{% if d.parent_name %}<div class="muted">inside {{ d.parent_name }}</div>{% endif %}
+          <div class="muted">{{ d.members }} member{{ '' if d.members == 1 else 's' }}</div></div>
+        <div class="row" style="flex-wrap:nowrap">
+          <a class="btn secondary small" href="?dept={{ d.id }}#dept">Edit</a>
+          <form method="post" action="/platform/org/{{ org.id }}/departments/{{ d.id }}/delete" class="inline"
+            onsubmit="return confirm('Delete {{ d.name }}? Its members stay in the organisation.')">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Delete</button></form>
+        </div>
+      </div>
+    {% else %}<div class="empty"><b>No departments yet</b>Add one above, or tap a quick-add suggestion.</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="card" id="grp">
+    <h2>Groups</h2>
+    <form method="post" action="/platform/org/{{ org.id }}/groups">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if editing_group %}<input type="hidden" name="group_id" value="{{ editing_group.id }}">{% endif %}
+      <label class="field">{{ 'Rename group' if editing_group else 'New group' }}
+        <input name="name" maxlength="40" required value="{{ editing_group.name if editing_group else '' }}" placeholder="e.g. Form 2 East"></label>
+      <div class="grid2">
+        <label class="field">Kind
+          <select name="kind">{% for k, label in kinds.items() %}<option value="{{ k }}" {{ 'selected' if editing_group and editing_group.kind == k }}>{{ label }}</option>{% endfor %}</select></label>
+        <label class="field">Part of a department? <small>Optional</small>
+          <select name="department_id"><option value="">No</option>
+            {% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if editing_group and editing_group.department_id == d.id }}>{{ d.name }}</option>{% endfor %}
+          </select></label>
+      </div>
+      <div class="row"><button type="submit">{{ 'Save' if editing_group else 'Add group' }}</button>
+        {% if editing_group %}<a class="btn secondary" href="/platform/org/{{ org.id }}/groups">Cancel</a>{% endif %}</div>
+    </form>
+    {% if group_suggestions and not editing_group %}
+    <p class="muted" style="margin:16px 0 6px">Quick add:</p>
+    <div class="row">{% for name in group_suggestions %}
+      <form method="post" action="/platform/org/{{ org.id }}/groups" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="name" value="{{ name }}"><button class="secondary small" type="submit">+ {{ name }}</button></form>{% endfor %}</div>
+    {% endif %}
+    <div style="margin-top:18px">
+    {% for x in groups %}
+      <div class="list-item">
+        <div><b>{{ x.name }}</b> <span class="pill off">{{ x.kind_name }}</span>
+          {% if x.department_name %}<div class="muted">in {{ x.department_name }}</div>{% endif %}
+          <div class="muted">{{ x.members }} member{{ '' if x.members == 1 else 's' }}</div></div>
+        <div class="row" style="flex-wrap:nowrap">
+          <a class="btn secondary small" href="?group={{ x.id }}#grp">Edit</a>
+          <form method="post" action="/platform/org/{{ org.id }}/groups/{{ x.id }}/delete" class="inline"
+            onsubmit="return confirm('Delete {{ x.name }}? Its members stay in the organisation.')">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Delete</button></form>
+        </div>
+      </div>
+    {% else %}<div class="empty"><b>No groups yet</b>Add one above, or tap a quick-add suggestion.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
