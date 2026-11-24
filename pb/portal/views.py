@@ -12,6 +12,7 @@ from pb.messaging import sms
 from pb.portal import bp, done, failed, is_staff, needs
 from pb.rbac import engine as rbac
 from pb.rbac.catalogue import ALL_PERMISSIONS, SYSTEM_ROLES
+from pb.org import structure
 from pb.tenancy import tenants as tenancy
 from pb.audit import audit
 from pb import support
@@ -94,6 +95,10 @@ def tenant_detail(tenant_id):
         settings=tenancy.settings(tenant_id), setting_help=tenancy.SETTINGS, setting_choices=tenancy.SETTING_CHOICES,
         plans=catalogue.plans(audience="enterprise"), editions=tenancy.editions(),
         members=tenancy.members(tenant_id, limit=50), member_count=len(tenancy.members(tenant_id, limit=100000)),
+        dept_names={d["id"]: d["name"] for d in structure.departments(tenant_id)},
+        group_names={x["id"]: x["name"] for x in structure.groups(tenant_id)},
+        member_ids={m["user_phone"]: m["id"] for m in tenancy.members(tenant_id, limit=100000)},
+        member_names={m["user_phone"]: m["display_name"] for m in tenancy.members(tenant_id, limit=100000)},
         assignments=rbac.tenant_assignments(tenant_id), roles=rbac.roles_for_tenant(tenant_id),
         allocations=allocations, dial=[ussd_codes.dial_string(a) for a in allocations],
         codes=[c for c in ussd_codes.codes() if c["status"] != "retired" and (c["code_type"] == "shared" or not c["tenants"])],
@@ -150,8 +155,15 @@ def tenant_setting(tenant_id):
 @bp.route("/tenants/<int:tenant_id>/owner", methods=["POST"])
 @needs("platform.tenants.manage")
 def tenant_owner(tenant_id):
-    phone, name = request.form.get("phone"), request.form.get("name")
-    return _tenant_action(tenant_id, lambda: tenancy.appoint_owner(g.principal, tenant_id, phone, name), "Owner appointed.")
+    phone, name, notify = request.form.get("phone"), request.form.get("name"), request.form.get("notify")
+
+    def appoint():
+        tenancy.appoint_owner(g.principal, tenant_id, phone, name)
+        if notify:
+            from pb.org import change_notices
+            from pb.text import login_phone
+            change_notices.member_added(g.principal, tenant_id, login_phone(phone), "org_owner")
+    return _tenant_action(tenant_id, appoint, "Owner appointed.")
 
 
 @bp.route("/tenants/<int:tenant_id>/revoke", methods=["POST"])

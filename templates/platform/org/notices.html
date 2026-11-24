@@ -67,6 +67,7 @@
     <div class="checks">
       <label><input type="checkbox" name="pinned" value="1" {{ 'checked' if editing and editing.pinned }}> Keep at the top</label>
       <label><input type="checkbox" name="is_emergency" value="1" {{ 'checked' if editing and editing.is_emergency }}> Urgent (shown first, marked URGENT)</label>
+      <label><input type="checkbox" name="notify" value="1" {{ '' if editing else 'checked' }}> {{ 'Tell members it changed' if editing else 'Notify members' }} in the app</label>
     </div>
     <div class="grid2" style="max-width:560px">
       <label class="field">Show it for <small>Members stop seeing it after this</small>

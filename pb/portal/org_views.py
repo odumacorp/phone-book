@@ -12,7 +12,8 @@ from flask import abort, g, redirect, render_template, request, url_for
 from pb.billing import ussd_codes
 from flask import jsonify
 
-from pb.org import content, reminders, structure, suggestions
+from pb.org import change_notices, content, reminders, structure, suggestions
+from pb.tenancy.repo import TenantRepo
 from pb.ussd import orgs as ussd_orgs
 from pb.portal import bp, done, failed, is_staff
 from pb.rbac import engine as rbac
@@ -135,11 +136,18 @@ def org_notice_save(tenant_id):
     form = {**request.form.to_dict(), "audience": request.form.getlist("audience")}
     notice_id = int(request.form["notice_id"]) if request.form.get("notice_id", "").isdigit() else None
     try:
-        content.save_notice(g.principal, tenant_id, form, notice_id)
+        saved_id = content.save_notice(g.principal, tenant_id, form, notice_id)
     except (ValueError, content.NotAllowed) as e:
         return failed(str(e), "platform.org_notices", tenant_id=tenant_id, **({"edit": notice_id} if notice_id else {}))
-    return done("Notice saved. Members see it on USSD and in the app now." if not notice_id else "Notice updated.",
-                "platform.org_notices", tenant_id=tenant_id)
+    message = "Notice saved. Members see it on USSD and in the app now." if not notice_id else "Notice updated."
+    if request.form.get("notify"):
+        message += _told(change_notices.notice_posted(g.principal, tenant_id, saved_id, updated=bool(notice_id)))
+    return done(message, "platform.org_notices", tenant_id=tenant_id)
+
+
+def _told(count):
+    return f" {count} {'person was' if count == 1 else 'people were'} notified in the app." if count else \
+        " Nobody with the app could be notified."
 
 
 @bp.route("/org/<int:tenant_id>/notices/<int:notice_id>/delete", methods=["POST"])
@@ -187,11 +195,13 @@ def _contact_save(tenant_id, emergency):
     form = {**request.form.to_dict(), "audience": request.form.getlist("audience")}
     contact_id = int(request.form["contact_id"]) if request.form.get("contact_id", "").isdigit() else None
     try:
-        content.save_contact(g.principal, tenant_id, form, emergency, contact_id)
+        saved_id = content.save_contact(g.principal, tenant_id, form, emergency, contact_id)
     except (ValueError, content.NotAllowed) as e:
         return failed(str(e), endpoint, tenant_id=tenant_id, **({"edit": contact_id} if contact_id else {}))
-    return done("Contact updated." if contact_id else "Contact added. Members can find it on USSD and in the app now.",
-                endpoint, tenant_id=tenant_id)
+    message = "Contact updated." if contact_id else "Contact added. Members can find it on USSD and in the app now."
+    if request.form.get("notify"):
+        message += _told(change_notices.contact_saved(g.principal, tenant_id, saved_id, updated=bool(contact_id)))
+    return done(message, endpoint, tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/contacts", methods=["GET"])
@@ -261,8 +271,14 @@ def org_member_add(tenant_id):
             structure.place_member(g.principal, tenant_id, membership_id, request.form.get("placement"))
     except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
         return failed(str(e), "platform.org_members", tenant_id=tenant_id)
-    return done("Member added. They see your notices and contacts once they log in with that number.", "platform.org_members",
-                tenant_id=tenant_id)
+    message = "Member added. They see your notices and contacts once they log in with that number."
+    if request.form.get("notify"):
+        snap = change_notices.member_snapshot(tenant_id, membership_id)
+        if change_notices.member_added(g.principal, tenant_id, snap["phone"], snap["role"]):
+            message += " They were notified in the app."
+        else:
+            message += " They don't have the app yet, so they weren't notified."
+    return done(message, "platform.org_members", tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/members/<int:membership_id>", methods=["POST"])
@@ -270,6 +286,7 @@ def org_member_update(tenant_id, membership_id):
     open_workspace(tenant_id)
     require_area("members")
     form = {**request.form.to_dict(), "placements": request.form.getlist("placements")}
+    before = change_notices.member_snapshot(tenant_id, membership_id) if request.form.get("notify") else None
     try:
         content.update_member(g.principal, tenant_id, membership_id, form)
     except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
@@ -278,7 +295,12 @@ def org_member_update(tenant_id, membership_id):
             message = "You can't give that role: it has permissions you don't have" + (
                 f" ({message.split(': ', 1)[1]})." if ": " in message else ".")
         return failed(message, "platform.org_members", tenant_id=tenant_id, edit=membership_id)
-    return done("Member updated.", "platform.org_members", tenant_id=tenant_id)
+    message = "Member updated."
+    if before:
+        after = change_notices.member_snapshot(tenant_id, membership_id)
+        if change_notices.member_changed(g.principal, tenant_id, after["phone"], before, after):
+            message += " They were notified in the app."
+    return done(message, "platform.org_members", tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/members/<int:membership_id>/readd", methods=["POST"])
@@ -287,6 +309,9 @@ def org_member_readd(tenant_id, membership_id):
     require_area("members")
     try:
         content.readd_member(g.principal, tenant_id, membership_id)
+        if request.form.get("notify"):
+            snap = change_notices.member_snapshot(tenant_id, membership_id)
+            change_notices.member_added(g.principal, tenant_id, snap["phone"], snap["role"])
     except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
         return failed(str(e), "platform.org_members", tenant_id=tenant_id)
     return done("Added back as a member. Change their role with Edit if needed.", "platform.org_members", tenant_id=tenant_id)
@@ -296,11 +321,16 @@ def org_member_readd(tenant_id, membership_id):
 def org_member_remove(tenant_id, membership_id):
     open_workspace(tenant_id)
     require_area("members")
+    member = TenantRepo(tenant_id).one("memberships", "id = ?", (membership_id,))
+    phone = member["user_phone"] if member else None
     try:
         content.remove_member(g.principal, tenant_id, membership_id)
     except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
         return failed(str(e), "platform.org_members", tenant_id=tenant_id)
-    return done("Member removed.", "platform.org_members", tenant_id=tenant_id)
+    message = "Member removed."
+    if phone and request.form.get("notify") and change_notices.member_removed(g.principal, tenant_id, phone):
+        message += " They were notified in the app."
+    return done(message, "platform.org_members", tenant_id=tenant_id)
 
 
 # ---------------------------------------------------------------- groups and departments

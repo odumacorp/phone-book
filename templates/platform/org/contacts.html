@@ -34,6 +34,8 @@
       <a href="/platform/org/{{ org.id }}/groups">Groups and departments</a>, or choose "Other" and type it.</p>{% endif %}
     {% set selected = editing_audience %}
     {% include "platform/org/_audience.html" with context %}
+    <div class="checks"><label><input type="checkbox" name="notify" value="1"> Notify members who can see it in the app
+      <span class="muted">({{ 'tell them it changed' if editing else 'e.g. a new helpline' }})</span></label></div>
     <div class="row">
       <button type="submit">{{ 'Save changes' if editing else 'Add contact' }}</button>
       {% if editing %}<a class="btn secondary" href="/platform/org/{{ org.id }}/{{ 'emergency' if emergency else 'contacts' }}">Cancel</a>{% endif %}

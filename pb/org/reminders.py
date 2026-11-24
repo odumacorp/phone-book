@@ -175,19 +175,9 @@ def send(tenant_id, reminder_id):
     now = int(time.time())
     app_sent = sms_sent = parts = 0
     if row["channels"] in ("app", "both"):
-        title = f"{org['name']}: {row['title']}"[:200]
-        rows = []
-        for phone in phones:
-            user = get_user(phone)
-            if user and user["notify_inapp"]:
-                rows.append((phone, "org", title, row["body"], now))
-        if rows:
-            db = get_db()
-            db.cursor().executemany(sql("INSERT INTO notifications (owner, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?)"), rows)
-            db.commit()
-        app_sent = len(rows)
-        if len(rows) < len(phones):
-            notes.append(f"{len(phones) - len(rows)} without the app (or with notifications off)")
+        app_sent = app_notify(phones, f"{org['name']}: {row['title']}", row["body"], now)
+        if app_sent < len(phones):
+            notes.append(f"{len(phones) - app_sent} without the app (or with notifications off)")
     if row["channels"] in ("sms", "both"):
         if messaging.sms is None:
             notes.append("SMS isn't set up on the server, so no SMS was sent")
@@ -201,6 +191,22 @@ def send(tenant_id, reminder_id):
     audit("reminder.sent", tenant_id, ("reminder", reminder_id),
           {"recipients": len(phones), "app": app_sent, "sms": sms_sent, "sms_parts": parts}, actor="system")
     return {"recipients": len(phones), "app": app_sent, "sms": sms_sent}
+
+
+def app_notify(phones, title, body, now=None):
+    """Put a notification in each registered person's in-app Notifications (unless they turned the list off).
+    Returns how many got it."""
+    now = now or int(time.time())
+    rows = []
+    for phone in dict.fromkeys(phones):
+        user = get_user(phone)
+        if user and user["notify_inapp"]:
+            rows.append((phone, "org", title[:200], body[:2000], now))
+    if rows:
+        db = get_db()
+        db.cursor().executemany(sql("INSERT INTO notifications (owner, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?)"), rows)
+        db.commit()
+    return len(rows)
 
 
 def send_bulk_sms(phones, text):

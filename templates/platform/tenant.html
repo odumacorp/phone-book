@@ -82,30 +82,47 @@
 </div>
 
 <div class="card">
-  <h2>People with roles</h2>
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">People with roles</h2>
+    {% if manage %}<div class="row">
+      <a class="btn small" href="/platform/org/{{ t.id }}/members">Manage members and roles</a>
+      <a class="btn secondary small" href="/platform/org/{{ t.id }}/groups">Groups and departments</a>
+      <a class="btn secondary small" href="/platform/org/{{ t.id }}/notices">Notices</a>
+      <a class="btn secondary small" href="/platform/org/{{ t.id }}/preview">Preview</a>
+    </div>{% endif %}
+  </div>
+  <p class="help">Change anyone's role, title, departments and groups with Edit. You can choose whether to tell them in the app.</p>
   <table>
-    <tr><th>Phone</th><th>Role</th><th>Where</th><th></th></tr>
+    <tr><th>Who</th><th>Role</th><th>Where</th><th></th></tr>
     {% for a in assignments %}
-    <tr><td>{{ local(a.principal[5:]) if a.principal.startswith('user:') else a.principal }}</td><td>{{ a.name }}</td><td>{{ 'Whole organisation' if a.scope_type == 'tenant' else a.scope_type ~ ' #' ~ a.scope_id }}</td>
-      <td>{% if manage %}<form method="post" action="/platform/tenants/{{ t.id }}/revoke" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="assignment" value="{{ a.id }}"><button class="secondary" type="submit">Remove</button></form>{% endif %}</td></tr>
+    {% set phone = a.principal[5:] if a.principal.startswith('user:') else None %}
+    <tr><td>{% if phone %}<b>{{ member_names.get(phone) or '-' }}</b><div class="muted">{{ local(phone) }}</div>{% else %}{{ a.principal }}{% endif %}</td>
+      <td>{{ a.name }}</td>
+      <td>{% if a.scope_type == 'tenant' %}Whole organisation{% elif a.scope_type == 'department' %}{{ dept_names.get(a.scope_id, 'a removed department') }} (department){% elif a.scope_type == 'group' %}{{ group_names.get(a.scope_id, 'a removed group') }} (group){% else %}{{ a.scope_type }} #{{ a.scope_id }}{% endif %}</td>
+      <td style="white-space:nowrap;text-align:right">{% if manage %}
+        {% if phone and member_ids.get(phone) %}<a class="btn secondary small" href="/platform/org/{{ t.id }}/members?edit={{ member_ids[phone] }}#form">Edit</a>{% endif %}
+        <form method="post" action="/platform/tenants/{{ t.id }}/revoke" class="inline" onsubmit="return confirm('Remove this role?')"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="assignment" value="{{ a.id }}"><button class="danger small" type="submit">Remove role</button></form>{% endif %}</td></tr>
     {% else %}<tr><td colspan="4" class="muted">Nobody yet. Appoint the owner below; they can then add admins and members from the workspace.</td></tr>{% endfor %}
   </table>
   {% if manage %}
-  <form method="post" action="/platform/tenants/{{ t.id }}/owner" class="row" style="margin-top:12px">
+  <form method="post" action="/platform/tenants/{{ t.id }}/owner" class="row" style="margin-top:14px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input name="phone" placeholder="Owner's phone 07..." inputmode="tel" required>
     <input name="name" placeholder="Name (optional)">
+    <label style="display:flex;align-items:center;gap:6px;white-space:nowrap"><input type="checkbox" name="notify" value="1" checked> Tell them in the app</label>
     <button type="submit">Appoint owner</button>
   </form>
   {% endif %}
 </div>
 
 <div class="card">
-  <h2>Members <span class="muted">(first 50)</span></h2>
-  <table><tr><th>Name</th><th>Phone</th><th>Status</th><th>Joined</th></tr>
-    {% for m in members %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td>{{ m.status }}</td><td>{{ fmt_date(m.joined_at) }}</td></tr>
-    {% else %}<tr><td colspan="4" class="muted">No members yet.</td></tr>{% endfor %}
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0">Members <span class="muted">({{ member_count }}{{ ', first 50 shown' if member_count > 50 }})</span></h2>
+    {% if manage %}<a class="btn secondary small" href="/platform/org/{{ t.id }}/members">All members</a>{% endif %}</div>
+  <table><tr><th>Name</th><th>Phone</th><th>Title</th><th>Joined</th><th></th></tr>
+    {% for m in members %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td>{{ m.title or '-' }}</td><td>{{ fmt_date(m.joined_at) }}</td>
+      <td style="text-align:right">{% if manage and m.status == 'active' %}<a class="btn secondary small" href="/platform/org/{{ t.id }}/members?edit={{ m.id }}#form">Edit</a>{% else %}<span class="muted">{{ m.status }}</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">No members yet.</td></tr>{% endfor %}
   </table>
 </div>
 
