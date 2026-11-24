@@ -26,7 +26,7 @@ SETTINGS = {
     "otp": ("inherit", "OTP by SMS for sensitive USSD views: inherit (the platform switch), on, or off."),
     "language": ("en", "Default language for members: en or sw."),
 }
-SETTING_CHOICES = {"allow_other_phone": ("1", "0"), "otp": ("inherit", "on", "off"), "language": ("en", "sw")}
+SETTING_CHOICES = {"allow_other_phone": ("1", "0", "some"), "otp": ("inherit", "on", "off"), "language": ("en", "sw")}
 
 
 def slugify(name):
@@ -191,8 +191,60 @@ def set_setting(actor, tenant_id, key, value):
         audit("tenant.setting", tenant_id, ("setting", key), {key: [old, value]}, actor=actor)
 
 
-def allow_other_phone(tenant_id):
-    return get_setting(tenant_id, "allow_other_phone") == "1"
+def other_phone_rules(tenant_id):
+    """Who may use USSD from another phone when allow_other_phone is "some": roles, departments (ids) and titles."""
+    row = TenantRepo(tenant_id).one("tenant_settings", "key = ?", ("other_phone_rules",))
+    try:
+        rules = json.loads(row["value"]) if row else {}
+    except ValueError:
+        rules = {}
+    return {"roles": rules.get("roles") or [], "departments": rules.get("departments") or [], "titles": rules.get("titles") or []}
+
+
+def set_other_phone_rules(actor, tenant_id, mode, roles=(), departments=(), titles=()):
+    """mode: "1" everyone, "0" own phone only, "some" only people matching any of the roles, departments or titles."""
+    if mode not in ("1", "0", "some"):
+        raise ValueError("Choose who can use another phone.")
+    rules = {
+        "roles": sorted({r for r in roles if r}),
+        "departments": sorted({int(d) for d in departments if str(d).isdigit()}),
+        "titles": sorted({" ".join(t.split())[:60] for t in titles if t and t.strip()}, key=str.lower),
+    }
+    if mode == "some" and not any(rules.values()):
+        raise ValueError("Pick at least one role, department or title, or choose another option.")
+    old = (get_setting(tenant_id, "allow_other_phone"), other_phone_rules(tenant_id))
+    repo = TenantRepo(tenant_id)
+    repo.upsert("tenant_settings", ["key"], key="allow_other_phone", value=mode)
+    repo.upsert("tenant_settings", ["key"], key="other_phone_rules", value=json.dumps(rules))
+    if old != (mode, rules):
+        audit("tenant.other_phone_rules", tenant_id, ("setting", "allow_other_phone"),
+              {"mode": [old[0], mode], "rules": rules}, actor=actor)
+
+
+def allow_other_phone(tenant_id, phone=None):
+    """May this member (or, without a phone, members in general) use the organisation from a phone that isn't theirs?"""
+    mode = get_setting(tenant_id, "allow_other_phone")
+    if mode != "some":
+        return mode == "1"
+    if not phone:
+        return False
+    repo = TenantRepo(tenant_id)
+    member = repo.one("memberships", "user_phone = ? AND status = 'active'", (phone,))
+    if not member:
+        return False
+    rules = other_phone_rules(tenant_id)
+    roles = rbac.role_keys(rbac.user_principal(phone), tenant_id) or {"member"}
+    if roles & set(rules["roles"]):
+        return True
+    if member["title"] and member["title"].lower() in {t.lower() for t in rules["titles"]}:
+        return True
+    if rules["departments"]:
+        allowed = set()
+        for d in rules["departments"]:
+            allowed |= rbac._department_tree(tenant_id, d)
+        if any(r["department_id"] in allowed for r in repo.all("department_members", "membership_id = ?", (member["id"],))):
+            return True
+    return False
 
 
 def otp_on_for(tenant_id):

@@ -65,7 +65,7 @@ def organisations_menu(owner, caller, rest, contact_menu):
             return screen(INVALID)
         org, rest = orgs[int(rest[0]) - 1], rest[1:]
     tenant_id, name = org["tenant_id"], plain_text(org["name"])[:TITLE_MAX]
-    if caller != owner and not tenancy.allow_other_phone(tenant_id):
+    if caller != owner and not tenancy.allow_other_phone(tenant_id, owner):
         return screen(f"{name} can only be used from your own phone number. Dial from your phone.")
     return org_menu(org, owner, caller, rest, contact_menu)
 

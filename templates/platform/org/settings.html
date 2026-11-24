@@ -4,13 +4,38 @@
 {% block content %}
 <div class="page-head"><h1>Settings</h1><p>How your members use {{ org.name }} on USSD.</p></div>
 <div class="card">
-  <div class="feature">
-    <div><b>Use from another phone</b> {% if allow_other_phone %}<span class="pill on">Allowed</span>{% else %}<span class="pill off">Own phone only</span>{% endif %}
-      <p>Allowed: members can borrow a phone and log in with their phone number and PIN. Own phone only: they can only reach
-        {{ org.name }} from the phone number you registered for them.</p></div>
-    <form method="post" action="/platform/org/{{ org.id }}/settings"><input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="key" value="allow_other_phone"><input type="hidden" name="value" value="{{ '0' if allow_other_phone else '1' }}">
-      <button class="secondary" type="submit">{{ 'Only allow their own phone' if allow_other_phone else 'Allow other phones' }}</button></form>
-  </div>
+  <h2>Use from another phone</h2>
+  <p class="help">Can members borrow a phone and log in with their phone number and PIN? If not, they can only reach {{ org.name }}
+    from the phone number you registered for them. Their personal phone book isn't affected.</p>
+  <form method="post" action="/platform/org/{{ org.id }}/settings">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="allow_other_phone">
+    <div class="checks" style="flex-direction:column;gap:10px">
+      <label><input type="radio" name="value" value="1" {{ 'checked' if mode == '1' }}> <span><b>Everyone</b> can use another phone</span></label>
+      <label><input type="radio" name="value" value="0" {{ 'checked' if mode == '0' }}> <span><b>Nobody</b>: only from their own phone</span></label>
+      <label><input type="radio" name="value" value="some" {{ 'checked' if mode == 'some' }}> <span><b>Only some people</b>, by role, department or job title:</span></label>
+    </div>
+    <div id="rules" class="card" style="background:var(--bg);box-shadow:none">
+      <p class="help" style="margin-top:0">Anyone who matches <b>any</b> of these can use another phone. Everyone else: own phone only.</p>
+      <label class="field" style="margin-bottom:4px">Roles</label>
+      <div class="checks">{% for key, name in choices %}<label><input type="checkbox" name="roles" value="{{ key }}" {{ 'checked' if key in rules.roles }}> {{ name }}</label>{% endfor %}</div>
+      {% if departments %}
+      <label class="field" style="margin-bottom:4px">Departments <small>Includes their sub-departments</small></label>
+      <div class="checks">{% for d in departments %}<label><input type="checkbox" name="departments" value="{{ d.id }}" {{ 'checked' if d.id in rules.departments }}> {{ d.name }}</label>{% endfor %}</div>
+      {% else %}<p class="muted">No departments yet. <a href="/platform/org/{{ org.id }}/groups">Create departments</a> to allow by department.</p>{% endif %}
+      <label class="field" style="margin-bottom:4px">Job titles</label>
+      <div class="checks">{% for t in titles %}<label><input type="checkbox" name="titles" value="{{ t }}" {{ 'checked' if t in rules.titles }}> {{ t }}</label>{% endfor %}
+        {% for t in rules.titles if t not in titles %}<label><input type="checkbox" name="titles" value="{{ t }}" checked> {{ t }}</label>{% endfor %}</div>
+      <label class="field" style="max-width:420px">Other titles <small>Separate with commas</small><input name="other_titles" placeholder="e.g. Hostel master, Driver"></label>
+    </div>
+    <button type="submit">Save</button>
+  </form>
 </div>
+<script>
+(() => {
+  const rules = document.getElementById('rules');
+  const f = () => { rules.hidden = !document.querySelector('input[name=value][value=some]').checked; };
+  document.querySelectorAll('input[name=value]').forEach((r) => r.addEventListener('change', f));
+  f();
+})();
+</script>
 {% endblock %}

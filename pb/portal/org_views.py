@@ -235,9 +235,19 @@ def org_members(tenant_id):
     choices = [(k, n) for k, n in audience_choices(tenant_id)]
     placements = structure.placements_by_member(tenant_id)
     rows = [dict(m, placed=placements.get(m["id"], [])) for m in content.member_rows(tenant_id)]
+    editing = next((m for m in rows if str(m["id"]) == request.args.get("edit")), None)
+    editing_scope = editing_placements = None
+    if editing:
+        _key, editing_scope = content.member_role(tenant_id, editing["user_phone"])
+        editing_placements = structure.placements_of(tenant_id, editing["id"])
+    used_titles = sorted({m["title"] for m in rows if m["title"]}, key=str.lower)
+    title_lists = [("Used in your organisation", used_titles),
+                   ("Suggested for you", [t for t in suggestions.title_options(g.org["edition"]) if t not in used_titles])]
     return page("platform/org/members.html", rows=rows, choices=choices,
                 departments=structure.departments(tenant_id), groups=structure.groups(tenant_id),
-                can_structure="structure" in g.org_areas)
+                can_structure="structure" in g.org_areas, editing=editing, editing_scope=editing_scope,
+                editing_placements=editing_placements or [], title_lists=title_lists,
+                former=content.former_members(tenant_id), me=g.principal)
 
 
 @bp.route("/org/<int:tenant_id>/members", methods=["POST"])
@@ -246,13 +256,40 @@ def org_member_add(tenant_id):
     require_area("members")
     try:
         membership_id = content.add_member_with_role(g.principal, tenant_id, request.form.get("phone"), request.form.get("name"),
-                                                     request.form.get("role") or "member")
+                                                     request.form.get("role") or "member", request.form.get("title"))
         if request.form.get("placement"):
             structure.place_member(g.principal, tenant_id, membership_id, request.form.get("placement"))
     except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
         return failed(str(e), "platform.org_members", tenant_id=tenant_id)
     return done("Member added. They see your notices and contacts once they log in with that number.", "platform.org_members",
                 tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/members/<int:membership_id>", methods=["POST"])
+def org_member_update(tenant_id, membership_id):
+    open_workspace(tenant_id)
+    require_area("members")
+    form = {**request.form.to_dict(), "placements": request.form.getlist("placements")}
+    try:
+        content.update_member(g.principal, tenant_id, membership_id, form)
+    except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
+        message = str(e)
+        if isinstance(e, rbac.PermissionDenied):
+            message = "You can't give that role: it has permissions you don't have" + (
+                f" ({message.split(': ', 1)[1]})." if ": " in message else ".")
+        return failed(message, "platform.org_members", tenant_id=tenant_id, edit=membership_id)
+    return done("Member updated.", "platform.org_members", tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/members/<int:membership_id>/readd", methods=["POST"])
+def org_member_readd(tenant_id, membership_id):
+    open_workspace(tenant_id)
+    require_area("members")
+    try:
+        content.readd_member(g.principal, tenant_id, membership_id)
+    except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
+        return failed(str(e), "platform.org_members", tenant_id=tenant_id)
+    return done("Added back as a member. Change their role with Edit if needed.", "platform.org_members", tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/members/<int:membership_id>/remove", methods=["POST"])
@@ -508,14 +545,23 @@ def org_history_purge(tenant_id, table, item_id):
 def org_settings(tenant_id):
     open_workspace(tenant_id)
     require_area("settings")
-    return page("platform/org/settings.html", allow_other_phone=tenancy.allow_other_phone(tenant_id))
+    members = content.member_rows(tenant_id)
+    titles = suggestions.title_options(g.org["edition"], [m["title"] for m in members if m["title"]])
+    return page("platform/org/settings.html", mode=tenancy.get_setting(tenant_id, "allow_other_phone"),
+                rules=tenancy.other_phone_rules(tenant_id), choices=audience_choices(tenant_id),
+                departments=structure.departments(tenant_id), titles=titles)
 
 
 @bp.route("/org/<int:tenant_id>/settings", methods=["POST"])
 def org_settings_save(tenant_id):
     open_workspace(tenant_id)
     require_area("settings")
-    if request.form.get("key") != "allow_other_phone":
+    f = request.form
+    if f.get("key") != "allow_other_phone":
         abort(400)
-    tenancy.set_setting(g.principal, tenant_id, "allow_other_phone", "1" if request.form.get("value") == "1" else "0")
+    try:
+        tenancy.set_other_phone_rules(g.principal, tenant_id, f.get("value"), f.getlist("roles"), f.getlist("departments"),
+                                      f.getlist("titles") + [t.strip() for t in (f.get("other_titles") or "").split(",")])
+    except ValueError as e:
+        return failed(str(e), "platform.org_settings", tenant_id=tenant_id)
     return done("Saved.", "platform.org_settings", tenant_id=tenant_id)

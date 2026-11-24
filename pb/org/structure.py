@@ -170,3 +170,19 @@ def placements_by_member(tenant_id):
         if r["group_id"] in grp:
             out.setdefault(r["membership_id"], []).append(grp[r["group_id"]])
     return out
+
+
+def placements_of(tenant_id, membership_id):
+    repo = TenantRepo(tenant_id)
+    return ([f"d:{r['department_id']}" for r in repo.all("department_members", "membership_id = ?", (membership_id,))]
+            + [f"g:{r['group_id']}" for r in repo.all("group_members", "membership_id = ?", (membership_id,))])
+
+
+def set_placements(principal, tenant_id, membership_id, placements):
+    """Make a member's departments and groups exactly these ("d:<id>" / "g:<id>")."""
+    _require(principal, tenant_id)
+    repo = TenantRepo(tenant_id)
+    repo.delete("department_members", "membership_id = ?", (membership_id,))
+    repo.delete("group_members", "membership_id = ?", (membership_id,))
+    for placement in placements:
+        place_member(principal, tenant_id, membership_id, placement)

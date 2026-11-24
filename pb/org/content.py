@@ -295,13 +295,16 @@ def visible_contacts(tenant_id, phone, emergency, roles=None):
 
 # ---------------------------------------------------------------- members (portal)
 
-def add_member_with_role(principal, tenant_id, phone, name, role_key):
+def add_member_with_role(principal, tenant_id, phone, name, role_key, title=None):
     """Add someone to the organisation and give them a role (only roles the operator may give)."""
     if not can_manage(principal, tenant_id, "members.manage"):
         raise NotAllowed("You don't have permission to add members.")
     as_platform = rbac.can(principal, "platform.tenants.manage")
     membership_id = tenancy.add_member(principal, tenant_id, phone, name)
     member_phone = TenantRepo(tenant_id).one("memberships", "id = ?", (membership_id,))["user_phone"]
+    title = " ".join(str(title or "").split())[:60] or None
+    if title:
+        TenantRepo(tenant_id).update("memberships", "id = ?", (membership_id,), title=title)
     rbac.grant(principal, tenant_id, rbac.user_principal(member_phone), role_key or "member", as_platform=as_platform)
     return membership_id
 
@@ -324,10 +327,89 @@ def remove_member(principal, tenant_id, membership_id):
     audit("member.remove", tenant_id, ("member", membership_id), {"phone": member["user_phone"]}, actor=principal)
 
 
+ADMIN_ROLES = ("org_owner", "org_admin")
+
+
+def member_role(tenant_id, phone):
+    """(role key, scope) of a member's main role: their first assignment, or ("member", tenant) if they have none."""
+    for a in rbac.tenant_assignments(tenant_id):
+        if a["principal"] == rbac.user_principal(phone):
+            return a["key"], (a["scope_type"], a["scope_id"])
+    return "member", ("tenant", None)
+
+
+def update_member(principal, tenant_id, membership_id, form):
+    """Change a member's name, member number, role (and the department a supervisor runs) and departments/groups."""
+    from pb.org import structure
+
+    if not can_manage(principal, tenant_id, "members.manage"):
+        raise NotAllowed("You don't have permission to change members.")
+    repo = TenantRepo(tenant_id)
+    member = repo.one("memberships", "id = ? AND status = 'active'", (membership_id,))
+    if not member:
+        raise ValueError("That member isn't in the organisation any more.")
+    member_principal = rbac.user_principal(member["user_phone"])
+    as_platform = rbac.can(principal, "platform.tenants.manage")
+    changes = {}
+
+    name = " ".join(str(form.get("name") or "").split())[:80] or None
+    member_no = " ".join(str(form.get("member_no") or "").split())[:40] or None
+    title = " ".join(str(form.get("title") or "").split())[:60] or None
+    if (name, member_no, title) != (member["display_name"], member["member_no"], member["title"]):
+        repo.update("memberships", "id = ?", (membership_id,), display_name=name, member_no=member_no, title=title)
+        changes["details"] = {"name": [member["display_name"], name], "member_no": [member["member_no"], member_no],
+                              "title": [member["title"], title]}
+
+    role_key = form.get("role") or "member"
+    scope = ("tenant", None)
+    if role_key == "department_supervisor":
+        dept = str(form.get("supervises") or "")
+        if not dept.isdigit():
+            raise ValueError("Choose the department this supervisor runs.")
+        scope = ("department", int(dept))
+    old_key, old_scope = member_role(tenant_id, member["user_phone"])
+    if (role_key, scope) != (old_key, old_scope):
+        if member_principal == principal:
+            raise ValueError("You can't change your own role. Ask another admin or the owner.")
+        current = [a for a in rbac.tenant_assignments(tenant_id) if a["principal"] == member_principal]
+        if any(a["key"] == "org_owner" for a in current) and role_key != "org_owner":
+            owners = {a["principal"] for a in rbac.tenant_assignments(tenant_id) if a["key"] == "org_owner"}
+            if owners == {member_principal}:
+                raise ValueError("This is the only owner. Make someone else the owner first.")
+        rbac.grant(principal, tenant_id, member_principal, role_key, scope, as_platform=as_platform)  # checks the operator may
+        for a in current:
+            if (a["key"], (a["scope_type"], a["scope_id"])) != (role_key, scope):
+                rbac.revoke(principal, tenant_id, a["id"], as_platform=as_platform)
+        changes["role"] = [old_key, role_key]
+
+    if "placements_sent" in form:
+        structure.set_placements(principal, tenant_id, membership_id, form.get("placements") or [])
+    if changes:
+        audit("member.update", tenant_id, ("member", membership_id), changes, actor=principal)
+
+
+def former_members(tenant_id):
+    return TenantRepo(tenant_id).all("memberships", "status <> 'active'", order="left_at DESC", limit=200)
+
+
+def readd_member(principal, tenant_id, membership_id):
+    if not can_manage(principal, tenant_id, "members.manage"):
+        raise NotAllowed("You don't have permission to add members.")
+    repo = TenantRepo(tenant_id)
+    member = repo.one("memberships", "id = ? AND status <> 'active'", (membership_id,))
+    if not member:
+        raise ValueError("That person is already a member.")
+    repo.update("memberships", "id = ?", (membership_id,), status="active", left_at=None)
+    rbac.grant(principal, tenant_id, rbac.user_principal(member["user_phone"]), "member",
+               as_platform=rbac.can(principal, "platform.tenants.manage"))
+    audit("member.readd", tenant_id, ("member", membership_id), {"phone": member["user_phone"]}, actor=principal)
+
+
 def member_rows(tenant_id):
     """Active members with their role names, for the portal."""
     roles_by_principal = {}
     for a in rbac.tenant_assignments(tenant_id):
         roles_by_principal.setdefault(a["principal"], []).append(a["name"])
     rows = TenantRepo(tenant_id).all("memberships", "status = 'active'", order="display_name, user_phone")
-    return [dict(r, roles=roles_by_principal.get(rbac.user_principal(r["user_phone"]), ["Member"])) for r in rows]
+    return [dict(r, roles=roles_by_principal.get(rbac.user_principal(r["user_phone"]), ["Member"]),
+                 role_key=member_role(tenant_id, r["user_phone"])[0]) for r in rows]

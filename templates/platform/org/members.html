@@ -1,18 +1,56 @@
 {% extends "platform/base.html" %}
+{% from "platform/org/_combo.html" import combo, combo_script %}
 {% set section = 'members' %}
 {% block title %}Members · {{ org.name }}{% endblock %}
 {% block content %}
 <div class="page-head"><h1>Members</h1>
-  <p>People in your organisation. Members see your notices and contacts after logging in with this phone number on USSD or in
-    the app. If they don't have an account yet, they can register in the app with the same number.</p></div>
+  <p>People in {{ org.name }}. They see your notices and contacts after logging in with their phone number on USSD or in the app.
+    If they don't have an account yet, they can register in the app with the same number.</p></div>
 
-<div class="card">
+{% if editing %}
+<div class="card" id="form">
+  <h2>Edit {{ editing.display_name or local(editing.user_phone) }}</h2>
+  <p class="help">Phone number {{ local(editing.user_phone) }}. To change the number, remove this member and add the new number.</p>
+  <form method="post" action="/platform/org/{{ org.id }}/members/{{ editing.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2">
+      <label class="field">Name<input name="name" maxlength="80" value="{{ editing.display_name or '' }}"></label>
+      {{ combo('title', 'Job title', 'Optional', title_lists, editing.title or '', 'e.g. Bursar') }}
+      <label class="field">Member or staff number <small>Optional</small><input name="member_no" maxlength="40" value="{{ editing.member_no or '' }}"></label>
+      <label class="field">Role <small>Decides what they can see and do</small>
+        <select name="role" id="role" {{ 'disabled' if me.endswith(editing.user_phone) }}>
+          {% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == editing.role_key }}>{{ name }}</option>{% endfor %}
+          {% if editing.role_key == 'org_owner' %}<option value="org_owner" selected>Organisation Owner</option>{% endif %}
+        </select>
+        {% if me.endswith(editing.user_phone) %}<input type="hidden" name="role" value="{{ editing.role_key }}"><small>You can't change your own role.</small>{% endif %}
+      </label>
+      {% if departments %}
+      <label class="field" id="supervises-field">Supervises <small>The department this supervisor runs</small>
+        <select name="supervises"><option value="">Choose…</option>
+          {% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if editing_scope and editing_scope[0] == 'department' and editing_scope[1] == d.id }}>{{ d.name }}</option>{% endfor %}
+        </select></label>
+      {% endif %}
+    </div>
+    {% if can_structure and (departments or groups) %}
+    <input type="hidden" name="placements_sent" value="1">
+    <label class="field" style="margin-bottom:4px">Departments and groups</label>
+    <div class="checks">
+      {% for d in departments %}<label><input type="checkbox" name="placements" value="d:{{ d.id }}" {{ 'checked' if ('d:' ~ d.id) in editing_placements }}> {{ d.name }}</label>{% endfor %}
+      {% for x in groups %}<label><input type="checkbox" name="placements" value="g:{{ x.id }}" {{ 'checked' if ('g:' ~ x.id) in editing_placements }}> {{ x.name }}</label>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="row"><button type="submit">Save changes</button><a class="btn secondary" href="/platform/org/{{ org.id }}/members">Cancel</a></div>
+  </form>
+</div>
+{% else %}
+<div class="card" id="form">
   <h2>Add a member</h2>
   <form method="post" action="/platform/org/{{ org.id }}/members">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="grid2">
       <label class="field">Phone number<input name="phone" inputmode="tel" required placeholder="0712 345 678"></label>
       <label class="field">Name<input name="name" maxlength="80" placeholder="Optional"></label>
+      {{ combo('title', 'Job title', 'Optional', title_lists, '', 'e.g. Bursar') }}
       <label class="field">Role <small>Decides what they can see and do</small>
         <select name="role">{% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == 'member' }}>{{ name }}</option>{% endfor %}</select></label>
       {% if can_structure %}
@@ -26,19 +64,64 @@
     <button type="submit">Add member</button>
   </form>
 </div>
+{% endif %}
 
 <div class="card">
-  <h2>{{ rows|length }} member{{ '' if rows|length == 1 else 's' }}</h2>
+  <div class="row" style="justify-content:space-between;margin-bottom:10px">
+    <h2 style="margin:0">{{ rows|length }} member{{ '' if rows|length == 1 else 's' }}</h2>
+    <div class="row">
+      <input id="msearch" placeholder="Search name, phone, title…" style="width:240px">
+      <select id="mrole" style="width:auto"><option value="">All roles</option>
+        {% for key, name in choices %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select>
+    </div>
+  </div>
   {% if rows %}
-  <table>
-    <tr><th>Name</th><th>Phone</th><th>Role</th><th>Department / group</th><th>Joined</th><th></th></tr>
+  <table id="mtable">
+    <tr><th>Name</th><th>Phone</th><th>Title</th><th>Role</th><th>Department / group</th><th></th></tr>
     {% for m in rows %}
-    <tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td>{{ m.roles|join(', ') }}</td><td>{{ m.placed|join(', ') or '-' }}</td><td class="muted">{{ fmt_date(m.joined_at) }}</td>
-      <td style="text-align:right"><form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/remove" class="inline"
-        onsubmit="return confirm('Remove {{ m.display_name or local(m.user_phone) }} from {{ org.name }}?')">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Remove</button></form></td></tr>
+    <tr data-role="{{ m.roles|join('|') }}"><td><b>{{ m.display_name or '-' }}</b>{% if m.member_no %}<div class="muted">No. {{ m.member_no }}</div>{% endif %}</td>
+      <td>{{ local(m.user_phone) }}</td><td>{{ m.title or '-' }}</td><td>{{ m.roles|join(', ') }}</td><td>{{ m.placed|join(', ') or '-' }}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <a class="btn secondary small" href="?edit={{ m.id }}#form">Edit</a>
+        {% if not me.endswith(m.user_phone) %}<form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/remove" class="inline"
+        onsubmit="return confirm('Remove {{ m.display_name or local(m.user_phone) }} from {{ org.name }}? You can add them back later.')">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Remove</button></form>{% endif %}</td></tr>
     {% endfor %}
   </table>
+  <p class="muted" id="mnone" hidden>No members match.</p>
   {% else %}<div class="empty"><b>No members yet</b>Add your first member above.</div>{% endif %}
 </div>
+
+{% if former %}
+<div class="card">
+  <h2>Removed members</h2>
+  <p class="help">People you removed. They no longer see anything from {{ org.name }}. Add them back with one click.</p>
+  <table>
+    <tr><th>Name</th><th>Phone</th><th>Removed</th><th></th></tr>
+    {% for m in former %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td class="muted">{{ fmt_date(m.left_at) }}</td>
+      <td style="text-align:right"><form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/readd" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary small" type="submit">Add back</button></form></td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<script>
+(() => {
+  const role = document.getElementById('role'), sup = document.getElementById('supervises-field');
+  if (role && sup) { const f = () => { sup.hidden = role.value !== 'department_supervisor'; }; role.addEventListener('change', f); f(); }
+  const q = document.getElementById('msearch'), r = document.getElementById('mrole'), table = document.getElementById('mtable');
+  if (!table) return;
+  function filter() {
+    const text = q.value.toLowerCase().replace(/\s+/g, ''), want = r.value;
+    let shown = 0;
+    table.querySelectorAll('tr[data-role]').forEach((tr) => {
+      const ok = (!text || tr.innerText.toLowerCase().replace(/\s+/g, '').includes(text)) && (!want || tr.dataset.role.split('|').includes(want));
+      tr.hidden = !ok; shown += ok;
+    });
+    document.getElementById('mnone').hidden = shown > 0;
+  }
+  q.addEventListener('input', filter); r.addEventListener('change', filter);
+})();
+</script>
+{{ combo_script() }}
 {% endblock %}
