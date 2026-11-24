@@ -1,0 +1,105 @@
+{% extends "platform/base.html" %}
+{% set section = 'preview' %}
+{% block title %}Preview · {{ org.name }}{% endblock %}
+{% block content %}
+<style>
+  .sim { display: grid; grid-template-columns: 300px 1fr; gap: 22px; align-items: start; }
+  .ussd-phone { width: 300px; background: #1f2a37; border-radius: 30px; padding: 18px 16px 20px; color: #e6edf5; box-shadow: var(--shadow); }
+  .ussd-phone .bar { text-align: center; font-size: 12px; color: #9fb0c3; margin-bottom: 10px; }
+  .ussd-screen { background: #f4f6f2; color: #1b1f1a; border-radius: 14px; padding: 14px; min-height: 230px;
+                 font: 15px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ussd-screen.ended { background: #e9ecef; }
+  .ussd-input { display: flex; gap: 8px; margin-top: 12px; }
+  .ussd-input input { background: #fff; text-align: center; font-size: 17px; letter-spacing: 1px; }
+  .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+  .keys button { background: #2c3a4b; border-color: #2c3a4b; color: #fff; padding: 8px 0; }
+  .ussd-help { font-size: 12px; color: #9fb0c3; margin-top: 10px; text-align: center; }
+  .app-phone { max-width: 400px; background: #f6f8fb; border: 10px solid #1f2a37; border-radius: 34px; padding: 18px 14px; box-shadow: var(--shadow);
+               max-height: 720px; overflow-y: auto; }
+  .app-card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 8px; }
+  .app-card.urgent { border-left: 4px solid var(--bad); }
+  .app-sec { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 16px 2px 8px; }
+  .app-row { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 6px; }
+  .app-row .grow { flex: 1; min-width: 0; }
+  .app-call { background: var(--primary); color: #fff; border-radius: 10px; padding: 6px 14px; font-weight: 700; font-size: 14px; }
+  .app-call.red { background: var(--bad); }
+  @media (max-width: 900px) { .sim { grid-template-columns: 1fr; } }
+</style>
+<div class="page-head"><h1>Preview</h1>
+  <p>See exactly what members see. The phone on the left is a working USSD session: type the numbers like a member would.
+    Nothing is sent or called from here. Choose a role to see what people with that role see.</p></div>
+
+<form method="get" class="row card" style="padding:14px 18px">
+  <b>View as:</b>
+  <select name="role" onchange="this.form.submit()" style="max-width:280px">
+    {% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == role }}>{{ name }}</option>{% endfor %}
+  </select>
+  <span class="muted">Members dial {% if dial %}<b>{{ dial }}</b>, or {% endif %}<b>{{ main_code }}</b> and choose <b>7. My organisations</b>.</span>
+</form>
+
+<div class="sim">
+  <div>
+    <h2 style="margin-bottom:10px">On USSD (any phone)</h2>
+    <div class="ussd-phone">
+      <div class="bar">USSD · {{ dial or main_code }}</div>
+      <div class="ussd-screen" id="screen">Loading…</div>
+      <form class="ussd-input" id="uform" autocomplete="off">
+        <input id="uin" inputmode="numeric" maxlength="160" aria-label="Reply">
+        <button type="submit">Send</button>
+      </form>
+      <div class="keys">
+        {% for k in ['1','2','3','4','98','0'] %}<button type="button" data-key="{{ k }}">{{ k }}</button>{% endfor %}
+      </div>
+      <div class="ussd-help">0 = back · 00 = start · <a href="#" id="restart" style="color:#9fb0c3">start again</a></div>
+    </div>
+  </div>
+
+  <div>
+    <h2 style="margin-bottom:10px">In the app and website</h2>
+    <div class="app-phone">
+      <div class="app-card"><b style="font-size:18px">{{ org.name }}</b>
+        <div class="muted">Notices and contacts from {{ org.name }}. Also on {{ main_code }}: choose 7. My organisations.</div></div>
+      <div class="app-sec">Notices</div>
+      {% for n in notices %}
+        <div class="app-card {{ 'urgent' if n.is_emergency }}"><b>{{ 'URGENT: ' if n.is_emergency }}{{ n.title }}</b>
+          <div style="white-space:pre-wrap;margin:4px 0">{{ n.body }}</div><div class="muted">{{ fmt_date(n.publish_at) }}</div></div>
+      {% else %}<div class="muted" style="padding:0 4px">No notices right now.</div>{% endfor %}
+      {% if emergency %}<div class="app-sec">Emergency contacts</div>
+        {% for c in emergency %}<div class="app-row"><div class="grow"><b>{{ c.name }}</b><div class="muted">{{ c.title ~ ' · ' if c.title }}{{ local(c.phone) }}</div></div>
+          <span class="muted" style="color:var(--primary)">Save</span><span class="app-call red">Call</span></div>{% endfor %}{% endif %}
+      {% for group, items in grouped.items() %}<div class="app-sec">{{ group }}</div>
+        {% for c in items %}<div class="app-row"><div class="grow"><b>{{ c.name }}</b><div class="muted">{{ c.title ~ ' · ' if c.title }}{{ local(c.phone) }}</div></div>
+          <span class="muted" style="color:var(--primary)">Save</span><span class="app-call">Call</span></div>{% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const screen = document.getElementById('screen'), form = document.getElementById('uform'), input = document.getElementById('uin');
+  let inputs = [];
+  async function show() {
+    const res = await fetch('/platform/org/{{ org.id }}/preview/ussd', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf|tojson }} },
+      body: JSON.stringify({ inputs, role: {{ role|tojson }} }) });
+    const data = await res.json().catch(() => ({ screen: 'Something went wrong.' }));
+    screen.textContent = data.screen;
+    screen.classList.toggle('ended', !!data.end);
+  }
+  function press(value) {
+    value = value.trim();
+    if (!value) return;
+    if (value === '000' || value === '00') inputs = [];
+    else if (value === '0') inputs.pop();
+    else inputs.push(value);
+    input.value = '';
+    show();
+  }
+  form.addEventListener('submit', (e) => { e.preventDefault(); press(input.value); input.focus(); });
+  document.querySelectorAll('[data-key]').forEach((b) => b.addEventListener('click', () => press(b.dataset.key)));
+  document.getElementById('restart').addEventListener('click', (e) => { e.preventDefault(); inputs = []; show(); });
+  show();
+})();
+</script>
+{% endblock %}

@@ -97,3 +97,15 @@ def internal_tick():
 def _close_idle_ussd_logins():
     """USSD logins are also closed when someone dials; this keeps the session history right when nobody does."""
     close_idle_ussd_logins()
+
+
+@job("send_due_reminders", every=60)
+def _send_due_reminders():
+    """Scheduled reminders whose time has come (each is claimed atomically, so overlapping ticks can't double-send)."""
+    from pb.org import reminders
+
+    for tenant_id, reminder_id in reminders.due_reminders():
+        try:
+            reminders.send(tenant_id, reminder_id)
+        except Exception:
+            log.exception("reminder %s failed", reminder_id)

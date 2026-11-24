@@ -1,0 +1,117 @@
+{% extends "platform/base.html" %}
+{% set section = 'reminders' %}
+{% block title %}Reminders · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Reminders</h1>
+  <p>Send a short reminder to members' phones by SMS (works on any phone), to their Remote Phonebook app, or both. Send it now or
+    pick a date and time. Tip: on the Notices page, every notice has a <b>Remind</b> button that fills this in for you.</p></div>
+
+<div class="two" style="grid-template-columns: 1fr 300px">
+<div class="card" id="form">
+  <h2>{{ 'Remind about a notice' if prefill.notice_id else 'New reminder' }}</h2>
+  <form method="post" action="/platform/org/{{ org.id }}/reminders" id="rform">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if prefill.notice_id %}<input type="hidden" name="notice_id" value="{{ prefill.notice_id }}">{% endif %}
+    <label class="field">Title <small>Short: it starts the SMS, e.g. "Fees due Friday"</small>
+      <input name="title" id="rtitle" maxlength="{{ title_max }}" required value="{{ prefill.title or '' }}"></label>
+    <label class="field">Message <small>Up to {{ body_max }} characters</small>
+      <textarea name="body" id="rbody" maxlength="{{ body_max }}" required style="min-height:90px">{{ prefill.body or '' }}</textarea></label>
+
+    <label class="field" style="margin-bottom:4px">Send it</label>
+    <div class="checks">
+      {% for key, label in channels.items() %}<label><input type="radio" name="channels" value="{{ key }}"
+        {{ 'checked' if (prefill.channels or 'both') == key }}> {{ label }}</label>{% endfor %}
+    </div>
+    {% if not sms_ready %}<div class="tip">SMS isn't set up on the server yet, so for now reminders go to the app only.</div>{% endif %}
+
+    {% set selected = prefill.audience or [] %}
+    {% include "platform/org/_audience.html" with context %}
+    {% if departments or groups %}
+    <label class="field" style="max-width:360px">Only one department or group? <small>Optional</small>
+      <select name="placement" id="rplacement"><option value="">No, all of them</option>
+        {% if departments %}<optgroup label="Departments">{% for v, n in departments %}<option value="{{ v }}" {{ 'selected' if prefill.placement == v }}>{{ n }}</option>{% endfor %}</optgroup>{% endif %}
+        {% if groups %}<optgroup label="Groups">{% for v, n in groups %}<option value="{{ v }}" {{ 'selected' if prefill.placement == v }}>{{ n }}</option>{% endfor %}</optgroup>{% endif %}
+      </select></label>
+    {% endif %}
+
+    <label class="field" style="margin-bottom:4px">When</label>
+    <div class="checks">
+      <label><input type="radio" name="when" value="now" checked> Send now</label>
+      <label><input type="radio" name="when" value="later"> Schedule for later</label>
+    </div>
+    <label class="field" id="later" hidden style="max-width:300px">Date and time <small>Kenya time</small>
+      <input type="datetime-local" name="send_at" id="send_at" min="{{ min_time }}"></label>
+
+    <div class="tip" id="estimate">Working out who will get it…</div>
+    <button type="submit" id="rsend">Send reminder</button>
+  </form>
+</div>
+
+<div>
+  <div class="phone">
+    <pre id="smsprev">{{ org.name }}: …</pre>
+    <div class="cap">The SMS members get</div>
+  </div>
+</div>
+</div>
+
+<div class="card">
+  <h2>Sent and scheduled</h2>
+  {% for r in rows %}
+  <div class="list-item">
+    <div style="min-width:0">
+      <h3>{{ r.title }}
+        {% if r.status == 'scheduled' %}<span class="pill warn">Scheduled</span>{% elif r.status == 'sent' %}<span class="pill on">Sent</span>
+        {% elif r.status == 'cancelled' %}<span class="pill off">Cancelled</span>{% else %}<span class="pill bad">{{ r.status|capitalize }}</span>{% endif %}</h3>
+      <div class="body">{{ r.body }}</div>
+      <div class="muted">{{ channels[r.channels] }} · to {{ r.who }} ·
+        {% if r.status == 'sent' %}sent {{ fmt_time(r.sent_at) }} · {{ r.recipients }} people ({{ r.app_sent }} in the app, {{ r.sms_sent }} by SMS{{ ', ' ~ r.sms_parts ~ ' SMS in total' if r.sms_parts }})
+        {% else %}{{ 'sends' if r.status == 'scheduled' else 'was due' }} {{ fmt_time(r.send_at) }}{% endif %}
+        {% if r.note %}<br>{{ r.note }}{% endif %}</div>
+    </div>
+    <div class="row" style="flex-wrap:nowrap">
+      <a class="btn secondary small" href="?again={{ r.id }}#form">Send again</a>
+      {% if r.status == 'scheduled' %}<form method="post" action="/platform/org/{{ org.id }}/reminders/{{ r.id }}/cancel" class="inline"
+        onsubmit="return confirm('Cancel this reminder? It won\'t be sent.')"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="danger small" type="submit">Cancel</button></form>{% endif %}
+    </div>
+  </div>
+  {% else %}<div class="empty"><b>No reminders yet</b>Send your first one above.</div>{% endfor %}
+</div>
+
+<script>
+(() => {
+  const form = document.getElementById('rform'), est = document.getElementById('estimate'), sendBtn = document.getElementById('rsend');
+  const later = document.getElementById('later'), sendAt = document.getElementById('send_at');
+  const org = {{ org.name|tojson }};
+  let timer;
+  function values() {
+    const fd = new FormData(form);
+    return { title: fd.get('title') || '', body: fd.get('body') || '', channels: fd.get('channels'),
+             audience: fd.getAll('audience'), placement: fd.get('placement') || '', when: fd.get('when') };
+  }
+  function update() {
+    const v = values();
+    later.hidden = v.when !== 'later';
+    sendAt.required = v.when === 'later';
+    sendBtn.textContent = v.when === 'later' ? 'Schedule reminder' : 'Send reminder';
+    document.getElementById('smsprev').textContent = (org + ': ' + (v.title || 'Title') + '\n' + (v.body || 'Your message')).slice(0, 459);
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const res = await fetch('/platform/org/{{ org.id }}/reminders/estimate', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf|tojson }} }, body: JSON.stringify(v) });
+      const e = await res.json().catch(() => null);
+      if (!e) return;
+      const bits = [];
+      if (v.channels !== 'sms') bits.push(e.app + ' in the app');
+      if (v.channels !== 'app') bits.push(e.sms_ready ? (e.sms + ' by SMS (' + e.sms_total + ' SMS in total, ' + e.sms_parts + ' per person)') : 'no SMS: SMS isn\'t set up');
+      est.textContent = e.people ? (e.people + (e.people === 1 ? ' person' : ' people') + ' will get it: ' + bits.join(', ') + '.') : 'Nobody matches who you chose.';
+      sendBtn.disabled = !e.people;
+    }, 300);
+  }
+  form.addEventListener('input', update);
+  form.addEventListener('change', update);
+  update();
+})();
+</script>
+{% endblock %}

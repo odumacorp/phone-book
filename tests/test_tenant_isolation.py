@@ -18,6 +18,7 @@ ALLOWED_RAW = {
     "tenancy/tenants.py": "platform-wide lists (all organisations with member counts) and a person's own memberships",
     "billing/ussd_codes.py": "the platform code inventory spans organisations",
     "auth/otp.py": "a person's own memberships (does any of their organisations force OTP?)",
+    "org/reminders.py": "the scheduled-reminder job finds due reminders across organisations",
 }
 
 

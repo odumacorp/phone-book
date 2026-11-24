@@ -15,6 +15,33 @@
     else preview.textContent = 'Shown until ' + fmt(new Date(Date.now() + Number(mode.value) * 86400000)) + '.';
   }
   mode.addEventListener('change', update);
+  // live preview of the draft: real USSD screens from the server, and the app card
+  const form = mode.form, title = form.querySelector('[name=title]'), body = form.querySelector('[name=body]');
+  const urgent = form.querySelector('[name=is_emergency]');
+  const out = document.getElementById('pv-ussd'), cap = document.getElementById('pv-cap');
+  let screens = [], at = 0, timer;
+  function draw() {
+    out.textContent = screens[at] || '';
+    cap.textContent = at === 0 ? 'On USSD: the notices list' : 'On USSD: the notice, page ' + at + ' of ' + (screens.length - 1);
+    document.getElementById('pv-app-title').textContent = (urgent.checked ? 'URGENT: ' : '') + (title.value || 'Your title');
+    document.getElementById('pv-app-body').textContent = body.value || 'Your message';
+  }
+  function refresh() {
+    clearTimeout(timer);
+    draw();
+    timer = setTimeout(async () => {
+      const res = await fetch('/platform/org/{{ org.id }}/preview/notice', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf|tojson }} },
+        body: JSON.stringify({ title: title.value, body: body.value, urgent: urgent.checked }) });
+      const data = await res.json().catch(() => null);
+      if (data) { screens = data.screens; at = Math.min(at, screens.length - 1); draw(); }
+    }, 250);
+  }
+  document.getElementById('pv-prev').onclick = () => { at = Math.max(0, at - 1); draw(); };
+  document.getElementById('pv-next').onclick = () => { at = Math.min(screens.length - 1, at + 1); draw(); };
+  [title, body, urgent].forEach((el) => el.addEventListener('input', refresh));
+  urgent.addEventListener('change', refresh);
+  refresh();
   date.addEventListener('change', update);
   update();
 })();
@@ -25,6 +52,7 @@
   <p>Short messages for your members: news, reminders, meeting dates. On USSD members see the title first and open it to read
     the rest, so put the key facts in the title.</p></div>
 
+<div class="two" style="grid-template-columns: 1fr 290px">
 <div class="card" id="form">
   <h2>{{ 'Edit notice' if editing else 'Post a notice' }}</h2>
   <form method="post" action="/platform/org/{{ org.id }}/notices">
@@ -55,24 +83,43 @@
     </div>
   </form>
 </div>
+<div>
+  <div class="phone" style="width:100%">
+    <pre id="pv-ussd">…</pre>
+    <div class="cap" id="pv-cap">On USSD: the notices list</div>
+    <div class="row" style="justify-content:center;margin-top:8px">
+      <button type="button" class="secondary small" id="pv-prev">‹</button>
+      <button type="button" class="secondary small" id="pv-next">›</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px;padding:14px">
+    <div class="muted" style="margin-bottom:6px">In the app</div>
+    <b id="pv-app-title"></b>
+    <div id="pv-app-body" style="white-space:pre-wrap;margin-top:4px"></div>
+  </div>
+  <p class="muted"><a href="/platform/org/{{ org.id }}/preview">Open the full preview</a> to click through USSD as a member.</p>
+</div>
+</div>
+
 <div class="card">
   <h2>Posted notices</h2>
   {% for n in rows %}
   <div class="list-item">
     <div style="min-width:0">
       <h3>{{ n.title }}{% if n.is_emergency %}<span class="pill bad">Urgent</span>{% endif %}{% if n.pinned %}<span class="pill on">At the top</span>{% endif %}
-        {% if n.expires_at and n.expires_at < now %}<span class="pill off">Expired</span>{% endif %}</h3>
+        </h3>
       <div class="body">{{ n.body }}</div>
       <div class="muted">Seen by: {{ n.audience_text }} · posted {{ fmt_date(n.publish_at) }}{{ ' · until ' ~ fmt_date(n.expires_at) if n.expires_at }}</div>
     </div>
     <div class="row" style="flex-wrap:nowrap">
+      {% if 'reminders' in areas %}<a class="btn secondary small" href="/platform/org/{{ org.id }}/reminders?notice={{ n.id }}#form" title="Send this notice as an SMS or app reminder">Remind</a>{% endif %}
       <a class="btn secondary small" href="/platform/org/{{ org.id }}/notices?edit={{ n.id }}#form">Edit</a>
-      <form method="post" action="/platform/org/{{ org.id }}/notices/{{ n.id }}/delete" class="inline" onsubmit="return confirm('Delete this notice? Members will no longer see it.')">
+      <form method="post" action="/platform/org/{{ org.id }}/notices/{{ n.id }}/delete" class="inline" onsubmit="return confirm('Delete this notice? Members will no longer see it. It stays in History, where you can repost it.')">
         <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Delete</button></form>
     </div>
   </div>
   {% else %}
-  <div class="empty"><b>No notices yet</b>Post your first notice above. Members see it straight away.</div>
+  <div class="empty"><b>No notices showing</b>Post one above. Deleted and ended notices are in <a href="/platform/org/{{ org.id }}/history">History</a>.</div>
   {% endfor %}
 </div>
 <script>
@@ -90,6 +137,33 @@
     else preview.textContent = 'Shown until ' + fmt(new Date(Date.now() + Number(mode.value) * 86400000)) + '.';
   }
   mode.addEventListener('change', update);
+  // live preview of the draft: real USSD screens from the server, and the app card
+  const form = mode.form, title = form.querySelector('[name=title]'), body = form.querySelector('[name=body]');
+  const urgent = form.querySelector('[name=is_emergency]');
+  const out = document.getElementById('pv-ussd'), cap = document.getElementById('pv-cap');
+  let screens = [], at = 0, timer;
+  function draw() {
+    out.textContent = screens[at] || '';
+    cap.textContent = at === 0 ? 'On USSD: the notices list' : 'On USSD: the notice, page ' + at + ' of ' + (screens.length - 1);
+    document.getElementById('pv-app-title').textContent = (urgent.checked ? 'URGENT: ' : '') + (title.value || 'Your title');
+    document.getElementById('pv-app-body').textContent = body.value || 'Your message';
+  }
+  function refresh() {
+    clearTimeout(timer);
+    draw();
+    timer = setTimeout(async () => {
+      const res = await fetch('/platform/org/{{ org.id }}/preview/notice', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf|tojson }} },
+        body: JSON.stringify({ title: title.value, body: body.value, urgent: urgent.checked }) });
+      const data = await res.json().catch(() => null);
+      if (data) { screens = data.screens; at = Math.min(at, screens.length - 1); draw(); }
+    }, 250);
+  }
+  document.getElementById('pv-prev').onclick = () => { at = Math.max(0, at - 1); draw(); };
+  document.getElementById('pv-next').onclick = () => { at = Math.min(screens.length - 1, at + 1); draw(); };
+  [title, body, urgent].forEach((el) => el.addEventListener('input', refresh));
+  urgent.addEventListener('change', refresh);
+  refresh();
   date.addEventListener('change', update);
   update();
 })();

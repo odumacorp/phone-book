@@ -81,15 +81,18 @@ def _require(principal, tenant_id, permission):
         raise NotAllowed("You don't have permission to do that here.")
 
 
+LIVE = "deleted_at IS NULL"  # deleted items stay in the table as history
+
+
 def contacts(tenant_id, emergency=None):
-    where, params = "", ()
+    where, params = LIVE, ()
     if emergency is not None:
-        where, params = "is_emergency = ?", (1 if emergency else 0,)
+        where, params = f"{LIVE} AND is_emergency = ?", (1 if emergency else 0,)
     return TenantRepo(tenant_id).all("org_contacts", where, params, order="is_emergency DESC, sort, group_name, name")
 
 
 def contact(tenant_id, contact_id):
-    return TenantRepo(tenant_id).one("org_contacts", "id = ?", (contact_id,))
+    return TenantRepo(tenant_id).one("org_contacts", f"id = ? AND {LIVE}", (contact_id,))
 
 
 def _clean_contact(form, tenant_id):
@@ -128,16 +131,20 @@ def delete_contact(principal, tenant_id, contact_id):
     if not row:
         return
     _require(principal, tenant_id, "emergency.manage" if row["is_emergency"] else "contacts.manage")
-    TenantRepo(tenant_id).delete("org_contacts", "id = ?", (contact_id,))
+    TenantRepo(tenant_id).update("org_contacts", "id = ?", (contact_id,), deleted_at=int(time.time()), deleted_by=principal)
     audit("org_contact.delete", tenant_id, ("org_contact", contact_id), {"name": row["name"]}, actor=principal)
 
 
-def notices(tenant_id):
-    return TenantRepo(tenant_id).all("notices", order="pinned DESC, is_emergency DESC, publish_at DESC")
+def notices(tenant_id, include_expired=False):
+    """Live notices for the operator (expired ones are in History unless include_expired)."""
+    where, params = LIVE, ()
+    if not include_expired:
+        where, params = f"{LIVE} AND (expires_at IS NULL OR expires_at > ?)", (int(time.time()),)
+    return TenantRepo(tenant_id).all("notices", where, params, order="pinned DESC, is_emergency DESC, publish_at DESC")
 
 
 def notice(tenant_id, notice_id):
-    return TenantRepo(tenant_id).one("notices", "id = ?", (notice_id,))
+    return TenantRepo(tenant_id).one("notices", f"id = ? AND {LIVE}", (notice_id,))
 
 
 def save_notice(principal, tenant_id, form, notice_id=None):
@@ -201,30 +208,88 @@ def delete_notice(principal, tenant_id, notice_id):
     if not row:
         return
     _require(principal, tenant_id, "announcements.publish")
-    TenantRepo(tenant_id).delete("notices", "id = ?", (notice_id,))
+    TenantRepo(tenant_id).update("notices", "id = ?", (notice_id,), deleted_at=int(time.time()), deleted_by=principal)
     audit("notice.delete", tenant_id, ("notice", notice_id), {"title": row["title"]}, actor=principal)
+
+
+# ---------------------------------------------------------------- history: deleted and expired items
+
+def history(tenant_id):
+    """Deleted notices and contacts (newest first), and notices that have expired, for the History page."""
+    repo, now = TenantRepo(tenant_id), int(time.time())
+    return {
+        "notices": repo.all("notices", "deleted_at IS NOT NULL", order="deleted_at DESC", limit=200),
+        "expired": repo.all("notices", f"{LIVE} AND expires_at IS NOT NULL AND expires_at <= ?", (now,),
+                            order="expires_at DESC", limit=200),
+        "contacts": repo.all("org_contacts", "deleted_at IS NOT NULL", order="deleted_at DESC", limit=200),
+    }
+
+
+def repost_notice(principal, tenant_id, notice_id, form):
+    """Bring a deleted or expired notice back, as new: posted now, shown for the chosen time (default: until deleted)."""
+    _require(principal, tenant_id, "announcements.publish")
+    repo = TenantRepo(tenant_id)
+    row = repo.one("notices", "id = ?", (notice_id,))
+    if not row:
+        raise ValueError("That notice no longer exists.")
+    now = int(time.time())
+    repo.update("notices", "id = ?", (notice_id,), deleted_at=None, deleted_by=None, publish_at=now,
+                expires_at=notice_expiry(form, now), updated_at=now)
+    audit("notice.repost", tenant_id, ("notice", notice_id), {"title": row["title"]}, actor=principal)
+
+
+def restore_contact(principal, tenant_id, contact_id):
+    repo = TenantRepo(tenant_id)
+    row = repo.one("org_contacts", "id = ? AND deleted_at IS NOT NULL", (contact_id,))
+    if not row:
+        raise ValueError("That contact isn't in the history.")
+    _require(principal, tenant_id, "emergency.manage" if row["is_emergency"] else "contacts.manage")
+    repo.update("org_contacts", "id = ?", (contact_id,), deleted_at=None, deleted_by=None, updated_at=int(time.time()))
+    audit("org_contact.restore", tenant_id, ("org_contact", contact_id), {"name": row["name"]}, actor=principal)
+
+
+def purge(principal, tenant_id, table, item_id):
+    """Delete for good, from the History page (only deleted or expired items)."""
+    repo = TenantRepo(tenant_id)
+    if table == "notices":
+        row = repo.one("notices", "id = ? AND (deleted_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at <= ?))",
+                       (item_id, int(time.time())))
+        permission = "announcements.publish"
+    elif table == "org_contacts":
+        row = repo.one("org_contacts", "id = ? AND deleted_at IS NOT NULL", (item_id,))
+        permission = "emergency.manage" if row and row["is_emergency"] else "contacts.manage"
+    else:
+        raise ValueError("Unknown item.")
+    if not row:
+        raise ValueError("Only items in the history can be deleted for good.")
+    _require(principal, tenant_id, permission)
+    repo.delete(table, "id = ?", (item_id,))
+    audit(f"{'notice' if table == 'notices' else 'org_contact'}.purge", tenant_id, (table, item_id),
+          {"name": row["title"] if table == "notices" else row["name"]}, actor=principal)
 
 
 # ---------------------------------------------------------------- what a member sees (USSD, app)
 
-def visible_notices(tenant_id, phone):
-    roles = viewer_roles(tenant_id, phone)
+def visible_notices(tenant_id, phone, roles=None):
+    """What a member sees. roles: view as these roles instead (the portal preview)."""
+    roles = set(roles) if roles else viewer_roles(tenant_id, phone)
     if roles is None or not tenancy.module_enabled(tenant_id, "announcements"):
         return []
     now = int(time.time())
     rows = TenantRepo(tenant_id).all(
-        "notices", "publish_at <= ? AND (expires_at IS NULL OR expires_at > ?)", (now, now),
+        "notices", f"{LIVE} AND publish_at <= ? AND (expires_at IS NULL OR expires_at > ?)", (now, now),
         order="pinned DESC, is_emergency DESC, publish_at DESC",
     )
     return [r for r in rows if _visible(r, roles)]
 
 
-def visible_contacts(tenant_id, phone, emergency):
-    roles = viewer_roles(tenant_id, phone)
+def visible_contacts(tenant_id, phone, emergency, roles=None):
+    roles = set(roles) if roles else viewer_roles(tenant_id, phone)
     module = "emergency" if emergency else "directory"
     if roles is None or not tenancy.module_enabled(tenant_id, module):
         return []
-    rows = TenantRepo(tenant_id).all("org_contacts", "is_emergency = ?", (1 if emergency else 0,), order="sort, group_name, name")
+    rows = TenantRepo(tenant_id).all("org_contacts", f"{LIVE} AND is_emergency = ?", (1 if emergency else 0,),
+                                     order="sort, group_name, name")
     return [r for r in rows if _visible(r, roles)]
 
 

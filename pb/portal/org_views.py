@@ -10,7 +10,10 @@ import time
 from flask import abort, g, redirect, render_template, request, url_for
 
 from pb.billing import ussd_codes
-from pb.org import content, structure, suggestions
+from flask import jsonify
+
+from pb.org import content, reminders, structure, suggestions
+from pb.ussd import orgs as ussd_orgs
 from pb.portal import bp, done, failed, is_staff
 from pb.rbac import engine as rbac
 from pb.tenancy import tenants as tenancy
@@ -21,6 +24,9 @@ AREAS = {  # area: (permission, module)
     "emergency": ("emergency.manage", "emergency"),
     "members": ("members.manage", "members"),
     "structure": ("departments.manage", "members"),
+    "reminders": ("announcements.publish", "announcements"),
+    "preview": (content.MANAGE_PERMISSIONS, None),
+    "history": (("announcements.publish", "contacts.manage", "emergency.manage"), None),
     "settings": ("tenant.settings.manage", None),
 }
 AUDIENCE_ROLES = ["member", "guardian", "client", "teacher", "content_publisher", "department_supervisor", "org_admin", "auditor"]
@@ -32,10 +38,15 @@ def workspaces():
         return []
     rows = []
     for org in tenancy.memberships_of(g.staff["phone"]):
-        areas = [a for a, (perm, _m) in AREAS.items() if rbac.can(g.principal, perm, org["tenant_id"])]
+        areas = [a for a, (perm, _m) in AREAS.items() if _holds(perm, org["tenant_id"])]
         if areas:
             rows.append(dict(org, areas=areas))
     return rows
+
+
+def _holds(perm, tenant_id):
+    perms = perm if isinstance(perm, tuple) else (perm,)
+    return any(rbac.can(g.principal, p, tenant_id) for p in perms)
 
 
 def open_workspace(tenant_id):
@@ -45,7 +56,7 @@ def open_workspace(tenant_id):
         abort(404)
     staff_help = rbac.can(g.principal, "platform.tenants.manage")
     areas = [a for a, (perm, module) in AREAS.items()
-             if (staff_help or rbac.can(g.principal, perm, tenant_id)) and (module is None or tenancy.module_enabled(tenant_id, module))]
+             if (staff_help or _holds(perm, tenant_id)) and (module is None or tenancy.module_enabled(tenant_id, module))]
     if not areas:
         abort(404)
     g.org, g.org_areas, g.org_staff_help = t, areas, staff_help
@@ -314,6 +325,181 @@ def org_group_save(tenant_id):
 def org_group_delete(tenant_id, group_id):
     return _structure_action(tenant_id, lambda: structure.delete_group(g.principal, tenant_id, group_id),
                              "Group deleted. Its members are still in the organisation.")
+
+
+# ---------------------------------------------------------------- reminders (SMS and app)
+
+def _placement_choices(tenant_id):
+    return ([(f"d:{d['id']}", d["name"]) for d in structure.departments(tenant_id)],
+            [(f"g:{x['id']}", x["name"]) for x in structure.groups(tenant_id)])
+
+
+@bp.route("/org/<int:tenant_id>/reminders", methods=["GET"])
+def org_reminders(tenant_id):
+    open_workspace(tenant_id)
+    require_area("reminders")
+    prefill = {}
+    if request.args.get("notice", "").isdigit():
+        n = content.notice(tenant_id, int(request.args["notice"]))
+        if n:
+            prefill = {"title": n["title"][:reminders.TITLE_MAX], "body": n["body"][:reminders.BODY_MAX], "notice_id": n["id"],
+                       "audience": content.audience_roles(n["audience"])}
+    elif request.args.get("again", "").isdigit():
+        r = reminders.reminder(tenant_id, int(request.args["again"]))
+        if r:
+            prefill = {"title": r["title"], "body": r["body"], "channels": r["channels"], "placement": r["placement"],
+                       "audience": content.audience_roles(r["audience"])}
+    departments, groups = _placement_choices(tenant_id)
+    choices = audience_choices(tenant_id)
+    names = dict(choices)
+    rows = []
+    for r in reminders.reminders(tenant_id):
+        who = audience_text(r["audience"], choices)
+        if r["placement"]:
+            label = dict(departments + groups).get(r["placement"], "a removed group")
+            who = f"{who} in {label}"
+        rows.append(dict(r, who=who))
+    today = datetime.datetime.now(content.EAT)
+    return page("platform/org/reminders.html", rows=rows, choices=choices, names=names, prefill=prefill,
+                departments=departments, groups=groups, channels=reminders.CHANNELS,
+                min_time=today.strftime("%Y-%m-%dT%H:%M"), sms_ready=reminders.messaging.sms is not None,
+                title_max=reminders.TITLE_MAX, body_max=reminders.BODY_MAX)
+
+
+@bp.route("/org/<int:tenant_id>/reminders", methods=["POST"])
+def org_reminder_send(tenant_id):
+    open_workspace(tenant_id)
+    require_area("reminders")
+    form = {**request.form.to_dict(), "audience": request.form.getlist("audience")}
+    try:
+        reminder_id = reminders.create(g.principal, tenant_id, form)
+    except (ValueError, reminders.NotAllowed, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_reminders", tenant_id=tenant_id)
+    row = reminders.reminder(tenant_id, reminder_id)
+    if row["status"] == "sent":
+        parts = []
+        if row["app_sent"]:
+            parts.append(f"{row['app_sent']} in the app")
+        if row["sms_sent"]:
+            parts.append(f"{row['sms_sent']} by SMS")
+        message = "Reminder sent: " + (" and ".join(parts) if parts else "nobody could be reached") + "."
+        if row["note"]:
+            message += f" ({row['note']}.)"
+    else:
+        message = "Reminder scheduled for " + datetime.datetime.fromtimestamp(row["send_at"], content.EAT).strftime("%a %d %b %Y, %H:%M") + "."
+    return done(message, "platform.org_reminders", tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/reminders/estimate", methods=["POST"])
+def org_reminder_estimate(tenant_id):
+    open_workspace(tenant_id)
+    require_area("reminders")
+    body = request.get_json(silent=True) or {}
+    try:
+        audience = content.parse_audience(body.get("audience") or [], tenant_id)
+    except ValueError:
+        audience = ""
+    return jsonify(reminders.estimate(tenant_id, audience, str(body.get("placement") or ""), body.get("channels") or "both",
+                                      str(body.get("title") or ""), str(body.get("body") or "")))
+
+
+@bp.route("/org/<int:tenant_id>/reminders/<int:reminder_id>/cancel", methods=["POST"])
+def org_reminder_cancel(tenant_id, reminder_id):
+    open_workspace(tenant_id)
+    require_area("reminders")
+    try:
+        reminders.cancel(g.principal, tenant_id, reminder_id)
+    except (ValueError, reminders.NotAllowed) as e:
+        return failed(str(e), "platform.org_reminders", tenant_id=tenant_id)
+    return done("Reminder cancelled. It won't be sent.", "platform.org_reminders", tenant_id=tenant_id)
+
+
+# ---------------------------------------------------------------- preview: what members see on USSD and in the app
+
+def _preview_role(tenant_id):
+    role = request.values.get("role") or (request.get_json(silent=True) or {}).get("role") or "member"
+    return role if role in dict(audience_choices(tenant_id)) else "member"
+
+
+@bp.route("/org/<int:tenant_id>/preview", methods=["GET"])
+def org_preview(tenant_id):
+    t, _areas = open_workspace(tenant_id)
+    require_area("preview")
+    role = _preview_role(tenant_id)
+    allocations = ussd_codes.allocations(tenant_id)
+    contacts = content.visible_contacts(tenant_id, None, emergency=False, roles={role})
+    grouped = {}
+    for c in contacts:
+        grouped.setdefault(c["group_name"] or "Contacts", []).append(c)
+    return page("platform/org/preview.html", role=role, choices=audience_choices(tenant_id),
+                notices=content.visible_notices(tenant_id, None, roles={role}),
+                emergency=content.visible_contacts(tenant_id, None, emergency=True, roles={role}), grouped=grouped,
+                dial=ussd_codes.dial_string(allocations[0]) if allocations else None, main_code=ussd_codes.main_code())
+
+
+@bp.route("/org/<int:tenant_id>/preview/ussd", methods=["POST"])
+def org_preview_ussd(tenant_id):
+    t, _areas = open_workspace(tenant_id)
+    require_area("preview")
+    body = request.get_json(silent=True) or {}
+    inputs = [str(x).strip()[:160] for x in (body.get("inputs") or [])][:30]
+    screen_text = ussd_orgs.org_menu({"tenant_id": tenant_id, "name": t["name"]}, "preview", "preview", inputs,
+                                     ussd_orgs.preview_contact_menu, roles={_preview_role(tenant_id)}, simulate=True)
+    return jsonify({"screen": screen_text[4:], "end": screen_text.startswith("END ")})
+
+
+@bp.route("/org/<int:tenant_id>/preview/notice", methods=["POST"])
+def org_preview_notice(tenant_id):
+    """A draft notice as USSD screens (the list line and each page) for the live preview on the Notices form."""
+    t, _areas = open_workspace(tenant_id)
+    body = request.get_json(silent=True) or {}
+    draft = {"title": str(body.get("title") or "Your title")[:content.NOTICE_TITLE_MAX],
+             "body": str(body.get("body") or "Your message")[:content.NOTICE_BODY_MAX], "is_emergency": 1 if body.get("urgent") else 0}
+    org = {"tenant_id": tenant_id, "name": t["name"]}
+    pages = len(ussd_orgs.text_pages(f"{draft['title']}\n{draft['body']}"))
+    screens = [ussd_orgs.notices_screen(org, [draft], "preview", [], simulate=True)[4:]]
+    for k in range(pages):
+        screens.append(ussd_orgs.notices_screen(org, [draft], "preview", ["1"] + ["98"] * k, simulate=True)[4:])
+    return jsonify({"screens": screens, "pages": pages})
+
+
+# ---------------------------------------------------------------- history: deleted and expired items
+
+@bp.route("/org/<int:tenant_id>/history", methods=["GET"])
+def org_history(tenant_id):
+    open_workspace(tenant_id)
+    require_area("history")
+    return page("platform/org/history.html", history=content.history(tenant_id), expiry_choices=content.EXPIRY_CHOICES,
+                can_notices="notices" in g.org_areas, can_contacts="contacts" in g.org_areas,
+                can_emergency="emergency" in g.org_areas, today=datetime.datetime.now(content.EAT).date().isoformat())
+
+
+def _history_action(tenant_id, fn, message):
+    open_workspace(tenant_id)
+    require_area("history")
+    try:
+        fn()
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_history", tenant_id=tenant_id)
+    return done(message, "platform.org_history", tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/history/notices/<int:notice_id>/repost", methods=["POST"])
+def org_notice_repost(tenant_id, notice_id):
+    form = request.form.to_dict()
+    return _history_action(tenant_id, lambda: content.repost_notice(g.principal, tenant_id, notice_id, form),
+                           "Notice reposted. Members see it again now.")
+
+
+@bp.route("/org/<int:tenant_id>/history/contacts/<int:contact_id>/restore", methods=["POST"])
+def org_contact_restore(tenant_id, contact_id):
+    return _history_action(tenant_id, lambda: content.restore_contact(g.principal, tenant_id, contact_id),
+                           "Contact restored. Members can find it again.")
+
+
+@bp.route("/org/<int:tenant_id>/history/<any(notices, org_contacts):table>/<int:item_id>/purge", methods=["POST"])
+def org_history_purge(tenant_id, table, item_id):
+    return _history_action(tenant_id, lambda: content.purge(g.principal, tenant_id, table, item_id), "Deleted for good.")
 
 
 # ---------------------------------------------------------------- settings

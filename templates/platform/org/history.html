@@ -1,0 +1,76 @@
+{% extends "platform/base.html" %}
+{% set section = 'history' %}
+{% block title %}History · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>History</h1>
+  <p>Nothing you delete is lost: deleted notices and contacts, and notices that have reached their end date, are kept here.
+    Repost or restore them with one click, or delete them for good.</p></div>
+
+{% macro repost_form(n) %}
+<form method="post" action="/platform/org/{{ org.id }}/history/notices/{{ n.id }}/repost" class="row" style="flex-wrap:nowrap">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <select name="expires_mode" style="width:auto" aria-label="Show it for">
+    {% for value, label in expiry_choices if value != 'date' %}<option value="{{ value }}">{{ 'Show until I delete it' if not value else 'Show for ' ~ label }}</option>{% endfor %}
+  </select>
+  <button class="small" type="submit">Repost</button>
+</form>
+{% endmacro %}
+
+{% if can_notices %}
+<div class="card">
+  <h2>Deleted notices</h2>
+  {% for n in history.notices %}
+  <div class="list-item">
+    <div style="min-width:0"><h3>{{ n.title }}{% if n.is_emergency %}<span class="pill bad">Urgent</span>{% endif %}</h3>
+      <div class="body">{{ n.body }}</div>
+      <div class="muted">Posted {{ fmt_date(n.publish_at) }} · deleted {{ fmt_time(n.deleted_at) }}</div></div>
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+      {{ repost_form(n) }}
+      <form method="post" action="/platform/org/{{ org.id }}/history/notices/{{ n.id }}/purge" class="inline"
+        onsubmit="return confirm('Delete this notice for good? This can\'t be undone.')"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="danger small" type="submit">Delete for good</button></form>
+    </div>
+  </div>
+  {% else %}<div class="empty"><b>No deleted notices</b>Notices you delete will appear here.</div>{% endfor %}
+</div>
+
+<div class="card">
+  <h2>Ended notices</h2>
+  <p class="help">Notices whose "show it for" time has passed. Members no longer see them.</p>
+  {% for n in history.expired %}
+  <div class="list-item">
+    <div style="min-width:0"><h3>{{ n.title }}</h3><div class="body">{{ n.body }}</div>
+      <div class="muted">Posted {{ fmt_date(n.publish_at) }} · ended {{ fmt_time(n.expires_at) }}</div></div>
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+      {{ repost_form(n) }}
+      <form method="post" action="/platform/org/{{ org.id }}/history/notices/{{ n.id }}/purge" class="inline"
+        onsubmit="return confirm('Delete this notice for good?')"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="danger small" type="submit">Delete for good</button></form>
+    </div>
+  </div>
+  {% else %}<div class="empty"><b>No ended notices</b></div>{% endfor %}
+</div>
+{% endif %}
+
+{% if can_contacts or can_emergency %}
+<div class="card">
+  <h2>Deleted contacts</h2>
+  {% set shown = namespace(n=0) %}
+  {% for c in history.contacts if (c.is_emergency and can_emergency) or (not c.is_emergency and can_contacts) %}
+  {% set shown.n = shown.n + 1 %}
+  <div class="list-item">
+    <div><b>{{ c.name }}</b>{% if c.is_emergency %} <span class="pill bad">Emergency</span>{% endif %}
+      <div class="muted">{{ c.title ~ ' · ' if c.title }}{{ local(c.phone) }}{{ ' · ' ~ c.group_name if c.group_name }} · deleted {{ fmt_time(c.deleted_at) }}</div></div>
+    <div class="row" style="flex-wrap:nowrap">
+      <form method="post" action="/platform/org/{{ org.id }}/history/contacts/{{ c.id }}/restore" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="small" type="submit">Restore</button></form>
+      <form method="post" action="/platform/org/{{ org.id }}/history/org_contacts/{{ c.id }}/purge" class="inline"
+        onsubmit="return confirm('Delete {{ c.name }} for good?')"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="danger small" type="submit">Delete for good</button></form>
+    </div>
+  </div>
+  {% endfor %}
+  {% if not shown.n %}<div class="empty"><b>No deleted contacts</b>Contacts you delete will appear here.</div>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

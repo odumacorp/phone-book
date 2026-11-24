@@ -58,4 +58,6 @@ def test_expired_notices_disappear_for_members(client, register):
         assert [n["title"] for n in content.visible_notices(t, "+254712345678")] == ["Short one"]
         TenantRepo(t).update("notices", "title = ?", ("Short one",), expires_at=1)  # time passes
         assert content.visible_notices(t, "+254712345678") == []
-    assert "Expired" in client.get(f"/platform/org/{t}/notices").get_data(as_text=True)  # still listed for the operator
+    assert "Short one" not in client.get(f"/platform/org/{t}/notices").get_data(as_text=True)
+    history = client.get(f"/platform/org/{t}/history").get_data(as_text=True)
+    assert "Ended notices" in history and "Short one" in history  # kept for the operator, can be reposted

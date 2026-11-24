@@ -63,7 +63,8 @@ def load_principal():
         return None
     if not g.principal:
         return redirect(url_for("platform.login"))
-    if request.method == "POST" and not hmac.compare_digest(str(request.form.get("csrf", "")), session.get("csrf", "") or "x"):
+    token = request.form.get("csrf") or request.headers.get("X-CSRF-Token") or ""
+    if request.method == "POST" and not hmac.compare_digest(str(token), session.get("csrf", "") or "x"):
         abort(403)
     return None
 

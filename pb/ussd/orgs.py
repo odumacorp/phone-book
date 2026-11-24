@@ -67,8 +67,14 @@ def organisations_menu(owner, caller, rest, contact_menu):
     tenant_id, name = org["tenant_id"], plain_text(org["name"])[:TITLE_MAX]
     if caller != owner and not tenancy.allow_other_phone(tenant_id):
         return screen(f"{name} can only be used from your own phone number. Dial from your phone.")
+    return org_menu(org, owner, caller, rest, contact_menu)
 
-    notices = content.visible_notices(tenant_id, owner)
+
+def org_menu(org, owner, caller, rest, contact_menu, roles=None, simulate=False):
+    """One organisation's USSD menu. roles: view as these roles instead of `owner`'s (the portal preview);
+    simulate: actions (SMS me this) only say what would happen."""
+    tenant_id, name = org["tenant_id"], plain_text(org["name"])[:TITLE_MAX]
+    notices = content.visible_notices(tenant_id, owner, roles=roles)
     options = []
     if tenancy.module_enabled(tenant_id, "announcements"):
         options.append((f"Notices ({len(notices)})" if notices else "Notices", "notices"))
@@ -87,14 +93,14 @@ def organisations_menu(owner, caller, rest, contact_menu):
         return screen(INVALID)
     kind, sub = options[int(rest[0]) - 1][1], rest[1:]
     if kind == "notices":
-        return notices_screen(org, notices, caller, sub)
+        return notices_screen(org, notices, caller, sub, simulate)
     if kind == "emergency":
-        rows = content.visible_contacts(tenant_id, owner, emergency=True)
+        rows = content.visible_contacts(tenant_id, owner, emergency=True, roles=roles)
         return contact_list(rows, sub, owner, caller, contact_menu, "No emergency contacts yet.", "Emergency:")
-    return contacts_screen(tenant_id, owner, caller, sub, contact_menu)
+    return contacts_screen(tenant_id, owner, caller, sub, contact_menu, roles)
 
 
-def notices_screen(org, rows, caller, sub):
+def notices_screen(org, rows, caller, sub, simulate=False):
     if not rows:
         return screen("No notices right now.")
     page, i = page_and_rest(len(rows), sub)
@@ -116,8 +122,10 @@ def notices_screen(org, rows, caller, sub):
         shown, j = shown + 1, j + 1
     if j == len(rest):
         nav = f"\n{MORE}. Next ({shown + 1}/{len(pages)})" if shown + 1 < len(pages) else (f"\n({len(pages)}/{len(pages)})" if len(pages) > 1 else "")
-        sms_line = "\n1. SMS me this" if messaging.sms is not None else ""
+        sms_line = "\n1. SMS me this" if messaging.sms is not None or simulate else ""
         return screen(pages[shown] + nav + sms_line)
+    if rest[j:] == ["1"] and simulate:
+        return screen("Sent to you by SMS.\n(Preview: nothing was sent.)")
     if rest[j:] == ["1"] and messaging.sms is not None:
         text = f"{org['name']}: {notice['title']}\n{notice['body']}"
         send_sms_async(caller, text[:SMS_CHUNK])
@@ -125,8 +133,8 @@ def notices_screen(org, rows, caller, sub):
     return screen(INVALID)
 
 
-def contacts_screen(tenant_id, owner, caller, sub, contact_menu):
-    rows = content.visible_contacts(tenant_id, owner, emergency=False)
+def contacts_screen(tenant_id, owner, caller, sub, contact_menu, roles=None):
+    rows = content.visible_contacts(tenant_id, owner, emergency=False, roles=roles)
     if not rows:
         return screen("No contacts yet.")
     groups = sorted({r["group_name"] or "Other" for r in rows}, key=lambda g: (g == "Other", g.lower()))
@@ -163,3 +171,21 @@ def contact_list(rows, sub, owner, caller, contact_menu, empty, title):
     row = chunk[index]
     name = f"{row['name']} ({row['title']})" if row["title"] else row["name"]
     return contact_menu(owner, caller, {"name": name, "phone": row["phone"]}, sub[i + 1:])
+
+
+def preview_contact_menu(owner, caller, contact, rest):
+    """The contact screen for the portal preview: same first screen as members get, but nothing is called or sent."""
+    from pb.text import is_service_number
+    name, phone = contact["name"], contact["phone"]
+    service = is_service_number(phone)
+    if not rest:
+        options = "1. Call\n3. Copy number" if service else "1. Call\n2. Send SMS\n3. Copy number"
+        return screen(f"{name}\n{phone}\n{options}")
+    action = rest[0]
+    if action == "1":
+        return screen(f"The member's phone would now {'dial ' + phone if service else 'call ' + name}.\n(Preview: no call made.)")
+    if action == "2" and not service:
+        return screen(f"The member would pick or type a message to {name}.\n(Preview: nothing sent.)")
+    if action == "3":
+        return screen(f"{name}\n{phone}\nAlso sent to them by SMS to copy.\n(Preview: nothing sent.)")
+    return screen(INVALID)

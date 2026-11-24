@@ -19,8 +19,11 @@
       {% if 'notices' in areas %}<a class="item {{ 'active' if section == 'notices' }}" href="/platform/org/{{ org.id }}/notices"><span class="icon">📢</span>Notices</a>{% endif %}
       {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contacts' }}" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span>Contacts</a>{% endif %}
       {% if 'emergency' in areas %}<a class="item {{ 'active' if section == 'emergency' }}" href="/platform/org/{{ org.id }}/emergency"><span class="icon">🚨</span>Emergency contacts</a>{% endif %}
+      {% if 'reminders' in areas %}<a class="item {{ 'active' if section == 'reminders' }}" href="/platform/org/{{ org.id }}/reminders"><span class="icon">⏰</span>Reminders</a>{% endif %}
       {% if 'members' in areas %}<a class="item {{ 'active' if section == 'members' }}" href="/platform/org/{{ org.id }}/members"><span class="icon">👥</span>Members</a>{% endif %}
       {% if 'structure' in areas %}<a class="item {{ 'active' if section == 'structure' }}" href="/platform/org/{{ org.id }}/groups"><span class="icon">🗂️</span>Groups and departments</a>{% endif %}
+      {% if 'preview' in areas %}<a class="item {{ 'active' if section == 'preview' }}" href="/platform/org/{{ org.id }}/preview"><span class="icon">📱</span>Preview</a>{% endif %}
+      {% if 'history' in areas %}<a class="item {{ 'active' if section == 'history' }}" href="/platform/org/{{ org.id }}/history"><span class="icon">🗃️</span>History</a>{% endif %}
       {% if 'settings' in areas %}<a class="item {{ 'active' if section == 'settings' }}" href="/platform/org/{{ org.id }}/settings"><span class="icon">⚙️</span>Settings</a>{% endif %}
       {% if not is_staff %}<a class="item" href="/platform/org"><span class="icon">↔️</span>Switch organisation</a>{% endif %}
     {% endif %}

@@ -24,6 +24,8 @@
       {% if 'notices' in areas %}<a class="action" href="/platform/org/{{ org.id }}/notices"><span class="icon">📢</span><b>Post a notice</b><span>News, reminders, meeting dates, urgent alerts</span></a>{% endif %}
       {% if 'contacts' in areas %}<a class="action" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span><b>Add a contact</b><span>Offices, staff, advocates, helpdesks</span></a>{% endif %}
       {% if 'emergency' in areas %}<a class="action" href="/platform/org/{{ org.id }}/emergency"><span class="icon">🚨</span><b>Add an emergency contact</b><span>Nurse, security, ambulance, claims hotline</span></a>{% endif %}
+      {% if 'reminders' in areas %}<a class="action" href="/platform/org/{{ org.id }}/reminders"><span class="icon">⏰</span><b>Send a reminder</b><span>By SMS or in the app, now or later</span></a>{% endif %}
+      {% if 'preview' in areas %}<a class="action" href="/platform/org/{{ org.id }}/preview"><span class="icon">📱</span><b>Preview</b><span>See what members see on USSD and in the app</span></a>{% endif %}
       {% if 'structure' in areas %}<a class="action" href="/platform/org/{{ org.id }}/groups"><span class="icon">🗂️</span><b>Organise groups</b><span>Departments, classes, teams and client groups</span></a>{% endif %}
       {% if 'members' in areas %}<a class="action" href="/platform/org/{{ org.id }}/members"><span class="icon">👥</span><b>Add a member</b><span>So they can see your notices and contacts</span></a>{% endif %}
     </div>
