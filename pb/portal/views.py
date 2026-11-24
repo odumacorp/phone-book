@@ -14,6 +14,7 @@ from pb.rbac import engine as rbac
 from pb.rbac.catalogue import ALL_PERMISSIONS, SYSTEM_ROLES
 from pb.tenancy import tenants as tenancy
 from pb.audit import audit
+from pb import support
 
 
 def _reseller_id():
@@ -399,7 +400,8 @@ def staff_update(staff_id):
 @needs("platform.flags.manage")
 def settings_page():
     return render_template("platform/settings.html", page="settings", otp=feature_on("otp", fresh=True),
-                           sms_ready=sms is not None, editions=tenancy.editions())
+                           sms_ready=sms is not None, editions=tenancy.editions(),
+                           support=support.support_details(), support_fields=support.SUPPORT_FIELDS, ai=support.ai_enabled())
 
 
 @bp.route("/settings", methods=["POST"])
@@ -413,6 +415,13 @@ def settings_save():
         set_feature("otp", on)
         audit("flag.otp", None, ("flag", "otp"), {"on": on}, actor=g.principal)
         return done(f"OTP {'on' if on else 'off'}.", "platform.settings_page")
+    if f.get("action") == "support":
+        old = support.support_details()
+        support.save_support_details(f)
+        audit("support.details", None, ("settings", "support"),
+              {k: [old.get(k), (f.get(k) or "").strip()] for k in support.SUPPORT_FIELDS if old.get(k) != (f.get(k) or "").strip()},
+              actor=g.principal)
+        return done("Support details saved. They show on the help page (/help).", "platform.settings_page")
     if f.get("action") == "edition":
         key = f.get("edition")
         if not tenancy.edition(key):

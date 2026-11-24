@@ -55,6 +55,15 @@ def _visible(item, roles):
     return not allowed or bool(set(allowed) & roles)
 
 
+MANAGE_PERMISSIONS = ("announcements.publish", "contacts.manage", "emergency.manage", "members.manage", "tenant.settings.manage")
+
+
+def manages_any_organisation(phone):
+    """Can this person use the organisation workspace in /platform (any manage permission in any of their organisations)?"""
+    principal = rbac.user_principal(phone)
+    return any(rbac.can(principal, p, o["tenant_id"]) for o in my_organisations(phone) for p in MANAGE_PERMISSIONS)
+
+
 def my_organisations(phone):
     """Organisations where this person is an active member and the organisation is usable."""
     return [o for o in tenancy.memberships_of(phone) if o["status"] not in ("suspended", "closed")]

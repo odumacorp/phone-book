@@ -26,6 +26,7 @@ os.environ.update({
     "SECRET_KEY": "test-secret-key",
     "ADMIN_PASSWORD": "admin-pass",
     "TICK_SECRET": "tick-secret",
+    "ANTHROPIC_API_KEY": "",  # the help chat never calls the real API in tests
     "CONTACTS_KEY": base64.urlsafe_b64encode(b"k" * 32).decode(),
     "SMTP_HOST": "",
     "SMTP_USER": "",
@@ -118,7 +119,7 @@ def _pb_modules():
 
 def _caches():
     """Per-process caches that must not leak between tests."""
-    return [getattr(m, n) for m in _pb_modules() for n in ("_settings_cache", "_admin_failures") if hasattr(m, n)]
+    return [getattr(m, n) for m in _pb_modules() for n in ("_settings_cache", "_admin_failures", "_chat_hits") if hasattr(m, n)]
 
 
 @pytest.fixture

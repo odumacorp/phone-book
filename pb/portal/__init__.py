@@ -14,7 +14,7 @@ from functools import wraps
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, session, url_for
 
 from pb.admin import admin_enabled, csrf_token
-from pb.api.auth import check_password, find_account
+from pb.api.auth import check_password, find_account, require_auth
 from pb.auth import staff as staff_auth
 from pb.auth.otp import login_needs_otp, send_otp, verify_otp
 from pb.billing.catalogue import kes
@@ -25,7 +25,7 @@ from pb.rbac import engine as rbac
 from pb.users import get_user
 
 bp = Blueprint("platform", __name__, url_prefix="/platform")
-OPEN_ENDPOINTS = ("platform.login", "platform.login_post", "platform.login_code")
+OPEN_ENDPOINTS = ("platform.login", "platform.login_post", "platform.login_code", "platform.app_login")
 
 
 def portal_enabled():
@@ -177,6 +177,16 @@ def login_code():
         return redirect(url_for("platform.login", error=error))
     _start_session(user_phone=phone)
     return redirect(url_for("platform.dashboard"))
+
+
+@bp.route("/app-login", methods=["POST"], endpoint="app_login")
+@require_auth
+def app_login():
+    """The website's "Manage organisation" button: turn its app login (bearer token, sent only by our own page,
+    which other sites can't do) into a portal session, so the person isn't asked to log in again."""
+    _start_session(user_phone=g.phone)
+    from flask import jsonify
+    return jsonify({"ok": True, "next": url_for("platform.dashboard")})
 
 
 @bp.route("/logout", methods=["POST"])

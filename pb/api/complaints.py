@@ -41,26 +41,33 @@ def complaint_json(r):
     }
 
 
-@app.route("/api/complaints", methods=["POST"])
-def api_add_complaint():
-    body = body_json()
-    message = str(body.get("message") or "").strip()[:COMPLAINT_MAX]
-    owner = optional_user()
-    contact = " ".join(str(body.get("contact") or "").split())[:120] or None
+def submit_complaint(owner, contact, message, ip):
+    """Save a report for the admin (/admin -> Reports and complaints). Returns None, or (error message, HTTP status)."""
+    message = str(message or "").strip()[:COMPLAINT_MAX]
+    contact = " ".join(str(contact or "").split())[:120] or None
     if len(message) < 5:
-        return api_error("Describe the problem in a few words.", 400)
+        return "Describe the problem in a few words.", 400
     if not owner and not contact:
-        return api_error("Enter a phone number or email so we can reply.", 400)
-    now, ip = int(time.time()), client_ip()
+        return "Enter a phone number or email so we can reply.", 400
+    now = int(time.time())
     recent = fetch_one(
         "SELECT COUNT(*) AS n FROM complaints WHERE (ip = ? OR owner = ?) AND created_at > ?", (ip, owner or "", now - 3600)
     )
     if recent["n"] >= COMPLAINTS_PER_HOUR:
-        return api_error("You've sent several reports already. Please wait a while.", 429)
+        return "You've sent several reports already. Please wait a while.", 429
     execute(
         "INSERT INTO complaints (owner, contact, message, ip, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         (owner, contact, message, ip, now, now),
     )
+    return None
+
+
+@app.route("/api/complaints", methods=["POST"])
+def api_add_complaint():
+    body = body_json()
+    failed = submit_complaint(optional_user(), body.get("contact"), body.get("message"), client_ip())
+    if failed:
+        return api_error(*failed)
     return jsonify({"sent": True}), 201
 
 

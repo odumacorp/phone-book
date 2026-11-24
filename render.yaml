@@ -27,6 +27,8 @@ services:
         sync: false
       - key: TICK_SECRET
         generateValue: true
+      - key: ANTHROPIC_API_KEY  # optional: AI answers in the /help chat
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT

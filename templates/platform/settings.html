@@ -16,6 +16,23 @@
   </div>
 </div>
 <div class="card">
+  <h2>Help page and support contacts</h2>
+  <p class="help">Shown to everyone on <a href="/help" target="_blank">the help page (/help)</a>. Leave a field empty to hide it.
+    Messages sent from the help page arrive in <a href="/admin">Phone book admin</a> → Reports and complaints.</p>
+  <form method="post" action="/platform/settings"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="support">
+    <div class="grid2">
+      {% for key, (label, hint) in support_fields.items() %}
+      <label class="field">{{ label }} <small>{{ hint }}</small><input name="{{ key }}" value="{{ support[key] }}" maxlength="200"></label>
+      {% endfor %}
+    </div>
+    <button type="submit">Save support details</button>
+  </form>
+  <p class="muted" style="margin-bottom:0">Chat assistant: {% if ai %}<span class="pill on">AI answers on</span> (Claude, using ANTHROPIC_API_KEY;
+    set CHATBOT_AI=off to use only the built-in answers){% else %}<span class="pill off">Built-in answers</span> Set ANTHROPIC_API_KEY on the server
+    for AI answers (Claude), grounded on the same questions and answers.{% endif %}</p>
+</div>
+
+<div class="card">
   <h2>Editions</h2>
   <p class="muted">Preset bundles of modules. Inactive editions can't be chosen for new organisations.</p>
   {% for e in editions %}

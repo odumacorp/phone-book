@@ -5,3 +5,4 @@ gunicorn>=21.2
 psycopg[binary]>=3.2
 psycopg-pool>=3.2
 cryptography>=42
+anthropic>=2.14

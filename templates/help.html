@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Help and support · Remote Phonebook</title>
+<meta name="description" content="Get help with Remote Phonebook: USSD, PINs, backing up contacts, organisations. Chat, FAQ and contact details.">
+<link rel="icon" href="/favicon.png">
+{% include "platform/_style.html" %}
+<style>
+  .topbar { background: var(--card); border-bottom: 1px solid var(--line); }
+  .topbar .in { max-width: 1080px; margin: 0 auto; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .topbar .brand { padding: 0; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 30px 20px 70px; }
+  .hero { text-align: center; padding: 18px 0 26px; }
+  .hero h1 { font-size: 34px; margin: 0 0 8px; }
+  .hero p { color: var(--muted); margin: 0 auto; max-width: 620px; font-size: 17px; }
+  .contacts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 26px; }
+  .contacts .action b { margin-top: 6px; }
+  .contacts .action span { word-break: break-word; }
+  .grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 18px; align-items: start; }
+  .chat { display: flex; flex-direction: column; height: 520px; padding: 0; overflow: hidden; }
+  .chat-head { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+  .chat-head .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; }
+  .chat-log { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; background: var(--bg); }
+  .bubble { max-width: 85%; padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+  .bubble.bot { background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; align-self: flex-start; }
+  .bubble.me { background: var(--primary); color: #fff; border-bottom-right-radius: 4px; align-self: flex-end; }
+  .bubble.typing { color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; }
+  .chip { border: 1px solid var(--line); background: var(--card); color: var(--primary); border-radius: 99px; padding: 5px 12px; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .chip:hover { border-color: var(--primary); }
+  .chat-form { display: flex; gap: 8px; padding: 12px 14px 14px; }
+  .chat-note { font-size: 12px; color: var(--muted); padding: 0 16px 12px; }
+  details.faq { border-top: 1px solid var(--line); padding: 12px 0; }
+  details.faq:first-of-type { border-top: 0; padding-top: 0; }
+  details.faq summary { list-style: none; display: flex; justify-content: space-between; gap: 10px; }
+  details.faq summary::after { content: "+"; color: var(--muted); font-weight: 400; font-size: 20px; line-height: 1; }
+  details.faq[open] summary::after { content: "−"; }
+  details.faq p { margin: 8px 0 0; color: var(--text); }
+  .faq-list { max-height: 520px; overflow-y: auto; }
+  #contact { scroll-margin-top: 20px; }
+  .hp { position: absolute; left: -5000px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .hero h1 { font-size: 28px; } .chat { height: 480px; } }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="in">
+  <a class="brand" href="/" style="color:inherit;text-decoration:none"><img src="/favicon.png" alt="">Remote Phonebook</a>
+  <div class="row"><a class="btn secondary small" href="/">Open the app</a><a class="btn small" href="/platform">Organisation login</a></div>
+</div></div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>How can we help?</h1>
+    <p>Ask our assistant, browse common questions, or send us a message. To use Remote Phonebook from any phone, dial <b>{{ code }}</b>.</p>
+  </div>
+
+  <div class="contacts">
+    {% if details.support_phone %}<a class="action" href="tel:{{ details.support_phone|replace(' ', '') }}"><span class="icon">📞</span><b>Call us</b><span>{{ details.support_phone }}</span></a>{% endif %}
+    {% if details.support_whatsapp %}<a class="action" href="{{ wa }}" target="_blank" rel="noopener"><span class="icon">💬</span><b>WhatsApp</b><span>{{ details.support_whatsapp }}</span></a>{% endif %}
+    {% if details.support_email %}<a class="action" href="mailto:{{ details.support_email }}"><span class="icon">✉️</span><b>Email</b><span>{{ details.support_email }}</span></a>{% endif %}
+    {% if details.support_hours %}<div class="action"><span class="icon">🕘</span><b>Opening hours</b><span>{{ details.support_hours }}</span></div>{% endif %}
+    {% if details.support_note %}<div class="action"><span class="icon">📍</span><b>Office</b><span>{{ details.support_note }}</span></div>{% endif %}
+    <a class="action" href="#contact"><span class="icon">📝</span><b>Send a message</b><span>We reply by phone or email</span></a>
+  </div>
+
+  <div class="grid">
+    <div class="card chat" aria-label="Support chat">
+      <div class="chat-head"><span class="dot"></span><b>Support assistant</b><span class="muted">· usually answers instantly</span></div>
+      <div class="chat-log" id="log" aria-live="polite"></div>
+      <div class="chips" id="chips">
+        {% for q in ['I forgot my PIN', 'How do I back up my contacts?', 'Contacts on a new phone', 'My organisation', 'Is it free?'] %}<button class="chip" type="button">{{ q }}</button>{% endfor %}
+      </div>
+      <form class="chat-form" id="chatform" autocomplete="off">
+        <input id="q" maxlength="500" placeholder="Type your question…" aria-label="Your question">
+        <button type="submit">Send</button>
+      </form>
+      <div class="chat-note">{% if ai %}Answers are written by an AI assistant and can be wrong. {% endif %}Never type your PIN, password or codes here.</div>
+    </div>
+
+    <div class="card">
+      <h2>Common questions</h2>
+      <div class="faq-list">
+        {% for q, a, _k in faq %}<details class="faq"><summary>{{ q }}</summary><p>{{ a }}</p></details>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="contact" style="margin-top:18px">
+    <h2>Send us a message</h2>
+    <p class="help">Tell us what's wrong or what you need. We reply to the phone number or email you give. Logged in to the app?
+      You can also use "Report a problem" there and see our reply in the app.</p>
+    {% if sent %}<div class="flash">Thanks, we've got your message. We'll get back to you soon.</div>{% endif %}
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/help#contact">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="hp" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+      <div class="grid2">
+        <label class="field">Your name <small>Optional</small><input name="name" maxlength="60" autocomplete="name"></label>
+        <label class="field">Phone number or email <small>So we can reply</small><input name="contact" maxlength="120" required autocomplete="tel" placeholder="0712 345 678 or you@example.com"></label>
+        <label class="field">Topic
+          <select name="topic">{% for t in ['Login, PIN or password', 'Backing up or restoring contacts', 'USSD', 'My organisation', 'Organisation packages (sales)', 'Report a problem', 'Other'] %}<option>{{ t }}</option>{% endfor %}</select></label>
+      </div>
+      <label class="field">Message<textarea name="message" maxlength="1000" required placeholder="Describe the problem or question. Don't include your PIN or password."></textarea></label>
+      <button type="submit">Send message</button>
+    </form>
+  </div>
+</div>
+
+<script>
+(() => {
+  const log = document.getElementById('log'), form = document.getElementById('chatform'), input = document.getElementById('q');
+  const history = [];
+  const csrf = {{ csrf|tojson }};
+  function bubble(text, who) {
+    const el = document.createElement('div');
+    el.className = 'bubble ' + who;
+    el.textContent = text;  // never innerHTML: replies are plain text
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+  bubble({{ greeting|tojson }}, 'bot');
+  async function ask(text) {
+    text = text.trim().slice(0, 500);
+    if (!text) return;
+    bubble(text, 'me');
+    history.push({ role: 'user', content: text });
+    input.value = '';
+    const wait = bubble('Typing…', 'bot typing');
+    form.querySelector('button').disabled = true;
+    try {
+      const res = await fetch('/help/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+        body: JSON.stringify({ messages: history.slice(-12) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const reply = data.reply || 'Sorry, something went wrong. Please try again, or use the form below.';
+      wait.remove();
+      bubble(reply, 'bot');
+      history.push({ role: 'assistant', content: reply });
+    } catch (e) {
+      wait.remove();
+      bubble('Could not reach the server. Check your connection, or use the form below.', 'bot');
+    } finally {
+      form.querySelector('button').disabled = false;
+      input.focus();
+    }
+  }
+  form.addEventListener('submit', (e) => { e.preventDefault(); ask(input.value); });
+  document.querySelectorAll('#chips .chip').forEach((c) => c.addEventListener('click', () => ask(c.textContent)));
+})();
+</script>
+</body>
+</html>

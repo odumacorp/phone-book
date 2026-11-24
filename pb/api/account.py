@@ -5,7 +5,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from pb.api.auth import ALREADY_REGISTERED, EMAIL_TAKEN, NO_ACCOUNT, api_error, auth_status, body_json, check_password, find_account, logged_in, password_error, pin_error, require_auth, revoke_app_session, set_password, token_version
 from pb.billing.ussd_codes import main_code
-from pb.org.content import my_organisations
+from pb.org.content import manages_any_organisation, my_organisations
 from pb.config import MAX_RESET_ATTEMPTS, RESET_CODE_TTL, RESET_RESEND_SECONDS, RESUME_SECONDS, SECRET_KEY, SESSION_HISTORY_DAYS, TOKEN_MAX_AGE
 from pb.contacts import sms_all
 from pb.db import execute, fetch_all, fetch_one, get_db, sql
@@ -375,6 +375,7 @@ def api_me():
         "unread_notifications": unread_count(g.phone),
         "ussd_code": main_code(),
         "organisations": len(my_organisations(g.phone)),
+        "platform_access": manages_any_organisation(g.phone),  # show the "Manage organisation" (/platform) button
     })
 
 
