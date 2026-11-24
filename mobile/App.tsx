@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import {
+  API_URL,
   ApiError,
   AppNotification,
   Complaint,
@@ -413,6 +414,7 @@ function LoginScreen({
       <Link title="Forgot password?" onPress={onForgot} disabled={busy} />
       <Link title="New here? Create an account" onPress={onRegister} disabled={busy} />
       <Link title="Report a problem" onPress={onReport} disabled={busy} />
+      <Link title="Help and support" onPress={() => openSite('/help')} disabled={busy} />
     </Form>
   );
 }
@@ -1590,6 +1592,25 @@ function PickContactsScreen({
 }
 
 /** Opens the phone's dialler with the number (the user presses call). Works in the app and the website. */
+/** Open a page of the Remote Phonebook website (/platform, /help): same tab on the website, the browser in the app. */
+function openSite(path: string) {
+  if (isWeb) {
+    window.location.href = path;
+    return;
+  }
+  Linking.openURL(API_URL + path).catch(() => {});
+}
+
+/** "Manage organisation": on the website, reuse this login for /platform; in the app, open it in the browser. */
+async function openPlatform(token: string) {
+  if (isWeb) {
+    await fetch('/platform/app-login', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+    window.location.href = '/platform';
+    return;
+  }
+  Linking.openURL(API_URL + '/platform').catch(() => {});
+}
+
 function callNumber(phone: string) {
   const url = `tel:${phone.replace(/[^\d+]/g, '')}`;
   if (isWeb) {
@@ -2135,6 +2156,13 @@ function SyncScreen({
             <Text style={styles.tileHint}>Notices and contacts</Text>
           </Pressable>
         ) : null}
+        {me?.platform_access ? (
+          <Pressable style={[styles.tile, styles.tileAccent]} onPress={() => openPlatform(token)} accessibilityRole="link">
+            <Text style={styles.tileIcon}>🛠️</Text>
+            <Text style={styles.tileTitle}>Manage organisation</Text>
+            <Text style={styles.tileHint}>Post notices, add contacts and members</Text>
+          </Pressable>
+        ) : null}
         <Pressable style={[styles.tile, busy && styles.buttonOff]} onPress={onPickContacts} disabled={busy} accessibilityRole="button">
           <Text style={styles.tileIcon}>📲</Text>
           <Text style={styles.tileTitle}>Choose from phone</Text>
@@ -2191,6 +2219,7 @@ function SyncScreen({
           { title: 'Change password', badge: '', onPress: onChangePassword },
           { title: 'Change USSD PIN', badge: '', onPress: onChangePin },
           { title: 'Report a problem', badge: '', onPress: onReport },
+          { title: 'Help and support', badge: '', onPress: () => openSite('/help') },
         ].map((item, i) => (
           <Pressable
             key={item.title}

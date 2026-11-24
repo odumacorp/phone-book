@@ -21,6 +21,7 @@ export type Me = {
   unread_notifications?: number;
   ussd_code?: string; // the USSD code users dial
   organisations?: number; // organisations this person belongs to
+  platform_access?: boolean; // can manage an organisation at /platform
 };
 /** An email on the account (up to max_emails). Any of them can be used to log in. */
 export type EmailAddress = { id: number; email: string; verified: boolean; notify?: boolean };
