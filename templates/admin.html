@@ -6,7 +6,35 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Remote Phonebook Admin</title>
 <link rel="icon" href="/favicon.png">
-{% include "_style.html" %}
+{% include "platform/_style.html" %}
+<style>
+  /* /admin: the portal's light style, with a top bar instead of a sidebar */
+  main { max-width: 1000px; margin: 0 auto; padding: 26px 20px 60px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  header h1 { font-size: 24px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  header h1::before { content: ""; width: 32px; height: 32px; border-radius: 50%; background: url(/favicon.png) center/cover; }
+  header button { background: var(--card); color: var(--muted); border-color: var(--line); font-size: 14px; padding: 7px 14px; }
+  .tabs.nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; padding: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+  .tabs.nav a { padding: 8px 14px; border-radius: 10px; color: var(--text); font-weight: 500; font-size: 15px; }
+  .tabs.nav a:hover { background: var(--soft); text-decoration: none; }
+  .tabs.nav a.active { background: var(--primary-soft); color: var(--primary); font-weight: 600; text-decoration: none; }
+  .tabs.nav a[href^="/platform"] { margin-left: auto; color: var(--primary); font-weight: 600; }
+  .tabs a { margin-right: 14px; }
+  .tabs a.active { font-weight: 700; }
+  .card h2 { margin-bottom: 14px; }
+  .stats .stat { box-shadow: none; background: var(--soft); border-color: transparent; }
+  .feature button { min-width: 96px; }
+  .complaint { border-top: 1px solid var(--line); padding: 16px 0; }
+  .complaint:first-of-type { border-top: 0; }
+  .complaint .msg { white-space: pre-wrap; margin: 6px 0 10px; overflow-wrap: anywhere; }
+  .resolved { color: var(--ok); background: var(--ok-bg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+  .chip { border: 1px solid var(--line); border-radius: 99px; padding: 5px 14px; color: var(--primary); font-size: 14px; background: var(--card); }
+  .chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .row > span.muted, .row > label { white-space: nowrap; }
+  .login { max-width: 400px; margin: 10vh auto 0; }
+  .login h1 { font-size: 22px; margin: 0 0 14px; }
+</style>
 </head>
 <body>
 <main>

@@ -453,7 +453,7 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void;
       {!codeSent ? (
         <>
           <Text style={styles.label}>Your name</Text>
-          <TextInput
+          <TextInput placeholderTextColor={COLORS.placeholder}
             style={styles.input}
             value={name}
             onChangeText={setNameText}
@@ -465,7 +465,7 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void;
           <PhoneField value={phone} onChange={setPhone} />
           <Text style={styles.hint}>We will text a 6-digit code to confirm it is yours.</Text>
           <Text style={styles.label}>Email (optional)</Text>
-          <TextInput
+          <TextInput placeholderTextColor={COLORS.placeholder}
             style={styles.input}
             value={email}
             onChangeText={setEmail}
@@ -618,7 +618,7 @@ function NotificationsScreen({ token, onBack, onLogout }: { token: string; onBac
         <Text style={styles.switchLabel}>{label}</Text>
         {hint ? <Text style={styles.hint}>{hint}</Text> : null}
       </View>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: COLORS.primary }} />
+      <Switch value={value} onValueChange={onChange} trackColor={{ true: COLORS.primary, false: '#CBD3DD' }} thumbColor="#fff" {...SWITCH_WEB} />
     </View>
   );
 
@@ -733,7 +733,7 @@ function AddEmailScreen({
       <Text style={styles.heading}>Add email</Text>
       <Text style={styles.hint}>You can add up to 3 emails. Any of them can be used to log in.</Text>
       <Text style={styles.label}>Email</Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={styles.input}
         value={email}
         onChangeText={setEmail}
@@ -842,7 +842,7 @@ function ReportScreen({ token, onBack, onLogout }: { token: string | null; onBac
       <Text style={styles.heading}>Report a problem</Text>
       <Text style={styles.hint}>Tell us what went wrong or what you'd like changed. The team reads every report.</Text>
       <Text style={styles.label}>What happened?</Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={[styles.input, { minHeight: 96, textAlignVertical: 'top' }]}
         value={message}
         onChangeText={setMessage}
@@ -853,7 +853,7 @@ function ReportScreen({ token, onBack, onLogout }: { token: string | null; onBac
       {!token ? (
         <>
           <Text style={styles.label}>Your phone number or email (so we can reply)</Text>
-          <TextInput
+          <TextInput placeholderTextColor={COLORS.placeholder}
             style={styles.input}
             value={contact}
             onChangeText={setContact}
@@ -1309,9 +1309,9 @@ function AddContactScreen({
     <Form>
       <Text style={styles.heading}>{contact ? 'Edit contact' : 'Add contact'}</Text>
       <Text style={styles.label}>Name</Text>
-      <TextInput style={styles.input} value={name} onChangeText={setNameText} placeholder="e.g. Mama Mboga" maxLength={60} />
+      <TextInput placeholderTextColor={COLORS.placeholder} style={styles.input} value={name} onChangeText={setNameText} placeholder="e.g. Mama Mboga" maxLength={60} />
       <Text style={styles.label}>Phone number</Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={styles.input}
         value={phone}
         onChangeText={setPhone}
@@ -1524,7 +1524,7 @@ function PickContactsScreen({
               {isWeb ? null : <ContactAccessSettings onChange={reload} />}
               <Link title="Cancel" onPress={onCancel} disabled={busy} />
             </View>
-            <TextInput
+            <TextInput placeholderTextColor={COLORS.placeholder}
               style={[styles.input, styles.search]}
               value={query}
               onChangeText={setQuery}
@@ -1659,7 +1659,7 @@ function OrganisationsScreen({ token, onBack, onLogout }: { token: string; onBac
         <Text style={styles.rowName}>{c.name}</Text>
         <Text style={styles.rowPhone}>
           {c.title ? `${c.title} · ` : ''}
-          {c.phone}
+          {c.phone.startsWith('+254') ? '0' + c.phone.slice(4) : c.phone}
         </Text>
       </View>
       {saved.has(c.phone) ? (
@@ -1739,7 +1739,9 @@ function OrganisationsScreen({ token, onBack, onLogout }: { token: string; onBac
             {n.title}
           </Text>
           <Text style={styles.noticeBody}>{n.body}</Text>
-          <Text style={styles.rowPhone}>{new Date(n.at * 1000).toLocaleDateString()}</Text>
+          <Text style={styles.rowPhone}>
+            {new Date(n.at * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+          </Text>
         </View>
       ))}
       {detail.emergency.length ? <Text style={styles.sectionTitle}>Emergency contacts</Text> : null}
@@ -2061,11 +2063,39 @@ function SyncScreen({
     return q ? sorted.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)) : sorted;
   }, [contacts, query]);
 
+  const initials =
+    (savedName || '')
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join('') || '👤';
+  const localPhone = me?.phone?.startsWith('+254') ? '0' + me.phone.slice(4) : me?.phone;
+
   const header = (
     <>
-      <View style={styles.card}>
-        <Text style={styles.label}>Logged in as</Text>
-        <Text style={styles.value}>{me?.phone ?? '…'}</Text>
+      <View style={[styles.card, styles.profileCard]}>
+        <View style={styles.profileTop}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+          <View style={styles.rowText}>
+            <Text style={styles.greeting}>{savedName ? `Hi, ${savedName.split(' ')[0]}` : 'Welcome'}</Text>
+            <Text style={styles.rowPhone}>{localPhone ?? '…'}</Text>
+          </View>
+        </View>
+        <Text style={styles.label}>Your name (signs the SMS you send)</Text>
+        <View style={styles.nameRow}>
+          <TextInput placeholderTextColor={COLORS.placeholder}
+            style={[styles.input, styles.nameInput]}
+            value={name}
+            onChangeText={setNameText}
+            placeholder="Add your name"
+            autoComplete="name"
+            maxLength={30}
+          />
+          {name.trim() && name.trim() !== savedName ? <Link title="Save" onPress={saveName} /> : null}
+        </View>
         <Text style={styles.label}>Emails (log in with any of them)</Text>
         {(me?.emails ?? []).map((e) => (
           <View key={e.id} style={styles.emailRow}>
@@ -2090,70 +2120,92 @@ function SyncScreen({
         ) : (
           <Text style={styles.hint}>You've added the most emails allowed ({me?.max_emails ?? 3}). Remove one to add another.</Text>
         )}
-        <Text style={styles.label}>Your name (signs your SMS)</Text>
-        <View style={styles.nameRow}>
-          <TextInput
-            style={[styles.input, styles.nameInput]}
-            value={name}
-            onChangeText={setNameText}
-            placeholder="Add your name"
-            autoComplete="name"
-            maxLength={30}
-          />
-          {name.trim() && name.trim() !== savedName ? <Link title="Save" onPress={saveName} /> : null}
-        </View>
-        <Pressable style={styles.emergencyButton} onPress={onEmergency} accessibilityRole="button">
-          <Text style={styles.emergencyButtonText}>Emergency numbers</Text>
+      </View>
+
+      <View style={styles.tiles}>
+        <Pressable style={[styles.tile, styles.tileDanger]} onPress={onEmergency} accessibilityRole="button">
+          <Text style={styles.tileIcon}>🚨</Text>
+          <Text style={[styles.tileTitle, styles.tileDangerText]}>Emergency numbers</Text>
+          <Text style={styles.tileHint}>999, 112, Red Cross…</Text>
         </Pressable>
         {me?.organisations ? (
-          <Pressable style={styles.orgButton} onPress={onOrgs} accessibilityRole="button">
-            <Text style={styles.orgButtonText}>
-              My organisations{me.organisations > 1 ? ` (${me.organisations})` : ''}
-            </Text>
+          <Pressable style={[styles.tile, styles.tileAccent]} onPress={onOrgs} accessibilityRole="button">
+            <Text style={styles.tileIcon}>🏢</Text>
+            <Text style={styles.tileTitle}>My organisations{me.organisations > 1 ? ` (${me.organisations})` : ''}</Text>
+            <Text style={styles.tileHint}>Notices and contacts</Text>
           </Pressable>
         ) : null}
-        <Button title="Choose contacts from phone" onPress={onPickContacts} disabled={busy} />
-        <View style={styles.buttonRow}>
-          <SecondaryButton title="Add contact" onPress={onAddContact} disabled={busy} />
-          <SecondaryButton title="Sync all" onPress={sync} busy={busy} />
-        </View>
-        {status ? <Text style={styles.status}>{status}</Text> : null}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-        <View style={styles.switchRow}>
+        <Pressable style={[styles.tile, busy && styles.buttonOff]} onPress={onPickContacts} disabled={busy} accessibilityRole="button">
+          <Text style={styles.tileIcon}>📲</Text>
+          <Text style={styles.tileTitle}>Choose from phone</Text>
+          <Text style={styles.tileHint}>Back up the contacts you pick</Text>
+        </Pressable>
+        <Pressable style={[styles.tile, busy && styles.buttonOff]} onPress={onAddContact} disabled={busy} accessibilityRole="button">
+          <Text style={styles.tileIcon}>➕</Text>
+          <Text style={styles.tileTitle}>Add contact</Text>
+          <Text style={styles.tileHint}>Type a name and number</Text>
+        </Pressable>
+        <Pressable style={[styles.tile, busy && styles.buttonOff]} onPress={sync} disabled={busy} accessibilityRole="button">
+          {busy ? <ActivityIndicator color={COLORS.primary} /> : <Text style={styles.tileIcon}>🔄</Text>}
+          <Text style={styles.tileTitle}>Sync all</Text>
+          <Text style={styles.tileHint}>Back up every phone contact</Text>
+        </Pressable>
+      </View>
+      {status ? <Text style={styles.status}>{status}</Text> : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Text style={styles.sectionTitle}>On USSD ({ussdCode()})</Text>
+      <View style={styles.card}>
+        <View style={[styles.switchRow, styles.switchFirst]}>
           <View style={styles.switchText}>
-            <Text style={styles.switchLabel}>Show other contacts on USSD</Text>
-            <Text style={styles.hint}>
-              {showOthers
-                ? `${ussdCode()} shows all your contacts, priority ones first.`
-                : `${ussdCode()} shows only your ${maxPriority} priority contacts.`}
+            <Text style={styles.switchLabel}>Show other contacts</Text>
+            <Text style={styles.hintTight}>
+              {showOthers ? 'All your contacts, priority ones first.' : `Only your ${maxPriority} priority contacts.`}
             </Text>
           </View>
-          <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary }} />
+          <Switch value={showOthers} onValueChange={toggleShowOthers} trackColor={{ true: COLORS.primary, false: '#CBD3DD' }} thumbColor="#fff" {...SWITCH_WEB} />
         </View>
         <View style={styles.switchRow}>
           <View style={styles.switchText}>
-            <Text style={styles.switchLabel}>Send all contacts by SMS</Text>
-            <Text style={styles.hint}>
+            <Text style={styles.switchLabel}>"SMS me my contacts" sends all</Text>
+            <Text style={styles.hintTight}>
               {smsAll
-                ? `"SMS me my contacts" on ${ussdCode()} texts all your contacts to the phone you dialled from.`
-                : `"SMS me my contacts" on ${ussdCode()} texts only your ${maxPriority} priority contacts to the phone you dialled from.`}
+                ? 'Texts all your contacts to the phone you dialled from.'
+                : `Texts only your ${maxPriority} priority contacts.`}
             </Text>
           </View>
-          <Switch value={smsAll} onValueChange={toggleSmsAll} trackColor={{ true: COLORS.primary }} />
-        </View>
-        <View style={styles.linkRow}>
-          <Link
-            title={me?.unread_notifications ? `Notifications (${me.unread_notifications} new)` : 'Notifications'}
-            onPress={onNotifications}
-            disabled={busy}
-          />
-          <Link title="Sessions" onPress={onSessions} disabled={busy} />
-          <Link title="Login attempts" onPress={onLoginHistory} disabled={busy} />
-          <Link title="Change password" onPress={onChangePassword} disabled={busy} />
-          <Link title="Change USSD PIN" onPress={onChangePin} disabled={busy} />
-          <Link title="Report a problem" onPress={onReport} disabled={busy} />
+          <Switch value={smsAll} onValueChange={toggleSmsAll} trackColor={{ true: COLORS.primary, false: '#CBD3DD' }} thumbColor="#fff" {...SWITCH_WEB} />
         </View>
       </View>
+
+      <Text style={styles.sectionTitle}>Account and security</Text>
+      <View style={[styles.card, styles.menuCard]}>
+        {[
+          {
+            title: 'Notifications',
+            badge: me?.unread_notifications ? `${me.unread_notifications} new` : '',
+            onPress: onNotifications,
+          },
+          { title: 'Where you are logged in', badge: '', onPress: onSessions },
+          { title: 'Login attempts', badge: '', onPress: onLoginHistory },
+          { title: 'Change password', badge: '', onPress: onChangePassword },
+          { title: 'Change USSD PIN', badge: '', onPress: onChangePin },
+          { title: 'Report a problem', badge: '', onPress: onReport },
+        ].map((item, i) => (
+          <Pressable
+            key={item.title}
+            style={[styles.menuRow, i === 0 && styles.menuRowFirst]}
+            onPress={item.onPress}
+            disabled={busy}
+            accessibilityRole="button"
+          >
+            <Text style={styles.menuText}>{item.title}</Text>
+            {item.badge ? <Text style={styles.badge}>{item.badge}</Text> : null}
+            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+        ))}
+      </View>
+
       <Text style={styles.sectionTitle}>
         Your contacts{contacts ? ` (${contacts.length})` : ''} · ★ {priorityCount}/{maxPriority} priority
       </Text>
@@ -2162,7 +2214,7 @@ function SyncScreen({
           ? 'Tick the contacts to delete.'
           : `Tap ☆ to pick up to ${maxPriority} priority contacts. Tap a contact to edit or remove it. To add several at once, use Choose contacts from phone.`}
       </Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={[styles.input, styles.search]}
         value={query}
         onChangeText={setQuery}
@@ -2277,7 +2329,7 @@ function PhoneField({ value, onChange }: { value: string; onChange: (v: string) 
   return (
     <>
       <Text style={styles.label}>Phone number</Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={styles.input}
         value={value}
         onChangeText={(v) => onChange(v.replace(/[^\d+\s-]/g, ''))}
@@ -2293,7 +2345,7 @@ function AccountField({ value, onChange }: { value: string; onChange: (v: string
   return (
     <>
       <Text style={styles.label}>Email or phone number</Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={styles.input}
         value={value}
         onChangeText={onChange}
@@ -2323,7 +2375,7 @@ function PasswordField({
     <>
       <Text style={styles.label}>{label}</Text>
       <View style={styles.nameRow}>
-        <TextInput
+        <TextInput placeholderTextColor={COLORS.placeholder}
           style={[styles.input, styles.nameInput]}
           value={value}
           onChangeText={onChange}
@@ -2346,7 +2398,7 @@ function CodeField({ value, onChange }: { value: string; onChange: (v: string) =
   return (
     <>
       <Text style={styles.label}>6-digit code</Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={styles.input}
         value={value}
         onChangeText={(v) => onChange(v.replace(/\D/g, '').slice(0, 6))}
@@ -2363,7 +2415,7 @@ function PinField({ label, value, onChange }: { label: string; value: string; on
   return (
     <>
       <Text style={styles.label}>{label}</Text>
-      <TextInput
+      <TextInput placeholderTextColor={COLORS.placeholder}
         style={styles.input}
         value={value}
         onChangeText={(v) => onChange(v.replace(/\D/g, '').slice(0, 4))}
@@ -2421,16 +2473,32 @@ function Link({ title, onPress, disabled }: { title: string; onPress: () => void
   );
 }
 
-const COLORS = { primary: '#0B6E4F', text: '#1A1A1A', muted: '#6B6B6B', border: '#D5D5D5', error: '#B3261E' };
+// Light and calm, in the blue of the Oduma Corp logo (the same palette as the /platform portal)
+const COLORS = {
+  primary: '#1F6FEB',
+  primarySoft: '#EAF2FF',
+  text: '#1F2A37',
+  muted: '#6B7785',
+  border: '#E3E8EF',
+  error: '#C0362C',
+  errorSoft: '#FDECEB',
+  bg: '#F6F8FB',
+  placeholder: '#9AA5B1',
+};
+// react-native-web colours the "on" knob teal unless told otherwise
+const SWITCH_WEB = (isWeb ? { activeThumbColor: '#fff' } : {}) as object;
+const SHADOW = isWeb
+  ? ({ boxShadow: '0 1px 2px rgba(16,24,40,.04), 0 2px 8px rgba(16,24,40,.05)' } as object)
+  : { shadowColor: '#101828', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 };
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#F6F7F6', paddingHorizontal: 16, paddingTop: isWeb ? 24 : 80 },
+  screen: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 16, paddingTop: isWeb ? 28 : 80 },
   column: { flex: 1, width: '100%', maxWidth: 640, alignSelf: 'center' }, // centred on tablets and computers
-  title: { fontSize: 26, fontWeight: '700', color: COLORS.text, flexShrink: 1 },
+  title: { fontSize: 22, fontWeight: '700', color: COLORS.text, flexShrink: 1 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 12 },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
-  logo: { width: 40, height: 40 },
-  logout: { color: COLORS.error, fontSize: 16, fontWeight: '600' },
+  logo: { width: 36, height: 36 },
+  logout: { color: COLORS.muted, fontSize: 15, fontWeight: '600', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff' },
   activeCard: { borderWidth: 2, borderColor: COLORS.primary },
   sessionRow: {
     flexDirection: 'row',
@@ -2438,58 +2506,61 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     padding: 14,
     marginTop: 8,
-    borderRadius: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     gap: 12,
   },
   sessionActive: { borderLeftWidth: 4, borderLeftColor: COLORS.primary },
   emergencyButton: {
     backgroundColor: COLORS.error,
-    borderRadius: 8,
+    borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: 8,
   },
   emergencyButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  orgButton: { backgroundColor: '#eaf2ff', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+  orgButton: { backgroundColor: COLORS.primarySoft, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   orgButtonText: { color: COLORS.primary, fontSize: 16, fontWeight: '700' },
   urgentCard: { borderLeftWidth: 4, borderLeftColor: COLORS.error },
   noticeTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
   noticeBody: { fontSize: 15, color: COLORS.text, lineHeight: 22 },
   callButtonCalm: { backgroundColor: COLORS.primary },
   emergencyNumber: { fontSize: 22, fontWeight: '700', color: COLORS.text },
-  callButton: { backgroundColor: COLORS.error, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 18 },
-  callButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  callButton: { backgroundColor: COLORS.error, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 18 },
+  callButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   callLink: { color: COLORS.primary, fontSize: 15, fontWeight: '600', marginRight: 16 },
   activeText: { color: COLORS.primary },
-  heading: { fontSize: 20, fontWeight: '600', color: COLORS.text },
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 20, gap: 8 },
-  label: { fontSize: 14, color: COLORS.muted, marginTop: 4 },
+  heading: { fontSize: 20, fontWeight: '700', color: COLORS.text },
+  card: { backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 8, borderWidth: 1, borderColor: COLORS.border, ...SHADOW },
+  label: { fontSize: 14, color: COLORS.text, fontWeight: '600', marginTop: 8 },
   value: { fontSize: 20, fontWeight: '600', color: COLORS.text, marginBottom: 8 },
   input: {
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 18,
+    borderColor: '#D6DCE4',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
     color: COLORS.text,
+    backgroundColor: '#fff',
   },
   button: {
     backgroundColor: COLORS.primary,
-    borderRadius: 8,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 12,
   },
   buttonOff: { opacity: 0.5 },
-  buttonText: { color: '#fff', fontSize: 17, fontWeight: '600' },
-  status: { color: COLORS.text, marginTop: 8 },
-  error: { color: COLORS.error, marginTop: 8 },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  status: { color: '#17803D', backgroundColor: '#E8F6EE', borderRadius: 12, padding: 12, marginTop: 10, overflow: 'hidden' },
+  error: { color: COLORS.error, backgroundColor: COLORS.errorSoft, borderRadius: 12, padding: 12, marginTop: 10, overflow: 'hidden' },
   hint: { color: COLORS.muted, fontSize: 13, marginTop: 12 },
   removeButton: { borderWidth: 1, borderColor: COLORS.error, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   removeButtonText: { color: COLORS.error, fontSize: 16, fontWeight: '600' },
   accessBox: { borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 16, paddingTop: 12, gap: 8 },
-  link: { color: COLORS.primary, fontSize: 15, marginTop: 16, textAlign: 'center' },
+  link: { color: COLORS.primary, fontSize: 15, fontWeight: '600', marginTop: 16, textAlign: 'center' },
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', columnGap: 16 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   emailRow: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 6 },
@@ -2504,8 +2575,9 @@ const styles = StyleSheet.create({
   secondary: {
     flex: 1,
     borderWidth: 1,
-    borderColor: COLORS.primary,
-    borderRadius: 8,
+    borderColor: COLORS.border,
+    backgroundColor: '#fff',
+    borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     marginTop: 12,
@@ -2524,7 +2596,7 @@ const styles = StyleSheet.create({
   },
   checkboxOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   checkmark: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  footer: { paddingTop: 8, paddingBottom: 24, backgroundColor: '#F6F7F6' },
+  footer: { paddingTop: 8, paddingBottom: 24, backgroundColor: COLORS.bg },
   warn: { color: COLORS.error },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
   dotOk: { backgroundColor: COLORS.primary },
@@ -2534,23 +2606,57 @@ const styles = StyleSheet.create({
   resultBad: { color: COLORS.error, fontWeight: '600' },
   formScroll: { paddingBottom: 40 },
   list: { flex: 1 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 14, marginTop: 6, borderTopWidth: 1, borderTopColor: COLORS.border },
+  switchFirst: { borderTopWidth: 0, paddingTop: 0, marginTop: 0 },
+  hintTight: { color: COLORS.muted, fontSize: 13, marginTop: 2 },
   switchText: { flex: 1 },
-  switchLabel: { fontSize: 16, color: COLORS.text, fontWeight: '500' },
-  sectionTitle: { fontSize: 17, fontWeight: '600', color: COLORS.text, marginTop: 24 },
-  search: { marginTop: 12, marginBottom: 8, backgroundColor: '#fff' },
+  switchLabel: { fontSize: 16, color: COLORS.text, fontWeight: '600' },
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: COLORS.muted, marginTop: 26, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 },
+  search: { marginTop: 12, marginBottom: 10, backgroundColor: '#fff' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
+    paddingVertical: 13,
+    marginBottom: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   rowText: { flex: 1, marginRight: 12 },
-  rowName: { fontSize: 16, color: COLORS.text },
+  rowName: { fontSize: 16, color: COLORS.text, fontWeight: '600' },
   rowPhone: { fontSize: 14, color: COLORS.muted, marginTop: 2 },
   star: { fontSize: 26, color: COLORS.muted },
-  starOn: { color: '#D99A00' },
+  starOn: { color: '#E0A100' },
+  profileCard: { gap: 6 },
+  profileTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
+  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: COLORS.primary, fontSize: 20, fontWeight: '700' },
+  greeting: { fontSize: 20, fontWeight: '700', color: COLORS.text },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  tile: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 140,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 16,
+    gap: 4,
+    ...SHADOW,
+  },
+  tileIcon: { fontSize: 24 },
+  tileTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginTop: 4 },
+  tileHint: { fontSize: 13, color: COLORS.muted },
+  tileDanger: { backgroundColor: COLORS.errorSoft, borderColor: '#F6CFCB' },
+  tileDangerText: { color: COLORS.error },
+  tileAccent: { backgroundColor: COLORS.primarySoft, borderColor: '#CFE0FB' },
+  menuCard: { paddingVertical: 4, paddingHorizontal: 0, gap: 0 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, borderTopWidth: 1, borderTopColor: COLORS.border, gap: 10 },
+  menuRowFirst: { borderTopWidth: 0 },
+  menuText: { flex: 1, fontSize: 16, color: COLORS.text },
+  badge: { backgroundColor: COLORS.primary, color: '#fff', fontSize: 12, fontWeight: '700', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 99, overflow: 'hidden' },
+  chevron: { fontSize: 22, color: COLORS.muted, lineHeight: 22 },
 });
