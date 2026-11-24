@@ -4,6 +4,7 @@ Notices, contacts, emergency contacts and members. Each action is permission-che
 supervisor or publisher only gets the parts their role allows. Platform staff who manage organisations can open
 any workspace (from the organisation's page) to help set it up; everything is in the audit log.
 """
+import datetime
 import time
 
 from flask import abort, g, redirect, render_template, request, url_for
@@ -107,7 +108,12 @@ def org_notices(tenant_id):
     choices = audience_choices(tenant_id)
     rows = [dict(n, audience_text=audience_text(n["audience"], choices)) for n in content.notices(tenant_id)]
     editing = content.notice(tenant_id, int(request.args["edit"])) if request.args.get("edit", "").isdigit() else None
+    today = datetime.datetime.now(content.EAT).date()
+    expiry_date = (datetime.datetime.fromtimestamp(editing["expires_at"], content.EAT).date().isoformat()
+                   if editing and editing["expires_at"] else "")
     return page("platform/org/notices.html", rows=rows, choices=choices, editing=editing, now=int(time.time()),
+                expiry_choices=content.EXPIRY_CHOICES, expiry_date=expiry_date, today=today.isoformat(),
+                max_date=(today + datetime.timedelta(days=content.MAX_EXPIRY_DAYS)).isoformat(),
                 editing_audience=content.audience_roles(editing["audience"]) if editing else [])
 
 

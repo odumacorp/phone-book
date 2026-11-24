@@ -1,6 +1,25 @@
 {% extends "platform/base.html" %}
 {% set section = 'notices' %}
-{% block title %}Notices · {{ org.name }}{% endblock %}
+{% block title %}Notices · {{ org.name }}<script>
+(() => {
+  const mode = document.getElementById('expires_mode'), field = document.getElementById('expires_date_field');
+  const date = document.getElementById('expires_date'), preview = document.getElementById('expires_preview');
+  const fmt = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+  function update() {
+    const picking = mode.value === 'date';
+    field.hidden = !picking;
+    date.required = picking;
+    if (picking && !date.value) { date.focus(); if (date.showPicker) { try { date.showPicker(); } catch (e) {} } }
+    if (!mode.value) preview.textContent = 'Shown until you delete it.';
+    else if (picking) preview.textContent = date.value ? 'Shown until the end of ' + fmt(new Date(date.value + 'T00:00')) + '.' : 'Pick the last day on the calendar.';
+    else preview.textContent = 'Shown until ' + fmt(new Date(Date.now() + Number(mode.value) * 86400000)) + '.';
+  }
+  mode.addEventListener('change', update);
+  date.addEventListener('change', update);
+  update();
+})();
+</script>
+{% endblock %}
 {% block content %}
 <div class="page-head"><h1>Notices</h1>
   <p>Short messages for your members: news, reminders, meeting dates. On USSD members see the title first and open it to read
@@ -21,8 +40,15 @@
       <label><input type="checkbox" name="pinned" value="1" {{ 'checked' if editing and editing.pinned }}> Keep at the top</label>
       <label><input type="checkbox" name="is_emergency" value="1" {{ 'checked' if editing and editing.is_emergency }}> Urgent (shown first, marked URGENT)</label>
     </div>
-    <label class="field" style="max-width:320px">Show for how many days? <small>Leave empty to keep it until you delete it.</small>
-      <input name="expires_days" inputmode="numeric" placeholder="e.g. 30"></label>
+    <div class="grid2" style="max-width:560px">
+      <label class="field">Show it for <small>Members stop seeing it after this</small>
+        <select name="expires_mode" id="expires_mode">
+          {% for value, label in expiry_choices %}<option value="{{ value }}" {{ 'selected' if (expiry_date and value == 'date') or (not expiry_date and value == '') }}>{{ label }}</option>{% endfor %}
+        </select></label>
+      <label class="field" id="expires_date_field" {% if not expiry_date %}hidden{% endif %}>Last day to show it <small>Until 11:59 pm that day</small>
+        <input type="date" name="expires_date" id="expires_date" value="{{ expiry_date }}" min="{{ today }}" max="{{ max_date }}"></label>
+    </div>
+    <p class="muted" id="expires_preview" style="margin:-4px 0 14px"></p>
     <div class="row">
       <button type="submit">{{ 'Save changes' if editing else 'Post notice' }}</button>
       {% if editing %}<a class="btn secondary" href="/platform/org/{{ org.id }}/notices">Cancel</a>{% endif %}
@@ -49,4 +75,23 @@
   <div class="empty"><b>No notices yet</b>Post your first notice above. Members see it straight away.</div>
   {% endfor %}
 </div>
+<script>
+(() => {
+  const mode = document.getElementById('expires_mode'), field = document.getElementById('expires_date_field');
+  const date = document.getElementById('expires_date'), preview = document.getElementById('expires_preview');
+  const fmt = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+  function update() {
+    const picking = mode.value === 'date';
+    field.hidden = !picking;
+    date.required = picking;
+    if (picking && !date.value) { date.focus(); if (date.showPicker) { try { date.showPicker(); } catch (e) {} } }
+    if (!mode.value) preview.textContent = 'Shown until you delete it.';
+    else if (picking) preview.textContent = date.value ? 'Shown until the end of ' + fmt(new Date(date.value + 'T00:00')) + '.' : 'Pick the last day on the calendar.';
+    else preview.textContent = 'Shown until ' + fmt(new Date(Date.now() + Number(mode.value) * 86400000)) + '.';
+  }
+  mode.addEventListener('change', update);
+  date.addEventListener('change', update);
+  update();
+})();
+</script>
 {% endblock %}

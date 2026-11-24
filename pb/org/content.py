@@ -5,6 +5,7 @@ Who may manage: contacts.manage (contacts), emergency.manage (emergency contacts
 held for the whole organisation. Who may see: active members whose roles match the item's audience
 ("" = everyone in the organisation). The same functions serve USSD, the app API and the portal.
 """
+import datetime
 import json
 import time
 
@@ -147,12 +148,7 @@ def save_notice(principal, tenant_id, form, notice_id=None):
         raise ValueError("Give the notice a title.")
     if not body:
         raise ValueError("Write the notice.")
-    expires_at = None
-    days = str(form.get("expires_days") or "").strip()
-    if days:
-        if not days.isdigit() or not 1 <= int(days) <= 365:
-            raise ValueError("Show it for 1 to 365 days, or leave it empty to keep it until you delete it.")
-        expires_at = int(time.time()) + int(days) * 86400
+    expires_at = notice_expiry(form)
     values = {
         "title": title, "body": body, "audience": parse_audience(form.get("audience"), tenant_id),
         "pinned": 1 if form.get("pinned") else 0, "is_emergency": 1 if form.get("is_emergency") else 0,
@@ -167,6 +163,37 @@ def save_notice(principal, tenant_id, form, notice_id=None):
     new_id = repo.insert("notices", publish_at=now, created_by=principal, created_at=now, updated_at=now, **values)
     audit("notice.add", tenant_id, ("notice", new_id), {"title": title, "emergency": bool(values["is_emergency"])}, actor=principal)
     return new_id
+
+
+EAT = datetime.timezone(datetime.timedelta(hours=3))
+EXPIRY_CHOICES = [  # (value, label) for the "Show it until" list; value = days
+    ("", "Until I delete it"), ("1", "1 day"), ("3", "3 days"), ("7", "1 week"), ("14", "2 weeks"), ("30", "1 month"),
+    ("90", "3 months"), ("180", "6 months"), ("365", "1 year"), ("date", "Pick a date…"),
+]
+MAX_EXPIRY_DAYS = 730
+
+
+def notice_expiry(form, now=None):
+    """When a notice stops showing: None (until deleted), N days from now, or the end of a chosen date (Kenya time)."""
+    now = now or int(time.time())
+    mode = str(form.get("expires_mode", form.get("expires_days")) or "").strip()
+    if not mode:
+        return None
+    if mode == "date":
+        raw = str(form.get("expires_date") or "").strip()
+        try:
+            day = datetime.date.fromisoformat(raw)
+        except ValueError:
+            raise ValueError("Pick the last day to show the notice.") from None
+        end = int(datetime.datetime.combine(day, datetime.time(23, 59, 59), EAT).timestamp())
+        if end <= now:
+            raise ValueError("The last day can't be in the past.")
+        if end - now > MAX_EXPIRY_DAYS * 86400:
+            raise ValueError("Choose a date within the next two years.")
+        return end
+    if not mode.isdigit() or not 1 <= int(mode) <= MAX_EXPIRY_DAYS:
+        raise ValueError("Choose how long to show the notice.")
+    return now + int(mode) * 86400
 
 
 def delete_notice(principal, tenant_id, notice_id):
