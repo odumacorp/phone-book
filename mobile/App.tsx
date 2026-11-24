@@ -323,6 +323,31 @@ function Main() {
           </Pressable>
         ) : null}
       </View>
+        {token && !booting && view === 'sync' ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickNav} contentContainerStyle={styles.quickNavIn}>
+            {me?.platform_access ? (
+              <Pressable style={[styles.navChip, styles.navChipMain]} onPress={() => openPlatform(token)} accessibilityRole="link">
+                <Text style={[styles.navChipText, styles.navChipMainText]}>🛠️ Platform</Text>
+              </Pressable>
+            ) : null}
+            {me?.organisations ? (
+              <Pressable style={styles.navChip} onPress={() => setView('orgs')} accessibilityRole="button">
+                <Text style={styles.navChipText}>🏢 My organisations</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={styles.navChip} onPress={() => setView('notifications')} accessibilityRole="button">
+              <Text style={styles.navChipText}>
+                🔔 Notifications{me?.unread_notifications ? ` (${me.unread_notifications})` : ''}
+              </Text>
+            </Pressable>
+            <Pressable style={styles.navChip} onPress={() => setView('emergency')} accessibilityRole="button">
+              <Text style={styles.navChipText}>🚨 Emergency</Text>
+            </Pressable>
+            <Pressable style={styles.navChip} onPress={() => openSite('/help')} accessibilityRole="link">
+              <Text style={styles.navChipText}>❓ Help</Text>
+            </Pressable>
+          </ScrollView>
+        ) : null}
         {content}
       </View>
     </View>
@@ -2659,6 +2684,12 @@ const styles = StyleSheet.create({
   star: { fontSize: 26, color: COLORS.muted },
   starOn: { color: '#E0A100' },
   profileCard: { gap: 6 },
+  quickNav: { flexGrow: 0, marginTop: -10, marginBottom: 14 },
+  quickNavIn: { gap: 8, paddingRight: 8 },
+  navChip: { borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', borderRadius: 99, paddingVertical: 8, paddingHorizontal: 14 },
+  navChipMain: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  navChipText: { fontSize: 14, fontWeight: '600', color: COLORS.text },
+  navChipMainText: { color: '#fff' },
   profileTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
   avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: COLORS.primary, fontSize: 20, fontWeight: '700' },
