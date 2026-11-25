@@ -84,10 +84,11 @@
   <div class="checks"><label><input type="checkbox" id="notify-list" checked> Notify people in the app when I remove them or add them back</label></div>
   {% if rows %}
   <table id="mtable">
-    <tr><th>Name</th><th>Phone</th><th>Title</th><th>Role</th><th>Department / group</th><th></th></tr>
+    <tr><th>Name</th><th>Phone</th><th>Title</th><th>Role</th><th>Department / group</th><th>Last active</th><th></th></tr>
     {% for m in rows %}
     <tr data-role="{{ m.roles|join('|') }}"><td><b>{{ m.display_name or '-' }}</b>{% if m.member_no %}<div class="muted">No. {{ m.member_no }}</div>{% endif %}</td>
       <td>{{ local(m.user_phone) }}</td><td>{{ m.title or '-' }}</td><td>{{ m.roles|join(', ') }}</td><td>{{ m.placed|join(', ') or '-' }}</td>
+      <td class="muted">{% if m.last_seen %}{{ fmt_date(m.last_seen[0]) }}<br>{{ m.last_seen[1] }}{% else %}Never{% endif %}</td>
       <td style="text-align:right;white-space:nowrap">
         <a class="btn secondary small" href="?edit={{ m.id }}#form">Edit</a>
         {% if not me.endswith(m.user_phone) %}<form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/remove" class="inline notify-aware"

@@ -421,6 +421,45 @@ def readd_member(principal, tenant_id, membership_id):
     audit("member.readd", tenant_id, ("member", membership_id), {"phone": member["user_phone"]}, actor=principal)
 
 
+def profile_organisations(phone):
+    """For the person's own profile: each organisation with their role(s), title, member number, departments and groups."""
+    from pb.org import structure
+
+    out = []
+    for o in my_organisations(phone):
+        tenant_id = o["tenant_id"]
+        member = TenantRepo(tenant_id).one("memberships", "user_phone = ? AND status = 'active'", (phone,))
+        roles = [a["name"] for a in rbac.tenant_assignments(tenant_id) if a["principal"] == rbac.user_principal(phone)]
+        out.append({
+            "id": tenant_id,
+            "name": o["name"],
+            "roles": roles or ["Member"],
+            "title": member["title"] if member else None,
+            "member_no": member["member_no"] if member else None,
+            "groups": structure.placements_by_member(tenant_id).get(member["id"], []) if member else [],
+            "joined_at": member["joined_at"] if member else None,
+        })
+    return out
+
+
+def last_logins(phones):
+    """phone -> (time, "app"/"USSD") of the latest successful login, for the members list."""
+    from pb.db import fetch_all
+
+    phones = list(phones)
+    if not phones:
+        return {}
+    marks = ", ".join("?" for _ in phones)
+    seen = {}
+    for r in fetch_all(f"SELECT owner, MAX(created_at) AS t FROM app_sessions WHERE owner IN ({marks}) GROUP BY owner", tuple(phones)):
+        seen[r["owner"]] = (r["t"], "app")
+    for r in fetch_all(f"SELECT owner, MAX(created_at) AS t FROM login_logs WHERE success = 1 AND owner IN ({marks}) GROUP BY owner",
+                       tuple(phones)):
+        if r["t"] and (r["owner"] not in seen or r["t"] > seen[r["owner"]][0]):
+            seen[r["owner"]] = (r["t"], "USSD")
+    return seen
+
+
 def member_rows(tenant_id):
     """Active members with their role names, for the portal."""
     roles_by_principal = {}

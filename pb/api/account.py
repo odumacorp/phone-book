@@ -5,7 +5,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from pb.api.auth import ALREADY_REGISTERED, EMAIL_TAKEN, NO_ACCOUNT, api_error, auth_status, body_json, check_password, find_account, logged_in, password_error, pin_error, require_auth, revoke_app_session, set_password, token_version
 from pb.billing.ussd_codes import main_code
-from pb.org.content import manages_any_organisation, my_organisations
+from pb.org.content import manages_any_organisation, my_organisations, profile_organisations
 from pb.config import TEST_OTP_CODE, MAX_RESET_ATTEMPTS, RESET_CODE_TTL, RESET_RESEND_SECONDS, RESUME_SECONDS, SECRET_KEY, SESSION_HISTORY_DAYS, TOKEN_MAX_AGE
 from pb.contacts import sms_all
 from pb.db import execute, fetch_all, fetch_one, get_db, sql
@@ -377,7 +377,30 @@ def api_me():
         "ussd_code": main_code(),
         "organisations": len(my_organisations(g.phone)),
         "platform_access": manages_any_organisation(g.phone),  # show the "Manage organisation" (/platform) button
+        "memberships": profile_organisations(g.phone),  # organisation, role, title, departments for the profile card
+        "last_login": previous_login(g.phone, getattr(g, "jti", None)),
     })
+
+
+def previous_login(phone, current_jti):
+    """The login before this one (app/website or USSD): {"at", "how", "where"}, or None for a first login."""
+    app_row = fetch_one(
+        "SELECT created_at, device FROM app_sessions WHERE owner = ? AND jti <> ? ORDER BY created_at DESC LIMIT 1",
+        (phone, current_jti or ""),
+    )
+    ussd_row = fetch_one(
+        "SELECT created_at, caller, network FROM login_logs WHERE owner = ? AND success = 1 ORDER BY created_at DESC LIMIT 1",
+        (phone,),
+    )
+    best = None
+    if app_row:
+        best = {"at": app_row["created_at"], "how": "app", "where": app_row["device"] or "app or website"}
+    if ussd_row and (not best or ussd_row["created_at"] >= best["at"]):
+        own = ussd_row["caller"] == phone
+        network = NETWORKS.get(ussd_row["network"] or "", "")
+        best = {"at": ussd_row["created_at"], "how": "USSD",
+                "where": ("your phone" if own else local_number(ussd_row["caller"])) + (f" ({network})" if network else "")}
+    return best
 
 
 @app.route("/api/logins", methods=["GET"])

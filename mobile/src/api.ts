@@ -22,6 +22,18 @@ export type Me = {
   ussd_code?: string; // the USSD code users dial
   organisations?: number; // organisations this person belongs to
   platform_access?: boolean; // can manage an organisation at /platform
+  memberships?: Membership[]; // organisations, with role, title and departments
+  last_login?: { at: number; how: 'app' | 'USSD'; where: string } | null; // the login before this one
+};
+/** The user's place in one organisation, for the profile card. */
+export type Membership = {
+  id: number;
+  name: string;
+  roles: string[];
+  title: string | null;
+  member_no: string | null;
+  groups: string[];
+  joined_at: number | null;
 };
 /** An email on the account (up to max_emails). Any of them can be used to log in. */
 export type EmailAddress = { id: number; email: string; verified: boolean; notify?: boolean };

@@ -244,7 +244,9 @@ def org_members(tenant_id):
     require_area("members")
     choices = [(k, n) for k, n in audience_choices(tenant_id)]
     placements = structure.placements_by_member(tenant_id)
-    rows = [dict(m, placed=placements.get(m["id"], [])) for m in content.member_rows(tenant_id)]
+    members = content.member_rows(tenant_id)
+    seen = content.last_logins(m["user_phone"] for m in members)
+    rows = [dict(m, placed=placements.get(m["id"], []), last_seen=seen.get(m["user_phone"])) for m in members]
     editing = next((m for m in rows if str(m["id"]) == request.args.get("edit")), None)
     editing_scope = editing_placements = None
     if editing:

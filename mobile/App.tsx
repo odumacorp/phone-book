@@ -1621,6 +1621,24 @@ function PickContactsScreen({
 }
 
 /** Opens the phone's dialler with the number (the user presses call). Works in the app and the website. */
+/** "24 Nov 2026, 15:10" (today: "today, 15:10"). */
+function formatWhen(seconds: number) {
+  const d = new Date(seconds * 1000);
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === new Date().toDateString()) return `today, ${time}`;
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}, ${time}`;
+}
+
+/** One labelled fact on the profile card ("Title: Bursar"). */
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.fact}>
+      <Text style={styles.factLabel}>{label}</Text>
+      <Text style={styles.factValue}>{value}</Text>
+    </View>
+  );
+}
+
 /** Open a page of the Remote Phonebook website (/platform, /help): same tab on the website, the browser in the app. */
 function openSite(path: string) {
   if (isWeb) {
@@ -2132,8 +2150,28 @@ function SyncScreen({
           <View style={styles.rowText}>
             <Text style={styles.greeting}>{savedName ? `Hi, ${savedName.split(' ')[0]}` : 'Welcome'}</Text>
             <Text style={styles.rowPhone}>{localPhone ?? '…'}</Text>
+            {me?.last_login ? (
+              <Text style={styles.lastLogin}>
+                Last login {formatWhen(me.last_login.at)} · {me.last_login.how === 'USSD' ? 'USSD from ' : ''}
+                {me.last_login.where}
+              </Text>
+            ) : me ? (
+              <Text style={styles.lastLogin}>First login on this account</Text>
+            ) : null}
           </View>
         </View>
+        {(me?.memberships ?? []).map((m) => (
+          <View key={m.id} style={styles.membership}>
+            <Text style={styles.membershipOrg}>🏢 {m.name}</Text>
+            <View style={styles.facts}>
+              <Fact label="Role" value={m.roles.join(', ')} />
+              {m.title ? <Fact label="Title" value={m.title} /> : null}
+              {m.groups.length ? <Fact label={m.groups.length > 1 ? 'Departments and groups' : 'Department or group'} value={m.groups.join(', ')} /> : null}
+              {m.member_no ? <Fact label="Number" value={m.member_no} /> : null}
+              {m.joined_at ? <Fact label="Member since" value={new Date(m.joined_at * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} /> : null}
+            </View>
+          </View>
+        ))}
         <Text style={styles.label}>Your name (signs the SMS you send)</Text>
         <View style={styles.nameRow}>
           <TextInput placeholderTextColor={COLORS.placeholder}
@@ -2688,6 +2726,13 @@ const styles = StyleSheet.create({
   star: { fontSize: 26, color: COLORS.muted },
   starOn: { color: '#E0A100' },
   profileCard: { gap: 6 },
+  lastLogin: { fontSize: 13, color: COLORS.muted, marginTop: 2 },
+  membership: { backgroundColor: COLORS.bg, borderRadius: 12, padding: 12, marginTop: 6, gap: 6 },
+  membershipOrg: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  facts: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 18, rowGap: 6 },
+  fact: { minWidth: 110 },
+  factLabel: { fontSize: 12, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: 0.4 },
+  factValue: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   headerButton: { color: COLORS.primary, fontSize: 15, fontWeight: '600', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', overflow: 'hidden' },
   headerButtonMain: { color: '#fff', backgroundColor: COLORS.primary, borderColor: COLORS.primary },
