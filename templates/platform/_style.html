@@ -67,8 +67,9 @@
   input[type=checkbox], input[type=radio] { width: 18px; height: 18px; padding: 0; vertical-align: -3px; flex: 0 0 auto; accent-color: var(--primary); }
   .combo input.combo-text { margin-top: 8px; }
   optgroup { font-weight: 600; color: var(--muted); }
-  .checks.aud { display: none; }
-  form:has(input[name=audience_mode][value=some]:checked) .checks.aud { display: flex; }
+  .audience-picker .aud { display: none; }
+  .audience-picker:has(input[type=radio][value=some]:checked) .aud { display: block; }
+  .aud-row { margin-bottom: 6px; }
   label.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600; margin-bottom: 14px; }
   label.field small { font-weight: 400; color: var(--muted); font-size: 13px; }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 16px; }

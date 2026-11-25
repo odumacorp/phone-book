@@ -1,6 +1,5 @@
 """Organisations choose: members manage their own contacts, or the organisation provides them."""
 from conftest import app_module, auth, login_ussd
-from pb.contacts import list_contacts
 
 from pb.tenancy import tenants as tenancy
 from test_org_content import ADMIN, MEMBER, portal_login, setup_org
@@ -42,21 +41,21 @@ def test_managed_blocks_adding_syncing_editing_on_app_and_ussd(client, register,
     assert client.post("/api/contacts", json={"name": "Mum", "phone": "0722000001"}, headers=auth(admin)).status_code == 201
 
 
-def test_operator_puts_contacts_in_members_phone_books(client, register, dial):
+def test_show_all_in_members_lists(client, register, dial):
     t, csrf = managed_org(client, register)
     client.post(f"/platform/org/{t}/contacts", data={"csrf": csrf, "name": "Front desk", "phone": "0720111222"})
     client.post(f"/platform/org/{t}/contacts", data={"csrf": csrf, "name": "Clients desk", "phone": "0720333444", "audience": ["client"]})
-    resp = client.post(f"/platform/org/{t}/contacts/push", data={"csrf": csrf, "notify": "1"})
-    assert "Added 4 numbers to 3 members" in client.get(resp.headers["Location"]).get_data(as_text=True)
-    with app_module.app.test_request_context():
-        assert [c["name"] for c in list_contacts("+254712345678")] == ["Front desk"]  # clients-only one not given to members
-        assert {c["name"] for c in list_contacts("+254713000003")} == {"Clients desk", "Front desk"}
-    resp = client.post(f"/platform/org/{t}/contacts/push", data={"csrf": csrf})
-    assert "already has these numbers" in client.get(resp.headers["Location"]).get_data(as_text=True)
+    resp = client.post(f"/platform/org/{t}/contacts/phone-books", data={"csrf": csrf, "show": "1", "notify": "1"})
+    assert "now show in members" in client.get(resp.headers["Location"]).get_data(as_text=True)
+    token = member_token(client)
+    names = [c["name"] for c in client.get("/api/contacts", headers=auth(token)).get_json()["contacts"]]
+    assert names == ["Front desk"]  # the clients-only one isn't theirs to see
     s = login_ussd(dial, "+254712345678")
-    assert "Front desk" in s.send("1")  # in their own phone book on USSD
-    titles = [n["title"] for n in client.get("/api/notifications", headers=auth(member_token(client))).get_json()["notifications"]]
-    assert "Test Advocates: new numbers in your phone book" in titles
+    assert "Front desk" in s.send("1")
+    titles = [n["title"] for n in client.get("/api/notifications", headers=auth(token)).get_json()["notifications"]]
+    assert "Test Advocates: new numbers in your contacts" in titles
+    resp = client.post(f"/platform/org/{t}/contacts/phone-books", data={"csrf": csrf, "show": "0"})
+    assert client.get("/api/contacts", headers=auth(token)).get_json()["contacts"] == []
 
 
 def test_settings_page_and_leaving_the_org_unlocks(client, register):

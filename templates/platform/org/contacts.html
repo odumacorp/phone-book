@@ -38,8 +38,16 @@
     </div>
     {% if not emergency and can_structure %}<p class="muted" style="margin:-6px 0 12px">Need a new group? Add it in
       <a href="/platform/org/{{ org.id }}/groups">Groups and departments</a>, or choose "Other" and type it.</p>{% endif %}
-    {% set selected = editing_audience %}
+    {% set selected = editing_audience %}{% set aud_name = 'audience' %}{% set aud_label = 'Who can see this' %}{% set aud_everyone = 'Everyone in the organisation' %}
     {% include "platform/org/_audience.html" with context %}
+    <div class="checks"><label><input type="checkbox" name="in_phone_books" value="1" id="in-books" {{ 'checked' if (editing and editing.in_phone_books) or (not editing and member_contacts == 'managed') }}>
+      Show in members' own contact lists <span class="muted">(they'll find it under My contacts in the app and on USSD; they can't change it)</span></label></div>
+    <div id="books-who" style="margin-left:24px">
+      {% set selected = editing_pb %}
+      {% set aud_name = 'pb_audience' %}{% set aud_label = 'Whose lists' %}{% set aud_everyone = 'Everyone who can see it' %}
+      {% include "platform/org/_audience.html" with context %}
+      {% if editing_pb_personal %}<p class="muted" style="margin-top:0">Also set for single people on their member pages (kept when you save).</p>{% endif %}
+    </div>
     <div class="checks"><label><input type="checkbox" name="notify" value="1"> Notify members who can see it in the app
       <span class="muted">({{ 'tell them it changed' if editing else 'e.g. a new helpline' }})</span></label></div>
     <div class="row">
@@ -77,8 +85,9 @@
       <datalist id="bulk-groups">{% for _t, items in group_lists %}{% for x in items %}<option value="{{ x }}">{% endfor %}{% endfor %}</datalist>
     </div>
     {% endif %}
-    {% set selected = [] %}
+    {% set selected = [] %}{% set aud_name = 'audience' %}{% set aud_label = 'Who can see them' %}{% set aud_everyone = 'Everyone in the organisation' %}
     {% include "platform/org/_audience.html" with context %}
+    <div class="checks"><label><input type="checkbox" name="in_phone_books" value="1" {{ 'checked' if member_contacts == 'managed' }}> Show them in members' own contact lists</label></div>
     <div class="checks"><label><input type="checkbox" name="notify" value="1"> Notify members who can see them in the app (one message)</label></div>
     <button type="submit" id="bulk-submit" disabled>Add ticked members</button>
   </form>
@@ -86,17 +95,26 @@
 {% endif %}
 
 {% if rows %}
+{% set shown_count = rows|selectattr('in_phone_books')|list|length %}
 <div class="card" {% if member_contacts == 'managed' %}style="border-color:var(--primary)"{% endif %}>
-  <h2>Members' phone books</h2>
-  <p class="help">{% if member_contacts == 'managed' %}{{ org.name }} provides members' contacts (see <a href="/platform/org/{{ org.id }}/settings">Settings</a>), so
-    they can't add their own. Put these {{ 'emergency ' if emergency }}contacts into their phone books: they then show under 1. My contacts on USSD and can be synced to their phones from the app.
-    {% else %}Optional: also put these {{ 'emergency ' if emergency }}contacts into members' own phone books, so they show under 1. My contacts and can be synced to their phones.{% endif %}
-    Each member only gets the contacts they're allowed to see; numbers they already have are skipped.</p>
-  <form method="post" action="/platform/org/{{ org.id }}/{{ 'emergency' if emergency else 'contacts' }}/push" class="row">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="notify" value="1" checked> Tell them in the app</label>
-    <button type="submit">Put in members' phone books</button>
-  </form>
+  <h2>In members' own contact lists <span class="pill {{ 'on' if shown_count else 'off' }}">{{ shown_count }} of {{ rows|length }}</span></h2>
+  <p class="help">Choose which {{ 'emergency ' if emergency }}contacts appear automatically in each member's own contact list (app,
+    website and USSD 1. My contacts), always up to date: when you edit one here, members see the change; untick it to take
+    it away. Each member only gets the ones they're allowed to see.
+    {% if member_contacts == 'managed' %}{{ org.name }} provides members' contacts (see <a href="/platform/org/{{ org.id }}/settings">Settings</a>), so these are the numbers they'll have.{% endif %}
+    Tick or untick <b>In members' lists</b> on each contact below, all at once, or set
+    <a href="/platform/org/{{ org.id }}/contact-lists">default lists by role, department or group</a>:</p>
+  <div class="row">
+    <form method="post" action="/platform/org/{{ org.id }}/{{ 'emergency' if emergency else 'contacts' }}/phone-books" class="row">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="show" value="1">
+      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="notify" value="1" checked> Tell members in the app</label>
+      <button type="submit" {{ 'disabled' if shown_count == rows|length }}>Show all in members' lists</button>
+    </form>
+    <form method="post" action="/platform/org/{{ org.id }}/{{ 'emergency' if emergency else 'contacts' }}/phone-books" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="show" value="0">
+      <button class="secondary" type="submit" {{ 'disabled' if not shown_count }}>Hide all</button>
+    </form>
+  </div>
 </div>
 {% endif %}
 
@@ -104,10 +122,13 @@
   <h2>{{ rows|length }} {{ 'emergency contact' if emergency else 'contact' }}{{ '' if rows|length == 1 else 's' }}</h2>
   {% if rows %}
   <table>
-    <tr><th>Name</th><th>Phone</th>{% if not emergency %}<th>Group</th>{% endif %}<th>Seen by</th><th></th></tr>
+    <tr><th>Name</th><th>Phone</th>{% if not emergency %}<th>Group</th>{% endif %}<th>Seen by</th><th>In members' lists</th><th></th></tr>
     {% for c in rows %}
     <tr><td><b>{{ c.name }}</b>{% if c.title %}<div class="muted">{{ c.title }}</div>{% endif %}</td><td>{{ local(c.phone) }}</td>
       {% if not emergency %}<td>{{ c.group_name or '-' }}</td>{% endif %}<td class="muted">{{ c.audience_text }}</td>
+      <td>{% if c.in_phone_books %}<div class="muted" style="font-size:12px;margin-bottom:4px">{{ c.pb_text }}</div>{% endif %}<form method="post" action="/platform/org/{{ org.id }}/contacts/{{ c.id }}/phone-books" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="show" value="{{ '0' if c.in_phone_books else '1' }}">
+        <button type="submit" class="small {{ '' if c.in_phone_books else 'secondary' }}" title="{{ 'Shown in members\' own contact lists: click to stop' if c.in_phone_books else 'Not in members\' lists: click to show it' }}">{{ '✓ Shown' if c.in_phone_books else 'Show' }}</button></form></td>
       <td style="white-space:nowrap;text-align:right">
         <a class="btn secondary small" href="?edit={{ c.id }}#form">Edit</a>
         <form method="post" action="/platform/org/{{ org.id }}/contacts/{{ c.id }}/delete" class="inline" onsubmit="return confirm('Delete {{ c.name }}? It stays in History, where you can restore it.')">
@@ -121,6 +142,8 @@
 {{ combo_script() }}
 <script>
 (() => {
+  const books = document.getElementById('in-books'), booksWho = document.getElementById('books-who');
+  if (books && booksWho) { const f = () => { booksWho.hidden = !books.checked; }; books.addEventListener('change', f); f(); }
   const members = {{ member_options|tojson }};
   const picker = document.getElementById('from-member');
   function setCombo(name, value) {

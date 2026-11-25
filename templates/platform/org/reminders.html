@@ -24,7 +24,7 @@
     </div>
     {% if not sms_ready %}<div class="tip">SMS isn't set up on the server yet, so for now reminders go to the app only.</div>{% endif %}
 
-    {% set selected = prefill.audience or [] %}
+    {% set selected = prefill.audience or [] %}{% set aud_label = 'Who gets it' %}{% set aud_everyone = 'Everyone in the organisation' %}
     {% include "platform/org/_audience.html" with context %}
     {% if departments or groups %}
     <label class="field" style="max-width:360px">Only one department or group? <small>Optional</small>

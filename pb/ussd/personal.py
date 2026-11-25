@@ -1,9 +1,10 @@
 from pb.config import AT_VOICE_NUMBER, MORE, PAGE_SIZE, SMS_CHUNK, SMS_MAX, SMS_MAX_MESSAGES
-from pb.contacts import add_contact, delete_contact, find_contact_by_phone, list_contacts, priority_only, save_pending_call, search_contacts, sms_all
+from pb.contacts import add_contact, delete_contact, find_contact_by_phone, list_contacts, priority_only, save_pending_call, sms_all
 from pb.messaging import send_sms_async, sms, start_call_async, voice
 from pb.text import EMERGENCY_NUMBERS, con, end, format_contacts, is_service_number, local_number, normalize_contact_phone, position_of
 from pb.users import get_user
 from pb.org.managed_contacts import blocked_message
+from pb.org.provided import with_provided
 from pb.ussd.orgs import has_organisations, organisations_menu
 from pb.ussd.screens import INVALID, MAIN_MENU, MEMBER_MENU, MENU_ACTIONS, NO_PRIORITY, screen
 
@@ -53,7 +54,8 @@ def menu(owner, caller, parts):
         if len(rest) == 0:
             return screen("Enter name to search:")
         query = rest[0].strip()
-        rows = search_contacts(owner, query, only)
+        q = query.lower()  # own contacts and the ones the user's organisations put in their list
+        rows = [r for r in with_provided(owner, list_contacts(owner, only)) if q in r["name"].lower()][:PAGE_SIZE]
         if not rows:
             return screen(f"No contacts match '{query}'.")
         if len(rest) == 1:
@@ -62,7 +64,7 @@ def menu(owner, caller, parts):
 
     # 1. List, paginated: 1 -> 98 (more) -> 98 ... -> pick contact -> action
     if choice == "list":
-        rows = list_contacts(owner, only)
+        rows = with_provided(owner, list_contacts(owner, only))
         if not rows:
             return screen(none_yet)
         page, i = 0, 0
@@ -103,7 +105,7 @@ def menu(owner, caller, parts):
         if sms is None:
             return screen("SMS service is not available right now.")
         send_all = sms_all(get_user(owner))
-        rows = list_contacts(owner, priority_only=not send_all)
+        rows = with_provided(owner, list_contacts(owner, priority_only=not send_all))
         if not rows:
             return screen("You have no contacts yet." if send_all else NO_PRIORITY)
         messages = contact_sms(rows, "Your contacts" if send_all else "Your priority contacts")

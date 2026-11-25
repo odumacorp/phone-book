@@ -17,7 +17,6 @@ from pb.audit import audit
 from pb.config import AT_SENDER_ID, SMS_CHUNK, log
 from pb.db import fetch_all, get_db, sql
 from pb.org import content
-from pb.rbac import engine as rbac
 from pb.tenancy import tenants as tenancy
 from pb.tenancy.repo import TenantRepo
 from pb.users import get_user
@@ -44,29 +43,12 @@ def sms_parts(text):
 # ---------------------------------------------------------------- who gets it
 
 def recipients(tenant_id, audience="", placement=""):
-    """Active members' phones matching the audience (roles; "" = everyone) and placement ("d:<id>", "g:<id>" or "")."""
-    repo = TenantRepo(tenant_id)
-    members = repo.all("memberships", "status = 'active'")
-    roles_of = {}
-    for a in rbac.tenant_assignments(tenant_id):
-        roles_of.setdefault(a["principal"], set()).add(a["key"])
-    wanted = set(content.audience_roles(audience))
-    if placement:
-        kind, _, raw = placement.partition(":")
-        if kind == "d" and raw.isdigit():
-            departments = rbac._department_tree(tenant_id, int(raw))
-            inside = {r["membership_id"] for r in repo.all("department_members") if r["department_id"] in departments}
-        elif kind == "g" and raw.isdigit():
-            groups = rbac._group_tree(tenant_id, int(raw))
-            inside = {r["membership_id"] for r in repo.all("group_members") if r["group_id"] in groups}
-        else:
-            inside = set()
-        members = [m for m in members if m["id"] in inside]
+    """Active members' phones matching the audience (roles, departments, groups; "" = everyone) and, optionally,
+    one department or group (placement "d:<id>" / "g:<id>", including the ones inside it)."""
     phones = []
-    for m in members:
-        roles = roles_of.get(rbac.user_principal(m["user_phone"])) or {"member"}
-        if not wanted or roles & wanted:
-            phones.append(m["user_phone"])
+    for phone, tags in content.member_tags(tenant_id).items():
+        if content.matches(audience, tags) and (not placement or placement in tags):
+            phones.append(phone)
     return phones
 
 

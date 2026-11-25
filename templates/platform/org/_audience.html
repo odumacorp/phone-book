@@ -1,10 +1,23 @@
-{# Who can see this: everyone, or chosen roles. Needs: choices, selected #}
-<label class="field" style="margin-bottom:4px">Who can see this</label>
-<div class="checks">
-  <label><input type="radio" name="audience_mode" value="everyone" {{ 'checked' if not selected }} onclick="this.form.querySelectorAll('.aud input').forEach(i=>i.checked=false)"> Everyone in the organisation</label>
-  <label><input type="radio" name="audience_mode" value="some" {{ 'checked' if selected }}> Only some people:</label>
-</div>
-<div class="checks aud" style="margin-left:24px">
-  {% for key, name in choices %}<label><input type="checkbox" name="audience" value="{{ key }}" {{ 'checked' if key in selected }}
-    onclick="this.form.querySelector('[name=audience_mode][value=some]').checked=true"> {{ name }}</label>{% endfor %}
+{# Choose people: everyone, or some roles / departments / groups.
+   Set before including: selected (list), and optionally aud_name (field name, default "audience"),
+   aud_label (default "Who can see this"), aud_everyone (default "Everyone in the organisation"). #}
+{% set _name = aud_name|default('audience') %}
+<div class="audience-picker">
+  <label class="field" style="margin-bottom:4px">{{ aud_label|default('Who can see this') }}</label>
+  <div class="checks">
+    <label><input type="radio" name="{{ _name }}_mode" value="everyone" {{ 'checked' if not selected }}
+      onclick="this.closest('.audience-picker').querySelectorAll('.aud input').forEach(i=>i.checked=false)"> {{ aud_everyone|default('Everyone in the organisation') }}</label>
+    <label><input type="radio" name="{{ _name }}_mode" value="some" {{ 'checked' if selected }}> Only some people:</label>
+  </div>
+  <div class="aud" style="margin-left:24px">
+    <div class="checks aud-row"><span class="muted" style="min-width:90px">Roles</span>
+      {% for key, name in choices %}<label><input type="checkbox" name="{{ _name }}" value="{{ key }}" {{ 'checked' if key in selected }}
+        onclick="this.closest('.audience-picker').querySelector('[value=some]').checked=true"> {{ name }}</label>{% endfor %}</div>
+    {% if audience_departments %}<div class="checks aud-row"><span class="muted" style="min-width:90px">Departments</span>
+      {% for id, name in audience_departments %}{% set v = 'd:' ~ id %}<label><input type="checkbox" name="{{ _name }}" value="{{ v }}" {{ 'checked' if v in selected }}
+        onclick="this.closest('.audience-picker').querySelector('[value=some]').checked=true"> {{ name }}</label>{% endfor %}</div>{% endif %}
+    {% if audience_groups %}<div class="checks aud-row"><span class="muted" style="min-width:90px">Groups</span>
+      {% for id, name in audience_groups %}{% set v = 'g:' ~ id %}<label><input type="checkbox" name="{{ _name }}" value="{{ v }}" {{ 'checked' if v in selected }}
+        onclick="this.closest('.audience-picker').querySelector('[value=some]').checked=true"> {{ name }}</label>{% endfor %}</div>{% endif %}
+  </div>
 </div>

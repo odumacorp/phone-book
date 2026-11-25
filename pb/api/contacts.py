@@ -8,16 +8,19 @@ from pb.db import execute, fetch_all, fetch_one, get_db, sql
 from pb.text import EMERGENCY_NUMBERS, clean_name, normalize_contact_phone
 from pb.users import get_user
 from pb.org.managed_contacts import blocked_message
+from pb.org.provided import with_provided
 from pb.web import app
 
 
 @app.route("/api/contacts", methods=["GET"])
 @require_auth
 def api_contacts():
-    rows = list_contacts(g.phone)
+    rows = with_provided(g.phone, list_contacts(g.phone))  # plus contacts the user's organisations show them
     return jsonify({
         "contacts": [
-            {"id": r["id"], "name": r["name"], "phone": r["phone"], "priority": bool(r["priority"])} for r in rows
+            {"id": r["id"], "name": r["name"], "phone": r["phone"], "priority": bool(r["priority"]),
+             **({"org": r["org"], "title": r["title"]} if r.get("org") else {})}
+            for r in rows
         ],
         "max_priority": MAX_PRIORITY,
         "show_others": bool(get_user(g.phone)["show_others"]),

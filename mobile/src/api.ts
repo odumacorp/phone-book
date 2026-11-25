@@ -38,7 +38,8 @@ export type Membership = {
 };
 /** An email on the account (up to max_emails). Any of them can be used to log in. */
 export type EmailAddress = { id: number; email: string; verified: boolean; notify?: boolean };
-export type Contact = { id: number; name: string; phone: string; priority: boolean };
+/** A contact. org: one an organisation shows in the user's list (read-only; the organisation keeps it up to date). */
+export type Contact = { id: number; name: string; phone: string; priority: boolean; org?: string; title?: string | null };
 export type ContactList = { contacts: Contact[]; max_priority: number; show_others: boolean; sms_all?: boolean };
 export type UssdLogin = {
   at: number; // unix seconds

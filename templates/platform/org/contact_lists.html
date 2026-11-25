@@ -1,0 +1,41 @@
+{% extends "platform/base.html" %}
+{% set section = 'contacts' %}
+{% block title %}Default contact lists · {{ org.name }}{% endblock %}
+{% block content %}
+<a class="crumb" href="/platform/org/{{ org.id }}/contacts">← Contacts</a>
+<div class="page-head"><h1>Default contact lists</h1>
+  <p>Choose which {{ org.name }} contacts people get in their own contact lists, by role, department or group. Everyone in the
+    group gets them automatically, including people who join later. To change one person's list, open them on the
+    <a href="/platform/org/{{ org.id }}/members">Members</a> page.</p></div>
+
+<form method="get" class="card row" style="padding:14px 18px">
+  <b>Default list for:</b>
+  <select name="for" onchange="this.form.submit()" style="max-width:320px">
+    <optgroup label="Roles">{% for key, name in roles %}<option value="{{ key }}" {{ 'selected' if key == tag }}>{{ name }}</option>{% endfor %}</optgroup>
+    {% if departments %}<optgroup label="Departments">{% for key, name in departments %}<option value="{{ key }}" {{ 'selected' if key == tag }}>{{ name }}</option>{% endfor %}</optgroup>{% endif %}
+    {% if groups %}<optgroup label="Groups">{% for key, name in groups %}<option value="{{ key }}" {{ 'selected' if key == tag }}>{{ name }}</option>{% endfor %}</optgroup>{% endif %}
+  </select>
+  <span class="muted">{{ people }} {{ 'person' if people == 1 else 'people' }} in {{ tag_name }}</span>
+</form>
+
+<div class="card">
+  <h2>Contacts in every {{ tag_name }} list</h2>
+  {% if rows %}
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="for" value="{{ tag }}">
+    <div style="border:1px solid var(--line);border-radius:12px;padding:4px 12px;margin-bottom:12px">
+    {% for c in rows %}
+      <label style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:{{ '0' if loop.first else '1px solid var(--line)' }}">
+        <input type="checkbox" name="contacts" value="{{ c.id }}" {{ 'checked' if c.on }}>
+        <span><b>{{ c.name }}</b>{% if c.is_emergency %} <span class="pill bad">Emergency</span>{% endif %}
+          <span class="muted">{{ local(c.phone) }}{{ ' · ' ~ c.title if c.title }}{{ ' · ' ~ c.group_name if c.group_name }}{{ ' · in everyone\'s list' if c.everyone and c.on }}</span></span>
+        <a class="muted" style="margin-left:auto" href="/platform/org/{{ org.id }}/{{ 'emergency' if c.is_emergency else 'contacts' }}?edit={{ c.id }}#form">Edit</a>
+      </label>
+    {% endfor %}
+    </div>
+    <div class="row"><button type="submit">Save {{ tag_name }}'s list</button>
+      <span class="muted">Only people allowed to see a contact ("Who can see this") get it.</span></div>
+  </form>
+  {% else %}<div class="empty"><b>No contacts yet</b><a href="/platform/org/{{ org.id }}/contacts">Add some contacts</a> first.</div>{% endif %}
+</div>
+{% endblock %}

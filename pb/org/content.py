@@ -25,35 +25,89 @@ class NotAllowed(Exception):
 
 # ---------------------------------------------------------------- audience
 
-def parse_audience(roles, tenant_id):
-    """Form values -> stored audience. Empty (or "everyone") -> "" (everyone)."""
-    roles = [r for r in (roles or []) if r and r != "everyone"]
-    if not roles:
+def parse_audience(values, tenant_id):
+    """Form values -> stored audience. Each value is a role key, "d:<department id>" or "g:<group id>".
+    Empty (or "everyone") -> "" (everyone)."""
+    values = [v for v in (values or []) if v and v != "everyone"]
+    if not values:
         return ""
-    valid = {r["key"] for r in rbac.roles_for_tenant(tenant_id)}
-    unknown = [r for r in roles if r not in valid]
-    if unknown:
-        raise ValueError(f"Unknown role: {', '.join(unknown)}")
-    return json.dumps(sorted(set(roles)))
+    roles = {r["key"] for r in rbac.roles_for_tenant(tenant_id)}
+    repo = TenantRepo(tenant_id)
+    for v in values:
+        kind, _, raw = v.lstrip("!").partition(":")
+        if kind == "m" and raw.isdigit():
+            if not repo.one("memberships", "id = ?", (int(raw),)):
+                raise ValueError("One of the people chosen is no longer a member.")
+        elif kind in ("d", "g") and raw.isdigit():
+            table = "departments" if kind == "d" else "member_groups"
+            if not repo.one(table, "id = ?", (int(raw),)):
+                raise ValueError("One of the departments or groups no longer exists.")
+        elif v not in roles:
+            raise ValueError(f"Unknown role: {v}")
+    return json.dumps(sorted(set(values)))
 
 
 def audience_roles(stored):
+    """The stored audience as a list (roles, "d:<id>", "g:<id>"); [] = everyone."""
     return json.loads(stored) if stored else []
 
 
+def _tree_up(rows):
+    """{id: {id and all its ancestors}} for departments or groups."""
+    parent = {r["id"]: r["parent_id"] for r in rows}
+    out = {}
+    for node in parent:
+        seen, cur = set(), node
+        while cur and cur not in seen:
+            seen.add(cur)
+            cur = parent.get(cur)
+        out[node] = seen
+    return out
+
+
+def member_tags(tenant_id):
+    """{phone: tags} for active members. Tags: role keys ("member" if none), "d:<id>" for their departments and the
+    departments above them, "g:<id>" for their groups and the groups above them (and a group's department)."""
+    repo = TenantRepo(tenant_id)
+    members = repo.all("memberships", "status = 'active'")
+    roles_of = {}
+    for a in rbac.tenant_assignments(tenant_id):
+        roles_of.setdefault(a["principal"], set()).add(a["key"])
+    dept_up = _tree_up(repo.all("departments"))
+    group_rows = repo.all("member_groups")
+    group_up = _tree_up(group_rows)
+    group_dept = {g["id"]: g["department_id"] for g in group_rows}
+    places = {}
+    for r in repo.all("department_members"):
+        places.setdefault(r["membership_id"], set()).update(f"d:{d}" for d in dept_up.get(r["department_id"], ()))
+    for r in repo.all("group_members"):
+        tags = places.setdefault(r["membership_id"], set())
+        for gid in group_up.get(r["group_id"], ()):
+            tags.add(f"g:{gid}")
+            if group_dept.get(gid):
+                tags.update(f"d:{d}" for d in dept_up.get(group_dept[gid], ()))
+    return {m["user_phone"]: (roles_of.get(rbac.user_principal(m["user_phone"])) or {"member"}) | places.get(m["id"], set())
+            | {f"m:{m['id']}"} for m in members}
+
+
 def viewer_roles(tenant_id, phone):
-    """The role keys a person holds in an organisation, or None if they aren't an active member.
-    A member without any role counts as "member"."""
-    membership = TenantRepo(tenant_id).one("memberships", "user_phone = ? AND status = 'active'", (phone,))
-    if not membership:
-        return None
-    keys = rbac.role_keys(rbac.user_principal(phone), tenant_id)
-    return keys or {"member"}
+    """A person's tags in an organisation (roles, departments, groups: see member_tags), or None if not an active member."""
+    return member_tags(tenant_id).get(phone)
 
 
-def _visible(item, roles):
-    allowed = audience_roles(item["audience"])
-    return not allowed or bool(set(allowed) & roles)
+def matches(stored_audience, tags):
+    """Does someone with these tags fall in the audience? Entries starting with "!" leave people out
+    (e.g. "!m:12": everyone else but member 12)."""
+    entries = audience_roles(stored_audience)
+    tags = set(tags)
+    if {e[1:] for e in entries if e.startswith("!")} & tags:
+        return False
+    wanted = [e for e in entries if not e.startswith("!")]
+    return not wanted or bool(set(wanted) & tags)
+
+
+def _visible(item, tags):
+    return matches(item["audience"], tags)
 
 
 MANAGE_PERMISSIONS = ("announcements.publish", "contacts.manage", "emergency.manage", "members.manage", "tenant.settings.manage")
@@ -109,12 +163,20 @@ def _clean_contact(form, tenant_id):
         "group_name": " ".join(str(form.get("group_name") or "").split())[:GROUP_MAX] or None,
         "email": str(form.get("email") or "").strip()[:120] or None,
         "audience": parse_audience(form.get("audience"), tenant_id),
+        "in_phone_books": 1 if form.get("in_phone_books") else 0,
+        "phone_book_audience": parse_audience(form.get("pb_audience"), tenant_id) if form.get("in_phone_books") else "",
     }
 
 
 def save_contact(principal, tenant_id, form, emergency, contact_id=None):
     _require(principal, tenant_id, "emergency.manage" if emergency else "contacts.manage")
     values = _clean_contact(form, tenant_id)
+    if contact_id and values["in_phone_books"]:
+        # choices made for single people on their member page ("m:" / "!m:") stay when the contact is edited
+        old = contact(tenant_id, contact_id)
+        personal = [e for e in audience_roles(old["phone_book_audience"] if old else "") if e.lstrip("!").startswith("m:")]
+        if personal:
+            values["phone_book_audience"] = json.dumps(sorted(set(audience_roles(values["phone_book_audience"]) + personal)))
     repo, now = TenantRepo(tenant_id), int(time.time())
     if contact_id:
         if not repo.update("org_contacts", "id = ?", (contact_id,), updated_at=now, **values):
@@ -142,7 +204,7 @@ def members_for_contacts(tenant_id, emergency=False):
     return out
 
 
-def add_contacts_from_members(principal, tenant_id, membership_ids, emergency=False, group=None, audience=""):
+def add_contacts_from_members(principal, tenant_id, membership_ids, emergency=False, group=None, audience="", in_phone_books=False):
     """Turn members into contacts in one go. group: one group for all, or None to use each member's own department or
     group. Members already on the list are skipped. Returns (added ids, skipped count)."""
     _require(principal, tenant_id, "emergency.manage" if emergency else "contacts.manage")
@@ -158,11 +220,189 @@ def add_contacts_from_members(principal, tenant_id, membership_ids, emergency=Fa
         new_id = repo.insert("org_contacts", name=m["name"][:NAME_MAX], phone=m["phone"], title=(m["title"] or None),
                              group_name=None if emergency else ((group if group is not None else m["group"]) or None),
                              email=None, audience=audience, is_emergency=1 if emergency else 0, created_by=principal,
+                             in_phone_books=1 if in_phone_books else 0,
                              created_at=now, updated_at=now)
         added.append(new_id)
     audit("org_contact.add_from_members", tenant_id, ("org_contact", ",".join(map(str, added))),
           {"count": len(added), "emergency": bool(emergency)}, actor=principal)
     return added, len(wanted) - len(added)
+
+
+def selected_only(member):
+    """The contact ids picked for a member whose list shows only those, or None if their list follows the defaults."""
+    if not member or member["list_mode"] != "selected":
+        return None
+    try:
+        return {int(i) for i in json.loads(member["list_selection"] or "[]")}
+    except ValueError:
+        return set()
+
+
+def member_list_contacts(tenant_id, membership_id):
+    """For a member's edit page: the organisation contacts they can see, each with whether it's in their own list."""
+    member = TenantRepo(tenant_id).one("memberships", "id = ? AND status = 'active'", (membership_id,))
+    if not member:
+        return []
+    tags = member_tags(tenant_id).get(member["user_phone"], set())
+    picked = selected_only(member)
+    out = []
+    for c in contacts(tenant_id):
+        if not matches(c["audience"], tags):
+            continue
+        if picked is not None:
+            shown = c["id"] in picked
+        else:
+            shown = bool(c["in_phone_books"]) and matches(c["phone_book_audience"], tags)
+        out.append(dict(c, shown=shown))
+    return out
+
+
+def set_member_list_mode(principal, tenant_id, membership_id, mode):
+    """"defaults" (role/department/group lists plus changes for them) or "selected" (only contacts picked for them).
+    Switching to "selected" starts from what they have now."""
+    if not can_manage(principal, tenant_id, "contacts.manage"):
+        raise NotAllowed("You don't have permission to change contact lists.")
+    if mode not in ("defaults", "selected"):
+        raise ValueError("Choose how their list works.")
+    repo = TenantRepo(tenant_id)
+    current = [c["id"] for c in member_list_contacts(tenant_id, membership_id) if c["shown"]]
+    repo.update("memberships", "id = ?", (membership_id,), list_mode=mode,
+                list_selection=json.dumps(sorted(current)) if mode == "selected" else None)
+    audit("member.list_mode", tenant_id, ("member", membership_id), {"mode": mode}, actor=principal)
+
+
+def reset_member_list(principal, tenant_id, membership_id):
+    """Undo every change made for this one person: their list follows the defaults again."""
+    if not can_manage(principal, tenant_id, "contacts.manage"):
+        raise NotAllowed("You don't have permission to change contact lists.")
+    tag, repo = f"m:{membership_id}", TenantRepo(tenant_id)
+    for c in repo.all("org_contacts"):
+        entries = audience_roles(c["phone_book_audience"])
+        if tag not in entries and "!" + tag not in entries:
+            continue
+        had_people = [e for e in entries if not e.startswith("!")]
+        entries = [e for e in entries if e not in (tag, "!" + tag)]
+        left = [e for e in entries if not e.startswith("!")]
+        in_books = 0 if (had_people and not left) else c["in_phone_books"]
+        repo.update("org_contacts", "id = ?", (c["id"],), in_phone_books=in_books,
+                    phone_book_audience=json.dumps(sorted(set(entries))) if entries and in_books else "")
+    repo.update("memberships", "id = ?", (membership_id,), list_mode=None, list_selection=None)
+    audit("member.list_reset", tenant_id, ("member", membership_id), None, actor=principal)
+
+
+def set_member_list_contacts(principal, tenant_id, membership_id, wanted_ids):
+    """Make exactly these organisation contacts show in one member's own list (only contacts they can see).
+    Adds "m:<id>" or "!m:<id>" to each contact's list audience as needed. Returns how many changed."""
+    tag = f"m:{membership_id}"
+    wanted = {int(i) for i in wanted_ids if str(i).isdigit()}
+    repo, changed = TenantRepo(tenant_id), 0
+    member = repo.one("memberships", "id = ?", (membership_id,))
+    if selected_only(member) is not None:  # their list shows only what's picked for them: keep it on their row
+        if not can_manage(principal, tenant_id, "contacts.manage"):
+            raise NotAllowed("You don't have permission to change contact lists.")
+        allowed = {c["id"] for c in member_list_contacts(tenant_id, membership_id)}
+        picked = sorted(wanted & allowed)
+        repo.update("memberships", "id = ?", (membership_id,), list_selection=json.dumps(picked))
+        audit("member.list_contacts", tenant_id, ("member", membership_id), {"contacts": picked, "mode": "selected"}, actor=principal)
+        return 1
+    for c in member_list_contacts(tenant_id, membership_id):
+        should = c["id"] in wanted
+        if should == c["shown"]:
+            continue
+        _require(principal, tenant_id, "emergency.manage" if c["is_emergency"] else "contacts.manage")
+        original = audience_roles(c["phone_book_audience"])
+        entries = [e for e in original if e not in (tag, "!" + tag)]
+        tags = member_tags(tenant_id).get(_phone_of(repo, membership_id), set())
+        in_books = 1
+        if should:
+            if not c["in_phone_books"]:
+                entries = [tag]  # it was in nobody's list: now just this person's
+            elif not matches(json.dumps(entries) if entries else "", tags):
+                entries.append(tag)
+        else:
+            had_people = [e for e in original if not e.startswith("!")]
+            left = [e for e in entries if not e.startswith("!")]
+            if had_people and not left:
+                in_books, entries = 0, []  # it was in this person's list only
+            elif matches(json.dumps(entries) if entries else "", tags):
+                entries.append("!" + tag)  # others keep it; leave this person out
+        repo.update("org_contacts", "id = ?", (c["id"],), in_phone_books=in_books,
+                    phone_book_audience=json.dumps(sorted(set(entries))) if entries else "")
+        changed += 1
+    if changed:
+        audit("member.list_contacts", tenant_id, ("member", membership_id), {"contacts": sorted(wanted)}, actor=principal)
+    return changed
+
+
+def _list_entries(c):
+    entries = audience_roles(c["phone_book_audience"])
+    return [e for e in entries if not e.startswith("!")], [e[1:] for e in entries if e.startswith("!")]
+
+
+def list_reason(c, tags, membership_id, names):
+    """Why a contact is (or isn't) in one member's list, in words."""
+    tag = f"m:{membership_id}"
+    wanted, left_out = _list_entries(c)
+    if tag in left_out:
+        return "left out for them"
+    if not c["in_phone_books"]:
+        return "not in anyone's list"
+    if tag in wanted:
+        return "just for them"
+    if not wanted:
+        return "everyone who can see it" if not (set(left_out) & set(tags)) else "left out for their group"
+    hits = [names.get(e, e) for e in wanted if e in tags]
+    return ("for " + ", ".join(hits)) if hits else "for other people"
+
+
+def list_defaults(tenant_id, tag):
+    """For the Default contact lists page: each contact, and whether people with this tag (a role, "d:<id>" or "g:<id>")
+    get it in their lists by default."""
+    out = []
+    for c in contacts(tenant_id):
+        wanted, left_out = _list_entries(c)
+        on = bool(c["in_phone_books"]) and tag not in left_out and (not wanted or tag in wanted)
+        out.append(dict(c, on=on, everyone=bool(c["in_phone_books"]) and not wanted))
+    return out
+
+
+def set_list_defaults(principal, tenant_id, tag, wanted_ids):
+    """Make exactly these contacts part of the default lists of everyone with this tag. Returns how many changed."""
+    parse_audience([tag], tenant_id)  # a real role, department or group
+    wanted_ids = {int(i) for i in wanted_ids if str(i).isdigit()}
+    repo, changed = TenantRepo(tenant_id), 0
+    for c in list_defaults(tenant_id, tag):
+        should = c["id"] in wanted_ids
+        if should == c["on"]:
+            continue
+        _require(principal, tenant_id, "emergency.manage" if c["is_emergency"] else "contacts.manage")
+        entries = [e for e in audience_roles(c["phone_book_audience"]) if e not in (tag, "!" + tag)]
+        wanted = [e for e in entries if not e.startswith("!")]
+        in_books = 1
+        if should:
+            if not c["in_phone_books"]:
+                entries = [e for e in entries if e.startswith("!")] + [tag]
+            elif wanted:  # an explicit list: add this group to it (if it was "everyone", removing the "!" was enough)
+                entries.append(tag)
+        else:
+            if not wanted and c["in_phone_books"]:
+                entries.append("!" + tag)  # everyone who can see it, except this group
+            elif not wanted:
+                in_books = 0
+            # (an explicit list: removing the tag above was enough)
+            if c["in_phone_books"] and wanted and not [e for e in entries if not e.startswith("!")]:
+                in_books, entries = 0, []
+        repo.update("org_contacts", "id = ?", (c["id"],), in_phone_books=in_books,
+                    phone_book_audience=json.dumps(sorted(set(entries))) if entries else "")
+        changed += 1
+    if changed:
+        audit("org_contact.list_defaults", tenant_id, ("audience", tag), {"contacts": sorted(wanted_ids)}, actor=principal)
+    return changed
+
+
+def _phone_of(repo, membership_id):
+    row = repo.one("memberships", "id = ?", (membership_id,))
+    return row["user_phone"] if row else None
 
 
 def delete_contact(principal, tenant_id, contact_id):

@@ -2447,7 +2447,7 @@ function SyncScreen({
           )
         }
         renderItem={({ item }) => {
-          if (selecting) {
+          if (selecting && !item.org) {
             const on = chosen.has(item.id);
             return (
               <Pressable
@@ -2465,6 +2465,26 @@ function SyncScreen({
                 </View>
                 <View style={[styles.checkbox, on && styles.checkboxOn]}>{on ? <Text style={styles.checkmark}>✓</Text> : null}</View>
               </Pressable>
+            );
+          }
+          if (item.org) {
+            // from the user's organisation: always up to date, can't be changed here
+            return (
+              <View style={styles.row}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.rowPhone}>
+                    {item.title ? `${item.title} · ` : ''}
+                    {item.phone.startsWith('+254') ? '0' + item.phone.slice(4) : item.phone} · from {item.org}
+                  </Text>
+                </View>
+                <Pressable onPress={() => callNumber(item.phone)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Call ${item.name}`}>
+                  <Text style={styles.callLink}>Call</Text>
+                </Pressable>
+                <Text style={styles.orgBadge} accessibilityLabel={`Provided by ${item.org}`}>🏢</Text>
+              </View>
             );
           }
           return (
@@ -2818,6 +2838,7 @@ const styles = StyleSheet.create({
   star: { fontSize: 26, color: COLORS.muted },
   starOn: { color: '#E0A100' },
   profileCard: { gap: 6 },
+  orgBadge: { fontSize: 20, marginLeft: 4 },
   managedNote: { fontSize: 14, color: COLORS.primary, backgroundColor: COLORS.primarySoft, borderRadius: 10, padding: 10, overflow: 'hidden' },
   choiceRow: { flexDirection: 'row', gap: 10 },
   choice: { flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, padding: 12, backgroundColor: '#fff' },

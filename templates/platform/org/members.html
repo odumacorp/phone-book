@@ -48,6 +48,64 @@
     <div class="row"><button type="submit">Save changes</button><a class="btn secondary" href="/platform/org/{{ org.id }}/members">Cancel</a></div>
   </form>
 </div>
+{% if can_contacts %}
+<div class="card" id="their-contacts">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">In {{ editing.display_name or local(editing.user_phone) }}'s contact list</h2>
+    <a class="btn secondary small" href="/platform/org/{{ org.id }}/contact-lists">Default lists by role, department or group</a>
+  </div>
+  {% set only = editing.list_mode == 'selected' %}
+  <form method="post" action="/platform/org/{{ org.id }}/members/{{ editing.id }}/contacts/mode" class="checks" style="margin:10px 0 6px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <span class="muted">Their list shows:</span>
+    <label><input type="radio" name="mode" value="defaults" {{ 'checked' if not only }} onchange="this.form.submit()"> The default lists for their role, department and group, plus changes for them</label>
+    <label><input type="radio" name="mode" value="selected" {{ 'checked' if only }} onchange="this.form.submit()"> Only the contacts picked here</label>
+  </form>
+  <p class="help">{% if only %}Only the ticked contacts show in their own contact list (app, website and USSD 1. My contacts);
+    default lists don't add anything for them.{% else %}{{ org.name }} contacts in their own contact list (app, website and USSD
+    1. My contacts). Most come from the default lists; tick or untick here to change it for this person only.{% endif %}</p>
+  {% if list_contacts_for %}
+  <form method="post" action="/platform/org/{{ org.id }}/members/{{ editing.id }}/contacts">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div style="border:1px solid var(--line);border-radius:12px;padding:4px 12px;margin-bottom:12px">
+    {% for c in list_contacts_for %}
+      <label style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:{{ '0' if loop.first else '1px solid var(--line)' }}">
+        <input type="checkbox" name="contacts" value="{{ c.id }}" {{ 'checked' if c.shown }}>
+        <span><b>{{ c.name }}</b>{% if c.is_emergency %} <span class="pill bad">Emergency</span>{% endif %}
+          <span class="muted">{{ local(c.phone) }}{{ ' · ' ~ c.title if c.title }}</span>
+          <span class="pill {{ 'on' if c.shown else 'off' }}">{{ c.reason }}</span></span>
+        <a class="muted" style="margin-left:auto" href="/platform/org/{{ org.id }}/{{ 'emergency' if c.is_emergency else 'contacts' }}?edit={{ c.id }}#form">Edit</a>
+      </label>
+    {% endfor %}
+    </div>
+    <div class="row"><button type="submit">Save their contact list</button>
+      <span class="muted">{{ list_contacts_for|selectattr('shown')|list|length }} of {{ list_contacts_for|length }} in their list now</span></div>
+  </form>
+  <div class="row" style="margin-top:10px">
+    <form method="post" action="/platform/org/{{ org.id }}/members/{{ editing.id }}/contacts/clear" class="inline"
+      onsubmit="return confirm('Remove every {{ org.name }} contact from their list?')"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="danger small" type="submit">Clear their list</button></form>
+    {% if not only %}<form method="post" action="/platform/org/{{ org.id }}/members/{{ editing.id }}/contacts/reset" class="inline"
+      onsubmit="return confirm('Undo the changes made just for them, so their list follows the defaults?')"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="secondary small" type="submit">Reset to the defaults</button></form>{% endif %}
+  </div>
+  {% else %}<p class="muted">No {{ org.name }} contacts they can see yet.</p>{% endif %}
+  <details style="margin-top:14px">
+    <summary>➕ Add a new contact to their list</summary>
+    <form method="post" action="/platform/org/{{ org.id }}/members/{{ editing.id }}/contacts/new" style="margin-top:10px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="grid2">
+        <label class="field">Name<input name="name" maxlength="60" required placeholder="e.g. Regional manager"></label>
+        <label class="field">Phone number<input name="phone" inputmode="tel" required placeholder="0712 345 678"></label>
+        <label class="field">Role or title <small>Optional</small><input name="title" maxlength="60"></label>
+      </div>
+      <div class="checks"><label><input type="checkbox" name="emergency" value="1"> It's an emergency contact</label></div>
+      <button type="submit">Add to their list</button>
+      <span class="muted">It's added to {{ org.name }}'s contacts too, and only goes in this person's list.</span>
+    </form>
+  </details>
+</div>
+{% endif %}
 {% else %}
 <div class="card" id="form">
   <h2>Add a member</h2>

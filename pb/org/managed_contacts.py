@@ -4,15 +4,13 @@ Each organisation chooses (Settings, "member_contacts"):
 - "own" (default): members add, edit, delete and sync their own contacts, as everyone does;
 - "managed": the organisation provides the numbers. Its members (not its admins and operators, who hold
   contacts.manage there) can't add, edit, delete or sync personal contacts on USSD, in the app or on the website.
-  Operators put contacts into members' phone books from the Contacts page ("Put in members' phone books").
+  Operators choose which organisation contacts show in members' lists (pb.org.provided).
 """
 from pb.audit import audit
-from pb.contacts import stored_contact
-from pb.db import get_db, sql
 from pb.org import content
-from pb.org.reminders import recipients
 from pb.rbac import engine as rbac
 from pb.tenancy import tenants as tenancy
+from pb.tenancy.repo import TenantRepo
 
 MANAGED_MESSAGE = "Your contacts are provided by {org}. Ask {org} to add the numbers you need."
 
@@ -33,37 +31,26 @@ def blocked_message(phone):
     return MANAGED_MESSAGE.format(org=org["name"]) if org else None
 
 
-def push_to_phone_books(principal, tenant_id, emergency=None):
-    """Copy the organisation's contacts into the phone books of the members allowed to see each one.
-    Numbers a member already has are left alone. Returns (people reached, contacts added)."""
-    if not content.can_manage(principal, tenant_id, "contacts.manage"):
-        raise content.NotAllowed("You don't have permission to add contacts to members' phone books.")
-    rows = content.contacts(tenant_id, emergency=emergency)
-    if not rows:
-        raise ValueError("Add some contacts first.")
-    db = get_db()
-    existing = {}
-    added, reached = 0, set()
+def show_in_phone_books(principal, tenant_id, emergency=None, show=True):
+    """Tick (or untick) "Show in members' own contact lists" on all the organisation's contacts (or one list of them).
+    Returns how many changed."""
+    if not content.can_manage(principal, tenant_id, "emergency.manage" if emergency else "contacts.manage"):
+        raise content.NotAllowed("You don't have permission to change that.")
+    rows = [c for c in content.contacts(tenant_id, emergency=emergency) if bool(c["in_phone_books"]) != show]
+    repo = TenantRepo(tenant_id)
     for c in rows:
-        for phone in recipients(tenant_id, c["audience"]):
-            if phone == c["phone"]:
-                continue  # don't add people to their own phone book
-            if phone not in existing:
-                existing[phone] = {r["phone"] for r in content_phones(phone)}
-            if c["phone"] in existing[phone]:
-                continue
-            name, number, enc = stored_contact(c["name"], c["phone"])
-            db.execute(sql("INSERT INTO contacts (owner, name, phone, enc, source_tenant) VALUES (?, ?, ?, ?, ?)"),
-                       (phone, name, number, enc, tenant_id))
-            existing[phone].add(c["phone"])
-            added += 1
-            reached.add(phone)
-    db.commit()
-    audit("org_contact.push_to_phone_books", tenant_id, ("org_contacts", "all"),
-          {"people": len(reached), "contacts_added": added}, actor=principal)
-    return len(reached), added
+        repo.update("org_contacts", "id = ?", (c["id"],), in_phone_books=1 if show else 0)
+    audit("org_contact.phone_books", tenant_id, ("org_contacts", "emergency" if emergency else "contacts"),
+          {"show": show, "changed": len(rows)}, actor=principal)
+    return len(rows)
 
 
-def content_phones(owner):
-    from pb.contacts import list_contacts
-    return list_contacts(owner)
+def set_one(principal, tenant_id, contact_id, show):
+    row = content.contact(tenant_id, contact_id)
+    if not row:
+        raise ValueError("That contact no longer exists.")
+    if not content.can_manage(principal, tenant_id, "emergency.manage" if row["is_emergency"] else "contacts.manage"):
+        raise content.NotAllowed("You don't have permission to change that.")
+    TenantRepo(tenant_id).update("org_contacts", "id = ?", (contact_id,), in_phone_books=1 if show else 0)
+    audit("org_contact.phone_books", tenant_id, ("org_contact", contact_id), {"show": show, "name": row["name"]}, actor=principal)
+    return row

@@ -14,6 +14,7 @@ from flask import jsonify
 
 from pb.org import change_notices, content, joining, managed_contacts, reminders, structure, suggestions
 from pb.tenancy.repo import TenantRepo
+from pb.text import local_number
 from pb.ussd import orgs as ussd_orgs
 from pb.portal import bp, done, failed, is_staff
 from pb.rbac import engine as rbac
@@ -65,7 +66,10 @@ def open_workspace(tenant_id):
 
 
 def page(template, **values):
-    return render_template(template, org=g.org, areas=g.org_areas, staff_help=g.org_staff_help, page="org", **values)
+    tenant_id = g.org["id"]
+    return render_template(template, org=g.org, areas=g.org_areas, staff_help=g.org_staff_help, page="org",
+                           audience_departments=[(d["id"], d["name"]) for d in structure.departments(tenant_id)],
+                           audience_groups=[(x["id"], x["name"]) for x in structure.groups(tenant_id)], **values)
 
 
 def audience_choices(tenant_id):
@@ -84,9 +88,19 @@ def title_lists_for(tenant_id, used=()):
 
 
 def audience_text(stored, choices):
-    names = dict(choices)
     keys = content.audience_roles(stored)
-    return "Everyone" if not keys else ", ".join(names.get(k, k) for k in keys)
+    if not keys:
+        return "Everyone"
+    names = dict(choices)
+    tenant_id = g.org["id"]
+    names.update({f"d:{d['id']}": d["name"] for d in structure.departments(tenant_id)})
+    names.update({f"g:{x['id']}": x["name"] for x in structure.groups(tenant_id)})
+    for m in TenantRepo(tenant_id).all("memberships"):
+        names[f"m:{m['id']}"] = m["display_name"] or local_number(m["user_phone"])
+    people = [names.get(k, "a removed group") for k in keys if not k.startswith("!")]
+    left_out = [names.get(k[1:], "someone") for k in keys if k.startswith("!")]
+    text = ", ".join(people) if people else "Everyone"
+    return text + (f" (not {', '.join(left_out)})" if left_out else "")
 
 
 def require_area(area):
@@ -176,7 +190,9 @@ def _contacts_page(tenant_id, emergency):
     open_workspace(tenant_id)
     require_area("emergency" if emergency else "contacts")
     choices = audience_choices(tenant_id)
-    rows = [dict(c, audience_text=audience_text(c["audience"], choices)) for c in content.contacts(tenant_id, emergency=emergency)]
+    rows = [dict(c, audience_text=audience_text(c["audience"], choices),
+                 pb_text=audience_text(c["phone_book_audience"], choices) if c["phone_book_audience"] else "Everyone who can see it")
+            for c in content.contacts(tenant_id, emergency=emergency)]
     editing = content.contact(tenant_id, int(request.args["edit"])) if request.args.get("edit", "").isdigit() else None
     if editing and bool(editing["is_emergency"]) != emergency:
         editing = None
@@ -189,6 +205,8 @@ def _contacts_page(tenant_id, emergency):
     title_lists = title_lists_for(tenant_id, [c["title"] for c in content.contacts(tenant_id)])
     name_lists = [("Suggested", suggestions.emergency_options(edition, [c["name"] for c in rows]))] if emergency else []
     return page("platform/org/contacts.html", rows=rows, choices=choices, editing=editing, emergency=emergency,
+                editing_pb=[e for e in content.audience_roles(editing["phone_book_audience"]) if not e.lstrip("!").startswith("m:")] if editing else [],
+                editing_pb_personal=bool(editing) and any(e.lstrip("!").startswith("m:") for e in content.audience_roles(editing["phone_book_audience"])),
                 group_lists=group_lists, title_lists=title_lists, name_lists=name_lists,
                 member_options=content.members_for_contacts(tenant_id, emergency),
                 member_contacts=tenancy.get_setting(tenant_id, "member_contacts"),
@@ -201,7 +219,7 @@ def _contact_save(tenant_id, emergency):
     open_workspace(tenant_id)
     require_area("emergency" if emergency else "contacts")
     endpoint = "platform.org_emergency" if emergency else "platform.org_contacts"
-    form = {**request.form.to_dict(), "audience": request.form.getlist("audience")}
+    form = {**request.form.to_dict(), "audience": request.form.getlist("audience"), "pb_audience": request.form.getlist("pb_audience")}
     contact_id = int(request.form["contact_id"]) if request.form.get("contact_id", "").isdigit() else None
     try:
         saved_id = content.save_contact(g.principal, tenant_id, form, emergency, contact_id)
@@ -243,7 +261,8 @@ def org_contacts_from_members(tenant_id, kind):
     group = None if f.get("group_mode", "own") == "own" else (" ".join((f.get("group_name") or "").split())[:40])
     try:
         audience = content.parse_audience(f.getlist("audience"), tenant_id)
-        added, skipped = content.add_contacts_from_members(g.principal, tenant_id, f.getlist("members"), emergency, group, audience)
+        added, skipped = content.add_contacts_from_members(g.principal, tenant_id, f.getlist("members"), emergency, group, audience,
+                                                           in_phone_books=bool(f.get("in_phone_books")))
     except (ValueError, content.NotAllowed) as e:
         return failed(str(e), endpoint, tenant_id=tenant_id)
     message = f"Added {len(added)} contact{'' if len(added) == 1 else 's'} from your members."
@@ -254,27 +273,38 @@ def org_contacts_from_members(tenant_id, kind):
     return done(message, endpoint, tenant_id=tenant_id)
 
 
-@bp.route("/org/<int:tenant_id>/<any(contacts, emergency):kind>/push", methods=["POST"])
-def org_contacts_push(tenant_id, kind):
-    """Put the organisation's contacts into members' own phone books (each member gets the ones they may see)."""
+@bp.route("/org/<int:tenant_id>/<any(contacts, emergency):kind>/phone-books", methods=["POST"])
+def org_contacts_phone_books(tenant_id, kind):
+    """Show (or stop showing) all of a list's contacts in members' own contact lists."""
     emergency = kind == "emergency"
     open_workspace(tenant_id)
     require_area("emergency" if emergency else "contacts")
     endpoint = "platform.org_emergency" if emergency else "platform.org_contacts"
+    show = request.form.get("show") == "1"
     try:
-        people, added = managed_contacts.push_to_phone_books(g.principal, tenant_id, emergency=emergency)
+        changed = managed_contacts.show_in_phone_books(g.principal, tenant_id, emergency=emergency, show=show)
     except (ValueError, content.NotAllowed) as e:
         return failed(str(e), endpoint, tenant_id=tenant_id)
-    if not added:
-        return done("Everyone already has these numbers in their phone book.", endpoint, tenant_id=tenant_id)
-    message = f"Added {added} number{'' if added == 1 else 's'} to {people} member{'' if people == 1 else 's'}' phone books."
-    if request.form.get("notify"):
+    message = (f"{changed} contact{'' if changed == 1 else 's'} now show{'s' if changed == 1 else ''} in members' own contact lists."
+               if show else f"{changed} contact{'' if changed == 1 else 's'} no longer show{'s' if changed == 1 else ''} in members' lists.")
+    if show and changed and request.form.get("notify"):
         org = g.org["name"]
-        phones = [p for p in reminders.recipients(tenant_id, "")]
-        count = reminders.app_notify(phones, f"{org}: new numbers in your phone book",
-                                     f"{org} added contacts to your Remote Phonebook. Open the app, or dial and choose 1. My contacts.")
+        count = reminders.app_notify(reminders.recipients(tenant_id, ""), f"{org}: new numbers in your contacts",
+                                     f"{org} added contacts to your Remote Phonebook list. Open the app, or dial and choose 1. My contacts.")
         message += _told(count)
     return done(message, endpoint, tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/contacts/<int:contact_id>/phone-books", methods=["POST"])
+def org_contact_phone_books(tenant_id, contact_id):
+    open_workspace(tenant_id)
+    show = request.form.get("show") == "1"
+    try:
+        row = managed_contacts.set_one(g.principal, tenant_id, contact_id, show)
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_contacts", tenant_id=tenant_id)
+    endpoint = "platform.org_emergency" if row["is_emergency"] else "platform.org_contacts"
+    return done(f"{row['name']} {'now shows' if show else 'no longer shows'} in members' own contact lists.", endpoint, tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/contacts/<int:contact_id>/delete", methods=["POST"])
@@ -315,14 +345,24 @@ def org_members(tenant_id):
                  category=member_category(m["role_key"])) for m in members]
     editing = next((m for m in rows if str(m["id"]) == request.args.get("edit")), None)
     editing_scope = editing_placements = None
+    list_contacts_for = []
     if editing:
+        tags = content.member_tags(tenant_id).get(editing["user_phone"], set())
+        names = dict(audience_choices(tenant_id))
+        names.update({f"d:{d['id']}": d["name"] for d in structure.departments(tenant_id)})
+        names.update({f"g:{x['id']}": x["name"] for x in structure.groups(tenant_id)})
+        only = editing["list_mode"] == "selected"
+        list_contacts_for = [dict(c, reason=("picked for them" if c["shown"] else "not picked") if only
+                                  else content.list_reason(c, tags, editing["id"], names))
+                             for c in content.member_list_contacts(tenant_id, editing["id"])]
         _key, editing_scope = content.member_role(tenant_id, editing["user_phone"])
         editing_placements = structure.placements_of(tenant_id, editing["id"])
     title_lists = title_lists_for(tenant_id, [m["title"] for m in rows])
     return page("platform/org/members.html", rows=rows, choices=choices,
                 departments=structure.departments(tenant_id), groups=structure.groups(tenant_id),
                 can_structure="structure" in g.org_areas, editing=editing, editing_scope=editing_scope,
-                editing_placements=editing_placements or [], title_lists=title_lists,
+                editing_placements=editing_placements or [], title_lists=title_lists, list_contacts_for=list_contacts_for,
+                can_contacts="contacts" in g.org_areas or "emergency" in g.org_areas,
                 former=content.former_members(tenant_id), me=g.principal,
                 super_admin=tenancy.super_admin(tenant_id),
                 can_hand_over=g.org_staff_help or tenancy.super_admin(tenant_id) == g.principal,
@@ -372,6 +412,81 @@ def org_member_update(tenant_id, membership_id):
         if change_notices.member_changed(g.principal, tenant_id, after["phone"], before, after):
             message += " They were notified in the app."
     return done(message, "platform.org_members", tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/members/<int:membership_id>/contacts", methods=["POST"])
+def org_member_list_contacts(tenant_id, membership_id):
+    """Which organisation contacts show in this one member's own contact list."""
+    open_workspace(tenant_id)
+    require_area("members")
+    try:
+        changed = content.set_member_list_contacts(g.principal, tenant_id, membership_id, request.form.getlist("contacts"))
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_members", tenant_id=tenant_id, edit=membership_id)
+    return done("Their contact list is updated." if changed else "Nothing changed.", "platform.org_members",
+                tenant_id=tenant_id, edit=membership_id, _anchor="their-contacts")
+
+
+@bp.route("/org/<int:tenant_id>/members/<int:membership_id>/contacts/<any(mode, clear, reset):action>", methods=["POST"])
+def org_member_list_action(tenant_id, membership_id, action):
+    """A member's own contact list: how it works (defaults / only picked), clear it, or reset it to the defaults."""
+    open_workspace(tenant_id)
+    require_area("members")
+    try:
+        if action == "mode":
+            content.set_member_list_mode(g.principal, tenant_id, membership_id, request.form.get("mode"))
+            message = ("Their list now shows only the contacts you pick for them." if request.form.get("mode") == "selected"
+                       else "Their list follows the default lists again (plus any changes for them).")
+        elif action == "clear":
+            content.set_member_list_contacts(g.principal, tenant_id, membership_id, [])
+            message = "Their contact list is cleared: no organisation contacts in it."
+        else:
+            content.reset_member_list(g.principal, tenant_id, membership_id)
+            message = "Their list follows the default lists again; changes made just for them are undone."
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_members", tenant_id=tenant_id, edit=membership_id, _anchor="their-contacts")
+    return done(message, "platform.org_members", tenant_id=tenant_id, edit=membership_id, _anchor="their-contacts")
+
+
+@bp.route("/org/<int:tenant_id>/members/<int:membership_id>/contacts/new", methods=["POST"])
+def org_member_new_contact(tenant_id, membership_id):
+    """Add a new organisation contact and put it in this one member's list."""
+    open_workspace(tenant_id)
+    require_area("members")
+    emergency = request.form.get("emergency") == "1"
+    form = {"name": request.form.get("name"), "phone": request.form.get("phone"), "title": request.form.get("title"),
+            "audience": [], "in_phone_books": "1", "pb_audience": [f"m:{membership_id}"]}
+    try:
+        content.save_contact(g.principal, tenant_id, form, emergency)
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_members", tenant_id=tenant_id, edit=membership_id, _anchor="their-contacts")
+    return done("Contact added to their list.", "platform.org_members", tenant_id=tenant_id, edit=membership_id, _anchor="their-contacts")
+
+
+@bp.route("/org/<int:tenant_id>/contact-lists", methods=["GET", "POST"])
+def org_contact_lists(tenant_id):
+    """Default contact lists: which contacts each role, department or group gets in their own lists."""
+    open_workspace(tenant_id)
+    if "contacts" not in g.org_areas and "emergency" not in g.org_areas:
+        abort(403)
+    choices = audience_choices(tenant_id)
+    departments = [(f"d:{d['id']}", d["name"]) for d in structure.departments(tenant_id)]
+    groups = [(f"g:{x['id']}", x["name"]) for x in structure.groups(tenant_id)]
+    every = dict(choices + departments + groups)
+    tag = request.values.get("for") or (choices[0][0] if choices else "member")
+    if tag not in every:
+        tag = choices[0][0] if choices else "member"
+    if request.method == "POST":
+        try:
+            changed = content.set_list_defaults(g.principal, tenant_id, tag, request.form.getlist("contacts"))
+        except (ValueError, content.NotAllowed) as e:
+            return failed(str(e), "platform.org_contact_lists", tenant_id=tenant_id, **{"for": tag})
+        return done(f"Default list for {every[tag]} saved." if changed else "Nothing changed.",
+                    "platform.org_contact_lists", tenant_id=tenant_id, **{"for": tag})
+    rows = content.list_defaults(tenant_id, tag)
+    people = len([p for p, tags in content.member_tags(tenant_id).items() if tag in tags])
+    return page("platform/org/contact_lists.html", rows=rows, tag=tag, tag_name=every[tag], roles=choices,
+                departments=departments, groups=groups, people=people)
 
 
 @bp.route("/org/<int:tenant_id>/members/<int:membership_id>/approve", methods=["POST"])
