@@ -70,12 +70,12 @@
   <h2>Settings</h2>
   {% for key, value in settings.items() %}
   <div class="feature">
-    <div><b>{{ {'allow_other_phone': 'Use from another phone', 'otp': 'SMS code for sensitive screens', 'language': 'Language', 'join_mode': 'Joining at sign-up'}[key] }}</b>
-      <span class="pill off">{{ {'1': 'allowed', '0': 'own phone only', 'some': 'only some people (set in the workspace)', 'inherit': 'platform default', 'on': 'on', 'off': 'off', 'en': 'English', 'sw': 'Kiswahili', 'open': 'anyone can join', 'approval': 'needs approval', 'closed': 'invite only'}[value] }}</span>
+    <div><b>{{ {'allow_other_phone': 'Use from another phone', 'otp': 'SMS code for sensitive screens', 'language': 'Language', 'join_mode': 'Joining at sign-up', 'member_contacts': "Members' own contacts"}[key] }}</b>
+      <span class="pill off">{{ {'1': 'allowed', '0': 'own phone only', 'some': 'only some people (set in the workspace)', 'inherit': 'platform default', 'on': 'on', 'off': 'off', 'en': 'English', 'sw': 'Kiswahili', 'open': 'anyone can join', 'approval': 'needs approval', 'closed': 'invite only', 'own': 'members manage their own', 'managed': 'provided by the organisation'}[value] }}</span>
       <p>{{ setting_help[key][1] }}</p></div>
     {% if manage %}<form method="post" action="/platform/tenants/{{ t.id }}/setting" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="key" value="{{ key }}">
-      <select name="value">{% for c in setting_choices[key] %}<option value="{{ c }}" {{ 'selected' if c == value }}>{{ {'1': 'Allowed', '0': 'Own phone only', 'some': 'Only some people', 'inherit': 'Platform default', 'on': 'On', 'off': 'Off', 'en': 'English', 'sw': 'Kiswahili', 'open': 'Anyone can join', 'approval': 'Needs approval', 'closed': 'Invite only'}[c] }}</option>{% endfor %}</select>
+      <select name="value">{% for c in setting_choices[key] %}<option value="{{ c }}" {{ 'selected' if c == value }}>{{ {'1': 'Allowed', '0': 'Own phone only', 'some': 'Only some people', 'inherit': 'Platform default', 'on': 'On', 'off': 'Off', 'en': 'English', 'sw': 'Kiswahili', 'open': 'Anyone can join', 'approval': 'Needs approval', 'closed': 'Invite only', 'own': 'Members manage their own', 'managed': 'Provided by the organisation'}[c] }}</option>{% endfor %}</select>
       <button class="secondary" type="submit">Set</button></form>{% endif %}
   </div>
   {% endfor %}

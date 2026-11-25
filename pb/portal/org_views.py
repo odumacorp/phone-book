@@ -12,7 +12,7 @@ from flask import abort, g, redirect, render_template, request, url_for
 from pb.billing import ussd_codes
 from flask import jsonify
 
-from pb.org import change_notices, content, joining, reminders, structure, suggestions
+from pb.org import change_notices, content, joining, managed_contacts, reminders, structure, suggestions
 from pb.tenancy.repo import TenantRepo
 from pb.ussd import orgs as ussd_orgs
 from pb.portal import bp, done, failed, is_staff
@@ -184,6 +184,7 @@ def _contacts_page(tenant_id, emergency):
     return page("platform/org/contacts.html", rows=rows, choices=choices, editing=editing, emergency=emergency,
                 group_lists=group_lists, title_lists=title_lists, name_lists=name_lists,
                 member_options=content.members_for_contacts(tenant_id, emergency),
+                member_contacts=tenancy.get_setting(tenant_id, "member_contacts"),
                 can_structure="structure" in g.org_areas,
                 editing_audience=content.audience_roles(editing["audience"]) if editing else [],
                 endpoint="platform.org_emergency" if emergency else "platform.org_contacts")
@@ -243,6 +244,29 @@ def org_contacts_from_members(tenant_id, kind):
         message += f" {skipped} already on the list."
     if f.get("notify"):
         message += _told(change_notices.contacts_added(g.principal, tenant_id, added))
+    return done(message, endpoint, tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/<any(contacts, emergency):kind>/push", methods=["POST"])
+def org_contacts_push(tenant_id, kind):
+    """Put the organisation's contacts into members' own phone books (each member gets the ones they may see)."""
+    emergency = kind == "emergency"
+    open_workspace(tenant_id)
+    require_area("emergency" if emergency else "contacts")
+    endpoint = "platform.org_emergency" if emergency else "platform.org_contacts"
+    try:
+        people, added = managed_contacts.push_to_phone_books(g.principal, tenant_id, emergency=emergency)
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), endpoint, tenant_id=tenant_id)
+    if not added:
+        return done("Everyone already has these numbers in their phone book.", endpoint, tenant_id=tenant_id)
+    message = f"Added {added} number{'' if added == 1 else 's'} to {people} member{'' if people == 1 else 's'}' phone books."
+    if request.form.get("notify"):
+        org = g.org["name"]
+        phones = [p for p in reminders.recipients(tenant_id, "")]
+        count = reminders.app_notify(phones, f"{org}: new numbers in your phone book",
+                                     f"{org} added contacts to your Remote Phonebook. Open the app, or dial and choose 1. My contacts.")
+        message += _told(count)
     return done(message, endpoint, tenant_id=tenant_id)
 
 
@@ -629,6 +653,7 @@ def org_settings(tenant_id):
     titles = suggestions.title_options(g.org["edition"], [m["title"] for m in members if m["title"]])
     return page("platform/org/settings.html", mode=tenancy.get_setting(tenant_id, "allow_other_phone"),
                 join_mode=tenancy.get_setting(tenant_id, "join_mode"), org_code=g.org["org_code"],
+                member_contacts=tenancy.get_setting(tenant_id, "member_contacts"),
                 rules=tenancy.other_phone_rules(tenant_id), choices=audience_choices(tenant_id),
                 departments=structure.departments(tenant_id), titles=titles)
 
@@ -638,9 +663,9 @@ def org_settings_save(tenant_id):
     open_workspace(tenant_id)
     require_area("settings")
     f = request.form
-    if f.get("key") == "join_mode":
+    if f.get("key") in ("join_mode", "member_contacts"):
         try:
-            tenancy.set_setting(g.principal, tenant_id, "join_mode", f.get("value"))
+            tenancy.set_setting(g.principal, tenant_id, f.get("key"), f.get("value"))
         except ValueError as e:
             return failed(str(e), "platform.org_settings", tenant_id=tenant_id)
         return done("Saved.", "platform.org_settings", tenant_id=tenant_id)

@@ -7,6 +7,7 @@ from pb.crypto import encrypting, stored_contact
 from pb.db import execute, fetch_all, fetch_one, get_db, sql
 from pb.text import EMERGENCY_NUMBERS, clean_name, normalize_contact_phone
 from pb.users import get_user
+from pb.org.managed_contacts import blocked_message
 from pb.web import app
 
 
@@ -34,6 +35,9 @@ def api_emergency():
 @app.route("/api/contacts", methods=["POST"])
 @require_auth
 def api_add_contact():
+    blocked = blocked_message(g.phone)
+    if blocked:
+        return api_error(blocked, 403)
     body = body_json()
     name = " ".join(str(body.get("name") or "").split())[:60]
     phone = normalize_contact_phone(str(body.get("phone") or ""))
@@ -52,6 +56,9 @@ def api_add_contact():
 @app.route("/api/contacts/<int:contact_id>", methods=["DELETE"])
 @require_auth
 def api_delete_contact(contact_id):
+    blocked = blocked_message(g.phone)
+    if blocked:
+        return api_error(blocked, 403)
     if not fetch_one("SELECT id FROM contacts WHERE id = ? AND owner = ?", (contact_id, g.phone)):
         return api_error("Contact not found.", 404)
     delete_contact(g.phone, contact_id)
@@ -61,6 +68,9 @@ def api_delete_contact(contact_id):
 @app.route("/api/contacts/delete", methods=["POST"])
 @require_auth
 def api_delete_contacts():
+    blocked = blocked_message(g.phone)
+    if blocked:
+        return api_error(blocked, 403)
     """Bulk delete: {ids: [...]}. Ids that are not the user's are ignored."""
     ids = body_json().get("ids")
     if not isinstance(ids, list) or not ids or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
@@ -79,6 +89,9 @@ def api_delete_contacts():
 @app.route("/api/contacts/<int:contact_id>", methods=["PATCH"])
 @require_auth
 def api_edit_contact(contact_id):
+    blocked = blocked_message(g.phone)
+    if blocked:
+        return api_error(blocked, 403)
     contact = fetch_one("SELECT priority FROM contacts WHERE id = ? AND owner = ?", (contact_id, g.phone))
     if not contact:
         return api_error("Contact not found.", 404)
@@ -141,6 +154,9 @@ def api_settings():
 @app.route("/api/contacts/sync", methods=["POST"])
 @require_auth
 def api_sync():
+    blocked = blocked_message(g.phone)
+    if blocked:
+        return api_error(blocked, 403)
     body = request.get_json(silent=True) or {}
     incoming = body.get("contacts")
     if not isinstance(incoming, list):

@@ -2219,6 +2219,8 @@ function SyncScreen({
       .join('') || '👤';
   const localPhone = me?.phone?.startsWith('+254') ? '0' + me.phone.slice(4) : me?.phone;
 
+  const managedBy = me?.contacts_managed_by ?? null; // the organisation provides this person's contacts
+
   const header = (
     <>
       <View style={[styles.card, styles.profileCard]}>
@@ -2239,6 +2241,9 @@ function SyncScreen({
             ) : null}
           </View>
         </View>
+        {managedBy ? (
+          <Text style={styles.managedNote}>📇 Your contacts are provided by {managedBy}.</Text>
+        ) : null}
         {(me?.memberships ?? []).map((m) => (
           <View key={m.id} style={styles.membership}>
             <Text style={styles.membershipOrg}>🏢 {m.name}</Text>
@@ -2309,6 +2314,8 @@ function SyncScreen({
             <Text style={styles.tileHint}>Post notices, add contacts and members</Text>
           </Pressable>
         ) : null}
+        {managedBy ? null : (
+        <>
         <Pressable style={[styles.tile, busy && styles.buttonOff]} onPress={onPickContacts} disabled={busy} accessibilityRole="button">
           <Text style={styles.tileIcon}>📲</Text>
           <Text style={styles.tileTitle}>Choose from phone</Text>
@@ -2324,6 +2331,8 @@ function SyncScreen({
           <Text style={styles.tileTitle}>Sync all</Text>
           <Text style={styles.tileHint}>Back up every phone contact</Text>
         </Pressable>
+        </>
+        )}
       </View>
       {status ? <Text style={styles.status}>{status}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -2385,9 +2394,11 @@ function SyncScreen({
         Your contacts{contacts ? ` (${contacts.length})` : ''} · ★ {priorityCount}/{maxPriority} priority
       </Text>
       <Text style={styles.hint}>
-        {selecting
-          ? 'Tick the contacts to delete.'
-          : `Tap ☆ to pick up to ${maxPriority} priority contacts. Tap a contact to edit or remove it. To add several at once, use Choose contacts from phone.`}
+        {managedBy
+          ? `Your contacts are provided by ${managedBy}. Ask ${managedBy} to add the numbers you need. Tap ☆ to pick up to ${maxPriority} priority contacts.`
+          : selecting
+            ? 'Tick the contacts to delete.'
+            : `Tap ☆ to pick up to ${maxPriority} priority contacts. Tap a contact to edit or remove it. To add several at once, use Choose contacts from phone.`}
       </Text>
       <TextInput placeholderTextColor={COLORS.placeholder}
         style={[styles.input, styles.search]}
@@ -2396,7 +2407,7 @@ function SyncScreen({
         placeholder="Search name or number"
         autoCorrect={false}
       />
-      {contacts?.length ? (
+      {contacts?.length && !managedBy ? (
         <View style={styles.linkRow}>
           {selecting ? (
             <>
@@ -2431,7 +2442,7 @@ function SyncScreen({
             <ActivityIndicator color={COLORS.primary} />
           ) : (
             <Text style={styles.hint}>
-              {query ? 'No contacts match.' : 'No contacts yet. Choose some from your phone, or add one.'}
+              {query ? 'No contacts match.' : managedBy ? `No contacts yet. ${managedBy} will add the numbers you need.` : 'No contacts yet. Choose some from your phone, or add one.'}
             </Text>
           )
         }
@@ -2458,7 +2469,7 @@ function SyncScreen({
           }
           return (
             <View style={styles.row}>
-              <Pressable style={styles.rowText} onPress={() => onEditContact(item)} accessibilityHint="Edit or remove this contact">
+              <Pressable style={styles.rowText} onPress={() => !managedBy && onEditContact(item)} disabled={!!managedBy} accessibilityHint="Edit or remove this contact">
                 <Text style={styles.rowName} numberOfLines={1}>
                   {item.name}
                 </Text>
@@ -2467,9 +2478,11 @@ function SyncScreen({
               <Pressable onPress={() => callNumber(item.phone)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Call ${item.name}`}>
                 <Text style={styles.callLink}>Call</Text>
               </Pressable>
-              <Pressable onPress={() => onEditContact(item)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
-                <Text style={styles.callLink}>Edit</Text>
-              </Pressable>
+              {managedBy ? null : (
+                <Pressable onPress={() => onEditContact(item)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
+                  <Text style={styles.callLink}>Edit</Text>
+                </Pressable>
+              )}
               <Pressable
                 onPress={() => togglePriority(item)}
                 hitSlop={12}
@@ -2805,6 +2818,7 @@ const styles = StyleSheet.create({
   star: { fontSize: 26, color: COLORS.muted },
   starOn: { color: '#E0A100' },
   profileCard: { gap: 6 },
+  managedNote: { fontSize: 14, color: COLORS.primary, backgroundColor: COLORS.primarySoft, borderRadius: 10, padding: 10, overflow: 'hidden' },
   choiceRow: { flexDirection: 'row', gap: 10 },
   choice: { flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, padding: 12, backgroundColor: '#fff' },
   choiceOn: { borderColor: COLORS.primary, backgroundColor: COLORS.primarySoft },

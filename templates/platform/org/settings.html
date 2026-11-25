@@ -4,6 +4,19 @@
 {% block content %}
 <div class="page-head"><h1>Settings</h1><p>How your members use {{ org.name }} on USSD.</p></div>
 <div class="card">
+  <h2>Members' own contacts</h2>
+  <p class="help">Who looks after the contacts in each member's own Remote Phonebook? Admins and operators always keep their own.</p>
+  <form method="post" action="/platform/org/{{ org.id }}/settings">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="member_contacts">
+    <div class="checks" style="flex-direction:column;gap:10px">
+      <label><input type="radio" name="value" value="own" {{ 'checked' if member_contacts == 'own' }}> <span><b>Members manage their own</b>: they add, edit and sync their own contacts</span></label>
+      <label><input type="radio" name="value" value="managed" {{ 'checked' if member_contacts == 'managed' }}> <span><b>{{ org.name }} provides them</b>: members can't add, edit, delete or sync contacts; you put the numbers in their phone books from the Contacts page</span></label>
+    </div>
+    <button type="submit">Save</button>
+  </form>
+</div>
+
+<div class="card">
   <h2>Joining at sign-up</h2>
   <p class="help">When people create a Remote Phonebook account, they can choose {{ org.name }}{% if org_code %} or type its
     code <b>{{ org_code }}</b>{% endif %}. People you've already added by phone number are linked automatically.</p>

@@ -85,6 +85,21 @@
 </details>
 {% endif %}
 
+{% if rows %}
+<div class="card" {% if member_contacts == 'managed' %}style="border-color:var(--primary)"{% endif %}>
+  <h2>Members' phone books</h2>
+  <p class="help">{% if member_contacts == 'managed' %}{{ org.name }} provides members' contacts (see <a href="/platform/org/{{ org.id }}/settings">Settings</a>), so
+    they can't add their own. Put these {{ 'emergency ' if emergency }}contacts into their phone books: they then show under 1. My contacts on USSD and can be synced to their phones from the app.
+    {% else %}Optional: also put these {{ 'emergency ' if emergency }}contacts into members' own phone books, so they show under 1. My contacts and can be synced to their phones.{% endif %}
+    Each member only gets the contacts they're allowed to see; numbers they already have are skipped.</p>
+  <form method="post" action="/platform/org/{{ org.id }}/{{ 'emergency' if emergency else 'contacts' }}/push" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="notify" value="1" checked> Tell them in the app</label>
+    <button type="submit">Put in members' phone books</button>
+  </form>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>{{ rows|length }} {{ 'emergency contact' if emergency else 'contact' }}{{ '' if rows|length == 1 else 's' }}</h2>
   {% if rows %}

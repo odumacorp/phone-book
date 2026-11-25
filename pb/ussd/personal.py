@@ -3,6 +3,7 @@ from pb.contacts import add_contact, delete_contact, find_contact_by_phone, list
 from pb.messaging import send_sms_async, sms, start_call_async, voice
 from pb.text import EMERGENCY_NUMBERS, con, end, format_contacts, is_service_number, local_number, normalize_contact_phone, position_of
 from pb.users import get_user
+from pb.org.managed_contacts import blocked_message
 from pb.ussd.orgs import has_organisations, organisations_menu
 from pb.ussd.screens import INVALID, MAIN_MENU, MEMBER_MENU, MENU_ACTIONS, NO_PRIORITY, screen
 
@@ -24,6 +25,11 @@ def menu(owner, caller, parts):
 
     only = priority_only(owner)
     none_yet = NO_PRIORITY if only else "You have no contacts yet."
+
+    if choice in ("add", "delete"):
+        blocked = blocked_message(owner)  # the user's organisation provides their contacts
+        if blocked:
+            return screen(blocked)
 
     # 3. Add contact: 3 -> name -> phone
     if choice == "add":

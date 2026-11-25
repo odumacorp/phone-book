@@ -24,6 +24,7 @@ export type Me = {
   platform_access?: boolean; // can manage an organisation at /platform
   memberships?: Membership[]; // organisations, with role, title and departments
   last_login?: { at: number; how: 'app' | 'USSD'; where: string } | null; // the login before this one
+  contacts_managed_by?: string | null; // an organisation provides this person's contacts: no adding or syncing
 };
 /** The user's place in one organisation, for the profile card. */
 export type Membership = {

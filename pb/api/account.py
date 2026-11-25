@@ -6,6 +6,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from pb.api.auth import ALREADY_REGISTERED, EMAIL_TAKEN, NO_ACCOUNT, api_error, auth_status, body_json, check_password, find_account, logged_in, password_error, pin_error, require_auth, revoke_app_session, set_password, token_version
 from pb.billing.ussd_codes import main_code
 from pb.org import joining
+from pb.org.managed_contacts import managed_by
 from pb.org.content import manages_any_organisation, my_organisations, profile_organisations
 from pb.config import TEST_OTP_CODE, MAX_RESET_ATTEMPTS, RESET_CODE_TTL, RESET_RESEND_SECONDS, RESUME_SECONDS, SECRET_KEY, SESSION_HISTORY_DAYS, TOKEN_MAX_AGE
 from pb.contacts import sms_all
@@ -392,6 +393,7 @@ def api_me():
         "platform_access": manages_any_organisation(g.phone),  # show the "Manage organisation" (/platform) button
         "memberships": profile_organisations(g.phone),  # organisation, role, title, departments for the profile card
         "last_login": previous_login(g.phone, getattr(g, "jti", None)),
+        "contacts_managed_by": (managed_by(g.phone) or {}).get("name"),  # their organisation provides their contacts
     })
 
 
