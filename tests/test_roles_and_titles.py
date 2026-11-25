@@ -85,3 +85,14 @@ def test_members_cannot_open_roles_page(client, register):
     t = setup_org(register)
     portal_login(client, MEMBER)
     assert client.get(f"/platform/org/{t}/lists").status_code == 404
+
+
+def test_click_a_role_to_see_who_has_it(client, register):
+    from test_org_content import ADMIN, portal_login, setup_org
+    t = setup_org(register)
+    _r, _csrf = portal_login(client, ADMIN)
+    page = client.get(f"/platform/org/{t}/lists").get_data(as_text=True)
+    assert 'class="role-toggle" data-role="client"' in page and 'id="role-client"' in page
+    people = page[page.index('id="role-client"'):]
+    people = people[:people.index("</tr>")]
+    assert "/members?edit=" in people  # each person links to their member page

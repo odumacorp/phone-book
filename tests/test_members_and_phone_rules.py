@@ -117,9 +117,9 @@ def test_remove_and_add_back(client, register, dial):
     client.post(f"/platform/org/{t}/members/{mid}/remove", data={"csrf": csrf})
     page = client.get(f"/platform/org/{t}/members").get_data(as_text=True)
     assert 'data-tab="removed"' in page and "Add back" in page
-    assert "7. My organisations" not in login_ussd(dial, "+254712345678").last
+    assert "My organisations" not in login_ussd(dial, "+254712345678").last
     client.post(f"/platform/org/{t}/members/{mid}/readd", data={"csrf": csrf})
-    assert "7. My organisations" in login_ussd(dial, "+254712345678").last
+    assert "3. My organisations" in login_ussd(dial, "+254712345678").last
 
 
 # ---------------------------------------------------------------- use from another phone: by role, department, title
@@ -129,7 +129,7 @@ BORROWED = "+254799000000"
 
 def can_open_from_borrowed_phone(dial, phone_local, full):
     s = login_ussd(dial, BORROWED, phone=phone_local)
-    return "only be used from your own phone" not in s.send("7")
+    return "only be used from your own phone" not in s.send("3")
 
 
 def test_other_phone_rules(client, register, dial):
@@ -163,6 +163,6 @@ def test_other_phone_rules(client, register, dial):
     assert can_open_from_borrowed_phone(dial, MEMBER, "+254712345678")
 
     # own phone always works
-    assert "Test Advocates" in login_ussd(dial, "+254713000003", phone=CLIENT).send("7")
+    assert "Test Advocates" in login_ussd(dial, "+254713000003", phone=CLIENT).send("3")
     resp = client.post(f"/platform/org/{t}/settings", data={"csrf": csrf, "key": "allow_other_phone", "value": "some"})
     assert "at least one" in client.get(resp.headers["Location"]).get_data(as_text=True)

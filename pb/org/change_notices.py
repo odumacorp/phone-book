@@ -11,7 +11,7 @@ from pb.tenancy import tenants as tenancy
 from pb.tenancy.repo import TenantRepo
 from pb.text import local_number
 
-SEE_IT = "On USSD choose 7. My organisations, or tap My organisations in the app."
+SEE_IT = "On USSD choose 3. My organisations, or tap My organisations in the app."
 
 
 def _role_name(key):

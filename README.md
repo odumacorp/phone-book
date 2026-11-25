@@ -35,6 +35,10 @@ is rejected rather than repeating the save/send/delete.
 6. SMS me my contacts (sent to the phone in use, with the Africa's Talking SMS API)
 ```
 
+People who belong to an organisation see **3. My organisations** instead, and the rest move down one:
+`1. My contacts, 2. Emergency numbers, 3. My organisations, 4. Add contact, 5. Search contact, 6. Delete contact,
+7. SMS me my contacts`. (Everyone else can still type 7 to be told they aren't in an organisation yet.)
+
 On the search and list screens, reply with the contact's position (1-4) or type any phone number:
 
 ```

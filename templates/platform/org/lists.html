@@ -8,17 +8,27 @@
 
 <div class="card">
   <h2>Roles in {{ org.name }}</h2>
-  <p class="help">Only the roles that fit a {{ edition_name(org.edition)|lower }} organisation are offered, plus any you add.</p>
+  <p class="help">Only the roles that fit a {{ edition_name(org.edition)|lower }} organisation are offered, plus any you add.
+    Click a role to see who has it.</p>
   <table>
     <tr><th>Role</th><th>Can</th><th class="num">People</th><th></th></tr>
-    <tr><td><b>Organisation Super Admin</b></td><td class="muted">Everything, including billing and appointing admins. Only one.</td><td class="num">1</td><td></td></tr>
+    {% macro people_row(key, who) %}
+    <tr class="role-people" id="role-{{ key }}" hidden><td colspan="4">
+      {% for m in who %}<a class="person-chip" href="/platform/org/{{ org.id }}/members?edit={{ m.id }}#form">{{ m.display_name or local(m.user_phone) }}{% if m.title %} <span class="muted">· {{ m.title }}</span>{% endif %}</a>
+      {% else %}<span class="muted">Nobody has this role yet. Give it to someone on the <a href="/platform/org/{{ org.id }}/members">Members</a> page.</span>{% endfor %}
+    </td></tr>
+    {% endmacro %}
+    <tr><td><button type="button" class="role-toggle" data-role="owner" aria-expanded="false"><b>Organisation Super Admin</b> <span class="caret">▸</span></button></td>
+      <td class="muted">Everything, including billing and appointing admins. Only one.</td><td class="num">{{ 1 if owner else 0 }}</td><td></td></tr>
+    {{ people_row('owner', [owner] if owner else []) }}
     {% for r in roles %}
-    <tr><td><b>{{ r.name }}</b>{% if r.own %} <span class="pill on">yours</span>{% endif %}</td>
+    <tr><td><button type="button" class="role-toggle" data-role="{{ r.key }}" aria-expanded="false"><b>{{ r.name }}</b> <span class="caret">▸</span></button>{% if r.own %} <span class="pill on">yours</span>{% endif %}</td>
       <td class="muted" style="max-width:520px">{{ r.can[:5]|join('; ') }}{{ '; and more' if r.can|length > 5 }}</td>
       <td class="num">{{ r.people }}</td>
       <td style="text-align:right">{% if r.own %}<form method="post" action="/platform/org/{{ org.id }}/lists/roles/{{ r.id }}/delete" class="inline"
         onsubmit="return confirm('Remove the {{ r.name }} role?')"><input type="hidden" name="csrf" value="{{ csrf }}">
         <button class="danger small" type="submit">Remove</button></form>{% endif %}</td></tr>
+    {{ people_row(r.key, r.members) }}
     {% endfor %}
   </table>
 </div>
@@ -78,5 +88,11 @@
   const c = document.getElementById('customise'), list = document.getElementById('perm-list');
   if (c && list) c.addEventListener('change', () => { list.hidden = !c.checked; });
 })();
+</script>
+<script>
+document.querySelectorAll('.role-toggle').forEach((b) => b.addEventListener('click', () => {
+  const row = document.getElementById('role-' + b.dataset.role), open = row.hidden;
+  row.hidden = !open; b.setAttribute('aria-expanded', open); b.querySelector('.caret').textContent = open ? '▾' : '▸';
+}));
 </script>
 {% endblock %}

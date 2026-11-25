@@ -43,7 +43,8 @@ FAQ = [
      "what is remote phonebook about service"),
     ("How do I use it on USSD?",
      "Dial {code} from any phone. Enter your phone number, then your 4-digit PIN. You'll see: 1. My contacts, "
-     "2. Emergency numbers, 3. Add contact, 4. Search, 5. Delete, 6. SMS me my contacts. Type a name to search straight away. "
+     "2. Emergency numbers, 3. Add contact, 4. Search, 5. Delete, 6. SMS me my contacts. If you belong to an organisation, "
+     "3 is My organisations and the rest move down one (4. Add contact ... 7. SMS me my contacts). Type a name to search straight away. "
      "On every screen 0 goes back, 00 goes home and 000 logs out.",
      "ussd dial code menu use how phone without internet"),
     ("How do I register?",
@@ -65,10 +66,10 @@ FAQ = [
     ("How do I back up my contacts?",
      "In the app tap \"Choose from phone\" to pick contacts, or \"Sync all\" to back up every contact on your phone. "
      "On the website you can import a .vcf file exported from your phone's Contacts app. You can also add contacts one "
-     "by one, on USSD (3. Add contact) or in the app.",
+     "by one, on USSD (Add contact: 3, or 4 if you're in an organisation) or in the app.",
      "backup back up save sync upload import contacts phone vcf"),
     ("How do I get my contacts on a new phone?",
-     "Dial {code} on the new phone and choose 6. SMS me my contacts: we text your contacts to that phone (your network "
+     "Dial {code} on the new phone and choose SMS me my contacts (6, or 7 if you're in an organisation): we text your contacts to that phone (your network "
      "may charge for the SMS). You can also log in to the app on the new phone to see all your contacts.",
      "new phone restore lost stolen get contacts back sms me"),
     ("What are priority contacts?",
@@ -81,7 +82,7 @@ FAQ = [
      "emergency police ambulance red cross gbv childline 999 112 help urgent"),
     ("My organisation (school, SACCO, employer)",
      "If your school, SACCO, insurer, law firm or employer uses Remote Phonebook, they add your phone number. Then on "
-     "{code} choose 7. My organisations to see their notices, contacts and emergency contacts, or tap My organisations "
+     "{code} choose 3. My organisations to see their notices, contacts and emergency contacts, or tap My organisations "
      "in the app. Not there? Ask your organisation to add your number.",
      "organisation organization school sacco employer company notices members"),
     ("I manage an organisation",

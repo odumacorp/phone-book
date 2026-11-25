@@ -13,10 +13,21 @@ MAIN_MENU = (
     "Or type a name to search\n"
     "000. Log out"
 )
-# For people in an organisation: 7 replaces the search hint (typing a name still searches), so the screen stays short
-MEMBER_MENU = MAIN_MENU.replace("Or type a name to search\n", "7. My organisations\n")
-# Main menu numbers, in the order shown above
+# For people in an organisation, My organisations is option 3 (the rest move down one; typing a name still searches)
+MEMBER_MENU = (
+    "Remote Phone-Book\n"
+    "1. My contacts\n"
+    "2. Emergency numbers\n"
+    "3. My organisations\n"
+    "4. Add contact\n"
+    "5. Search contact\n"
+    "6. Delete contact\n"
+    "7. SMS me my contacts\n"
+    "000. Log out"
+)
+# Main menu numbers, in the order shown above (7 still opens My organisations for everyone else: "not in any yet")
 MENU_ACTIONS = {"1": "list", "2": "emergency", "3": "add", "4": "search", "5": "delete", "6": "sms", "7": "orgs"}
+MEMBER_ACTIONS = {"1": "list", "2": "emergency", "3": "orgs", "4": "add", "5": "search", "6": "delete", "7": "sms"}
 
 
 def screen(msg):

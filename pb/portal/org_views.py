@@ -883,18 +883,23 @@ def _role_summary(role_id):
 def org_lists(tenant_id):
     open_workspace(tenant_id)
     require_area("lists")
-    counts = {}
+    members = content.member_rows(tenant_id)
+    by_principal = {rbac.user_principal(m["user_phone"]): m for m in members}
+    people = {}  # role key -> the members who have it (click a role to see them)
     for a in rbac.tenant_assignments(tenant_id):
-        counts[a["key"]] = counts.get(a["key"], 0) + 1
+        m = by_principal.get(a["principal"])
+        if m:
+            people.setdefault(a["key"], []).append(m)
+    owner = by_principal.get(tenancy.super_admin(tenant_id))
     roles = []
     for key, name in tenancy.available_roles(tenant_id):
         role = rbac.role_by_key(key, tenant_id)
-        roles.append({"id": role["id"], "key": key, "name": name, "own": not role["is_system"], "people": counts.get(key, 0),
-                      "can": _role_summary(role["id"])})
+        who = sorted(people.get(key, []), key=lambda m: (m["display_name"] or m["user_phone"]).lower())
+        roles.append({"id": role["id"], "key": key, "name": name, "own": not role["is_system"], "people": len(who),
+                      "members": who, "can": _role_summary(role["id"])})
     from pb.rbac.catalogue import TENANT_PERMISSIONS
     own_titles = tenancy.org_titles(tenant_id)
-    members = content.member_rows(tenant_id)
-    return page("platform/org/lists.html", roles=roles, own_titles=own_titles,
+    return page("platform/org/lists.html", roles=roles, own_titles=own_titles, owner=owner,
                 title_suggestions=[t for t in suggestions.title_options(g.org["edition"]) if t.lower() not in {o.lower() for o in own_titles}][:24],
                 used_titles=sorted({m["title"] for m in members if m["title"] and m["title"].lower() not in {o.lower() for o in own_titles}}),
                 base_roles=[(k, n) for k, n in tenancy.available_roles(tenant_id) if k != tenancy.ADMIN],

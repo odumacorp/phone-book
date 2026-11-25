@@ -33,9 +33,9 @@ def test_managed_blocks_adding_syncing_editing_on_app_and_ussd(client, register,
                        headers=auth(token)).status_code == 403
     assert client.post("/api/contacts/delete", json={"ids": [1]}, headers=auth(token)).status_code == 403
     s = login_ussd(dial, "+254712345678")
-    assert "provided by Test Advocates" in s.send("3")
+    assert "provided by Test Advocates" in s.send("4")
     s = login_ussd(dial, "+254712345678")
-    assert "provided by Test Advocates" in s.send("5")
+    assert "provided by Test Advocates" in s.send("6")
     # the organisation's admins keep their own phone book
     admin = client.post("/api/login", json={"login": ADMIN, "password": "secret-pass-1"}).get_json()["token"]
     assert client.post("/api/contacts", json={"name": "Mum", "phone": "0722000001"}, headers=auth(admin)).status_code == 201

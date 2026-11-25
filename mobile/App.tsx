@@ -1946,7 +1946,7 @@ function OrganisationsScreen({
       ) : null}
       <Text style={styles.hint}>
         {detail
-          ? `Notices and contacts from ${detail.org.name}. Also on ${ussdCode()}: choose 7. My organisations.`
+          ? `Notices and contacts from ${detail.org.name}. Also on ${ussdCode()}: choose 3. My organisations.`
           : 'Organisations you belong to, such as your school, SACCO or employer.'}
       </Text>
       {notice ? <Text style={styles.status}>{notice}</Text> : null}

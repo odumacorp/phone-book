@@ -67,8 +67,8 @@ def test_publish_and_members_see_it_on_ussd(client, register, dial, fake_sms):
     client.post(f"/platform/org/{t}/emergency", data={"csrf": csrf, "name": "Ambulance", "phone": "1199"})
 
     s = login_ussd(dial, "+254712345678")  # the member
-    assert "7. My organisations" in s.last
-    org_menu = s.send("7")  # only one organisation: straight in
+    assert "3. My organisations" in s.last
+    org_menu = s.send("3")  # only one organisation: straight in
     assert "Test Advocates" in org_menu and "1. Notices (1)" in org_menu  # the client-only notice is hidden
     assert "Office closed Friday" in s.send("1")
     first = s.send("1")
@@ -78,14 +78,14 @@ def test_publish_and_members_see_it_on_ussd(client, register, dial, fake_sms):
     assert any("Test Advocates: Office closed Friday" in m for m in fake_sms.to("+254712345678"))
 
     s = login_ussd(dial, "+254712345678")
-    s.send("7")
+    s.send("3")
     groups = s.send("2")
     assert "1. Advocates" in groups and "2. Office" in groups
     assert "Advocate Wan" in s.send("1")  # names are shortened on list screens
     assert "1. Call\n2. Send SMS\n3. Copy number" in s.send("1")
 
     s = login_ussd(dial, "+254712345678")
-    s.send("7")
+    s.send("3")
     assert "Ambulance" in s.send("3")
     assert "1. Call\n3. Copy number" in s.send("1")  # a short code: dial it yourself, no SMS
 
@@ -95,14 +95,14 @@ def test_client_sees_client_notice(client, register, dial):
     _resp, csrf = portal_login(client, ADMIN)
     client.post(f"/platform/org/{t}/notices", data={"csrf": csrf, "title": "Client fees update", "body": "New rates.", "audience": ["client"]})
     s = login_ussd(dial, "+254713000003", phone=CLIENT)
-    s.send("7")
+    s.send("3")
     assert "Client fees update" in s.send("1")
 
 
 def test_outsider_sees_nothing(register, dial):
     setup_org(register)
     s = login_ussd(dial, "+254714000004", phone=OUTSIDER)
-    assert "7. My organisations" not in s.last and "Or type a name" in s.last
+    assert "My organisations" not in s.last and "Or type a name" in s.last
     assert "not in any organisation" in s.send("7")
 
 
@@ -111,9 +111,9 @@ def test_own_phone_only_setting(client, register, dial):
     with app_module.app.test_request_context():
         tenancy.set_setting(rbac.ROOT, t, "allow_other_phone", "0")
     s = login_ussd(dial, "+254799000000")  # member logging in from a borrowed phone
-    assert "only be used from your own phone" in s.send("7")
+    assert "only be used from your own phone" in s.send("3")
     s = login_ussd(dial, "+254712345678")
-    assert "Test Advocates" in s.send("7")
+    assert "Test Advocates" in s.send("3")
 
 
 def test_app_api_shows_visible_content(client, register):
@@ -154,7 +154,7 @@ def test_admin_adds_and_removes_members(client, register, dial):
     client.post(f"/platform/org/{t}/members", data={"csrf": csrf, "phone": "0715000005", "name": "New person", "role": "member"})
     assert "New person" in client.get(f"/platform/org/{t}/members").get_data(as_text=True)
     s = login_ussd(dial, "+254715000005", phone="0715000005")
-    assert "7. My organisations" in s.last
+    assert "3. My organisations" in s.last
     resp = client.post(f"/platform/org/{t}/members", data={"csrf": csrf, "phone": "0715000006", "role": "org_owner"})
     assert resp.status_code == 302  # admins can't create owners: refused with a message, not a crash
     page = client.get(f"/platform/org/{t}/members").get_data(as_text=True)
@@ -180,7 +180,7 @@ def test_modules_decide_what_shows(client, register, dial):
     assert client.get(f"/platform/org/{t}/emergency").status_code == 403
     assert client.post(f"/platform/org/{t}/emergency", data={"csrf": csrf, "name": "X", "phone": "999"}).status_code == 403
     s = login_ussd(dial, "+254712345678")
-    menu = s.send("7")
+    menu = s.send("3")
     assert "Notices" in menu and "Contacts" in menu and "Emergency" not in menu
 
 
@@ -191,10 +191,19 @@ def test_suspended_org_shows_nothing(client, register, dial):
     with app_module.app.test_request_context():
         tenancy.update_tenant(rbac.ROOT, t, status="suspended")
     s = login_ussd(dial, "+254712345678")
-    assert "7. My organisations" not in s.last
+    assert "My organisations" not in s.last
 
 
 def _audit(tenant_id):
     from pb.audit import audit_entries
     with app_module.app.app_context():
         return [r["action"] for r in audit_entries(tenant_id=tenant_id)]
+
+
+def test_members_menu_puts_my_organisations_third(register, dial):
+    setup_org(register)
+    s = login_ussd(dial, "+254712345678")
+    assert "3. My organisations\n4. Add contact\n5. Search contact\n6. Delete contact\n7. SMS me my contacts" in s.last
+    assert "Enter contact name" in s.send("4")  # Add contact moved to 4
+    s = login_ussd(dial, "+254714000004", phone=OUTSIDER)
+    assert "3. Add contact" in s.last and "My organisations" not in s.last  # individuals keep their menu

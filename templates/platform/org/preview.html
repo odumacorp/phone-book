@@ -34,7 +34,7 @@
   <select name="role" onchange="this.form.submit()" style="max-width:280px">
     {% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == role }}>{{ name }}</option>{% endfor %}
   </select>
-  <span class="muted">Members dial {% if dial %}<b>{{ dial }}</b>, or {% endif %}<b>{{ main_code }}</b> and choose <b>7. My organisations</b>.</span>
+  <span class="muted">Members dial {% if dial %}<b>{{ dial }}</b>, or {% endif %}<b>{{ main_code }}</b> and choose <b>3. My organisations</b>.</span>
 </form>
 
 <div class="sim">
@@ -58,7 +58,7 @@
     <h2 style="margin-bottom:10px">In the app and website</h2>
     <div class="app-phone">
       <div class="app-card"><b style="font-size:18px">{{ org.name }}</b>
-        <div class="muted">Notices and contacts from {{ org.name }}. Also on {{ main_code }}: choose 7. My organisations.</div></div>
+        <div class="muted">Notices and contacts from {{ org.name }}. Also on {{ main_code }}: choose 3. My organisations.</div></div>
       <div class="app-sec">Notices</div>
       {% for n in notices %}
         <div class="app-card {{ 'urgent' if n.is_emergency }}"><b>{{ 'URGENT: ' if n.is_emergency }}{{ n.title }}</b>

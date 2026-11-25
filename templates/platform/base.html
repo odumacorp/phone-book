@@ -10,8 +10,14 @@
 </head>
 <body>
 <div class="layout">
-  <aside class="side">
-    <div class="brand"><img src="/favicon.png" alt="">Remote Phonebook</div>
+  <aside class="side" id="side">
+    <div class="topbar">
+      <div class="brand"><img src="/favicon.png" alt="">Remote Phonebook</div>
+      {% if org is defined and org %}<div class="topbar-org">{% if org_logo %}<img src="{{ org_logo }}" alt="" class="org-logo">{% endif %}<span>{{ org.name }}</span></div>{% endif %}
+      <button type="button" class="menu-btn secondary small" aria-controls="side-menu" aria-expanded="false"
+        onclick="const s=document.getElementById('side'),o=s.classList.toggle('menu-open');this.setAttribute('aria-expanded',o);this.querySelector('span').textContent=o?'✕':'☰'"><span aria-hidden="true">☰</span> Menu</button>
+    </div>
+    <div class="side-menu" id="side-menu">
     <nav>
     {% if org is defined and org %}
       <div class="org-head">{% if org_logo %}<img src="{{ org_logo }}" alt="" class="org-logo">{% endif %}<h6>{{ org.name }}</h6></div>
@@ -49,6 +55,7 @@
       Logged in as <b>{{ staff_user.name }}</b>
       <form method="post" action="/platform/logout" style="margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf }}">
         <button class="secondary small" type="submit">Log out</button></form>
+    </div>
     </div>
   </aside>
   <main class="content">

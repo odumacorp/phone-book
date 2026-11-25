@@ -6,7 +6,7 @@ from pb.users import get_user
 from pb.org.managed_contacts import blocked_message
 from pb.org.provided import with_provided
 from pb.ussd.orgs import has_organisations, organisations_menu
-from pb.ussd.screens import INVALID, MAIN_MENU, MEMBER_MENU, MENU_ACTIONS, NO_PRIORITY, screen
+from pb.ussd.screens import INVALID, MAIN_MENU, MEMBER_ACTIONS, MEMBER_MENU, MENU_ACTIONS, NO_PRIORITY, screen
 
 
 # ---------------------------------------------------------------- menu logic
@@ -14,13 +14,16 @@ from pb.ussd.screens import INVALID, MAIN_MENU, MEMBER_MENU, MENU_ACTIONS, NO_PR
 # the path ends exactly at them; anything typed after a result is rejected, not re-run.
 
 def menu(owner, caller, parts):
+    member = has_organisations(owner)
     if not parts:
-        return con(MEMBER_MENU if has_organisations(owner) else MAIN_MENU)
+        return con(MEMBER_MENU if member else MAIN_MENU)
 
-    choice, rest = MENU_ACTIONS.get(parts[0]), parts[1:]
+    actions = MEMBER_ACTIONS if member else MENU_ACTIONS
+    choice, rest = actions.get(parts[0]), parts[1:]
     if parts[0].strip() and not parts[0].strip().isdigit():
-        return menu(owner, caller, ["4"] + parts)  # typed a name on the main menu: search straight away
-    # 7. My organisations: notices, contacts and emergency contacts from the user's organisations
+        search = next(k for k, v in actions.items() if v == "search")
+        return menu(owner, caller, [search] + parts)  # typed a name on the main menu: search straight away
+    # My organisations (3 for members): notices, contacts and emergency contacts from the user's organisations
     if choice == "orgs":
         return organisations_menu(owner, caller, rest, contact_menu)
 
@@ -32,7 +35,7 @@ def menu(owner, caller, parts):
         if blocked:
             return screen(blocked)
 
-    # 3. Add contact: 3 -> name -> phone
+    # Add contact (3, or 4 for members): -> name -> phone
     if choice == "add":
         if len(rest) == 0:
             return screen("Enter contact name:")
