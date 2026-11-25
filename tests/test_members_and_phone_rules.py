@@ -59,22 +59,55 @@ def test_role_change_limits(client, register):
         assert rbac.role_keys(rbac.user_principal("+254712345678"), t) == {"member"}
 
 
-def test_only_owner_cannot_be_demoted(client, register):
-    t = setup_org(register)
+def test_one_super_admin_hand_over_and_admin_limit(client, register):
+    t = setup_org(register)  # enterprise_standard: up to 5 admins; ADMIN is an admin
     register(phone="0719000009")
     with app_module.app.test_request_context():
         tenancy.appoint_owner(rbac.ROOT, t, "0719000009")
     _r, csrf = portal_login(client, "0719000009")
-    other_owner_page = client.get(f"/platform/org/{t}/members").get_data(as_text=True)
-    assert "Organisation Owner" in other_owner_page
-    # the owner makes the admin an owner too, then demotes... themselves is blocked; demoting the other owner works
+    page = client.get(f"/platform/org/{t}/members").get_data(as_text=True)
+    assert "Organisation Super Admin" in page and "1 of 5 allowed" in page
+    me = member_id(client, t, "0719000009")
+    resp = client.post(f"/platform/org/{t}/members/{me}/remove", data={"csrf": csrf})
+    assert "can&#39;t remove yourself" in client.get(resp.headers["Location"]).get_data(as_text=True)
+    # hand the role to the admin: they become Super Admin, the previous one becomes an Admin
     aid = member_id(client, t, ADMIN)
     client.post(f"/platform/org/{t}/members/{aid}", data={"csrf": csrf, "role": "org_owner"})
-    client.post(f"/platform/org/{t}/members/{aid}", data={"csrf": csrf, "role": "org_admin"})
     with app_module.app.test_request_context():
-        assert rbac.role_keys(rbac.user_principal("+254711000001"), t) == {"org_admin"}
-        owners = [a for a in rbac.tenant_assignments(t) if a["key"] == "org_owner"]
-        assert [a["principal"] for a in owners] == ["user:+254719000009"]
+        assert tenancy.super_admin(t) == "user:+254711000001"
+        assert rbac.role_keys(rbac.user_principal("+254711000001"), t) == {"org_owner"}
+        assert rbac.role_keys(rbac.user_principal("+254719000009"), t) == {"org_admin"}
+        assert [a["key"] for a in rbac.tenant_assignments(t)].count("org_owner") == 1
+    # the new Super Admin can't be demoted or removed by others; admins can't hand the role over
+    _r, csrf2 = portal_login(client, "0719000009")
+    resp = client.post(f"/platform/org/{t}/members/{aid}", data={"csrf": csrf2, "role": "member"})
+    assert "This is the Super Admin" in client.get(resp.headers["Location"]).get_data(as_text=True)
+    resp = client.post(f"/platform/org/{t}/members/{member_id(client, t, MEMBER)}", data={"csrf": csrf2, "role": "org_owner"})
+    assert "Only the Super Admin" in client.get(resp.headers["Location"]).get_data(as_text=True)
+
+
+def test_admin_limit_from_plan(client, register):
+    t = setup_org(register)
+    with app_module.app.test_request_context():
+        tenancy.update_tenant(rbac.ROOT, t, plan_key="enterprise_starter")  # 1 admin allowed, ADMIN already is one
+        tenancy.appoint_owner(rbac.ROOT, t, "0713000003")  # the client becomes Super Admin
+    _r, csrf = portal_login(client, CLIENT)
+    resp = client.post(f"/platform/org/{t}/members/{member_id(client, t, MEMBER)}", data={"csrf": csrf, "role": "org_admin"})
+    assert "plan allows 1 admin" in client.get(resp.headers["Location"]).get_data(as_text=True)
+    resp = client.post(f"/platform/org/{t}/members", data={"csrf": csrf, "phone": "0714444444", "role": "org_admin"})
+    assert "plan allows 1 admin" in client.get(resp.headers["Location"]).get_data(as_text=True)
+
+
+def test_platform_cannot_strip_the_super_admin(staff_client, register):
+    t = setup_org(register)
+    with app_module.app.test_request_context():
+        tenancy.appoint_owner(rbac.ROOT, t, "0711000001")
+        owner = next(a for a in rbac.tenant_assignments(t) if a["key"] == "org_owner")
+    client, csrf = staff_client()
+    resp = client.post(f"/platform/tenants/{t}/revoke", data={"csrf": csrf, "assignment": owner["id"]})
+    assert "needs its Super Admin" in client.get(resp.headers["Location"]).get_data(as_text=True)
+    page = client.get(f"/platform/tenants/{t}").get_data(as_text=True)
+    assert "Change Super Admin" in page
 
 
 def test_remove_and_add_back(client, register, dial):

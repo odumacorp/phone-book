@@ -2,7 +2,7 @@
 {% block title %}Organisations{% endblock %}
 {% block content %}
 <div class="page-head"><h1>Organisations</h1><p>Schools, SACCOs, insurers, law firms and companies using Remote Phonebook. Open one to
-  change its plan, give it a USSD code, appoint its owner or open its workspace.</p></div>
+  change its plan, give it a USSD code, appoint its Super Admin or open its workspace.</p></div>
 {% if can_create %}
 <details class="card">
   <summary>➕ Add an organisation</summary>
@@ -12,8 +12,8 @@
       <label class="field">Name<input name="name" required maxlength="80"></label>
       <label class="field">Edition<select name="edition">{% for e in editions %}<option value="{{ e.key }}">{{ e.name }}</option>{% endfor %}</select></label>
       <label class="field">Plan<select name="plan">{% for p in plans %}<option value="{{ p.key }}">{{ p.name }}{{ '' if p.active else ' (inactive)' }}</option>{% endfor %}</select></label>
-      <label class="field">Owner's phone (optional)<input name="owner_phone" placeholder="07..." inputmode="tel"></label>
-      <label class="field">Owner's name (optional)<input name="owner_name" maxlength="80"></label>
+      <label class="field">Super Admin's phone (optional)<input name="owner_phone" placeholder="07..." inputmode="tel"></label>
+      <label class="field">Super Admin's name (optional)<input name="owner_name" maxlength="80"></label>
     </div>
     <button type="submit">Create (starts as a trial)</button>
   </form>

@@ -163,14 +163,20 @@ def tenant_owner(tenant_id):
             from pb.org import change_notices
             from pb.text import login_phone
             change_notices.member_added(g.principal, tenant_id, login_phone(phone), "org_owner")
-    return _tenant_action(tenant_id, appoint, "Owner appointed.")
+    return _tenant_action(tenant_id, appoint, "Super Admin appointed.")
 
 
 @bp.route("/tenants/<int:tenant_id>/revoke", methods=["POST"])
 @needs("platform.tenants.manage")
 def tenant_revoke(tenant_id):
     assignment = int(request.form.get("assignment") or 0)
-    return _tenant_action(tenant_id, lambda: rbac.revoke(g.principal, tenant_id, assignment, as_platform=True), "Role removed.")
+
+    def revoke():
+        row = next((a for a in rbac.tenant_assignments(tenant_id) if a["id"] == assignment), None)
+        if row and row["key"] == tenancy.SUPER_ADMIN:
+            raise ValueError("Every organisation needs its Super Admin. Appoint someone else as Super Admin instead.")
+        rbac.revoke(g.principal, tenant_id, assignment, as_platform=True)
+    return _tenant_action(tenant_id, revoke, "Role removed.")
 
 
 @bp.route("/tenants/<int:tenant_id>/code", methods=["POST"])

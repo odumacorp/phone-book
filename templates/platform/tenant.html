@@ -103,15 +103,15 @@
         {% if phone and member_ids.get(phone) %}<a class="btn secondary small" href="/platform/org/{{ t.id }}/members?edit={{ member_ids[phone] }}#form">Edit</a>{% endif %}
         <form method="post" action="/platform/tenants/{{ t.id }}/revoke" class="inline" onsubmit="return confirm('Remove this role?')"><input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="assignment" value="{{ a.id }}"><button class="danger small" type="submit">Remove role</button></form>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="4" class="muted">Nobody yet. Appoint the owner below; they can then add admins and members from the workspace.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="4" class="muted">Nobody yet. Appoint the Super Admin below; they can then add members, admins and roles from the workspace.</td></tr>{% endfor %}
   </table>
   {% if manage %}
   <form method="post" action="/platform/tenants/{{ t.id }}/owner" class="row" style="margin-top:14px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input name="phone" placeholder="Owner's phone 07..." inputmode="tel" required>
+    <input name="phone" placeholder="{{ 'New' if assignments|selectattr('key', 'equalto', 'org_owner')|list else '' }} Super Admin's phone 07..." inputmode="tel" required>
     <input name="name" placeholder="Name (optional)">
     <label style="display:flex;align-items:center;gap:6px;white-space:nowrap"><input type="checkbox" name="notify" value="1" checked> Tell them in the app</label>
-    <button type="submit">Appoint owner</button>
+    <button type="submit">{{ 'Change Super Admin' if assignments|selectattr('key', 'equalto', 'org_owner')|list else 'Appoint Super Admin' }}</button>
   </form>
   {% endif %}
 </div>

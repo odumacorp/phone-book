@@ -5,7 +5,9 @@
 {% block content %}
 <div class="page-head"><h1>Members</h1>
   <p>People in {{ org.name }}. They see your notices and contacts after logging in with their phone number on USSD or in the app.
-    If they don't have an account yet, they can register in the app with the same number.</p></div>
+    If they don't have an account yet, they can register in the app with the same number.</p>
+  <p class="muted" style="margin-top:6px">Every organisation has one <b>Super Admin</b>, who can do everything and hand the role to someone else.
+    <b>Admins</b> are optional: {{ admin_count }} of {{ admin_limit if admin_limit is not none else 'unlimited' }} allowed by your plan.</p></div>
 
 {% if editing %}
 <div class="card" id="form">
@@ -18,11 +20,13 @@
       {{ combo('title', 'Job title', 'Optional', title_lists, editing.title or '', 'e.g. Bursar') }}
       <label class="field">Member or staff number <small>Optional</small><input name="member_no" maxlength="40" value="{{ editing.member_no or '' }}"></label>
       <label class="field">Role <small>Decides what they can see and do</small>
-        <select name="role" id="role" {{ 'disabled' if me.endswith(editing.user_phone) }}>
+        {% set locked = me.endswith(editing.user_phone) or editing.role_key == 'org_owner' %}
+        <select name="role" id="role" {{ 'disabled' if locked }}>
+          {% if editing.role_key == 'org_owner' or can_hand_over %}<option value="org_owner" {{ 'selected' if editing.role_key == 'org_owner' }}>Organisation Super Admin{{ '' if editing.role_key == 'org_owner' else ' (hand over the role)' }}</option>{% endif %}
           {% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == editing.role_key }}>{{ name }}</option>{% endfor %}
-          {% if editing.role_key == 'org_owner' %}<option value="org_owner" selected>Organisation Owner</option>{% endif %}
         </select>
-        {% if me.endswith(editing.user_phone) %}<input type="hidden" name="role" value="{{ editing.role_key }}"><small>You can't change your own role.</small>{% endif %}
+        {% if locked %}<input type="hidden" name="role" value="{{ editing.role_key }}">
+          <small>{% if editing.role_key == 'org_owner' %}The Super Admin. To change that, edit someone else and make them the Super Admin.{% else %}You can't change your own role.{% endif %}</small>{% endif %}
       </label>
       {% if departments %}
       <label class="field" id="supervises-field">Supervises <small>The department this supervisor runs</small>

@@ -13,7 +13,7 @@ from pb.audit import audit
 from pb.rbac import engine as rbac
 from pb.tenancy import tenants as tenancy
 from pb.tenancy.repo import TenantRepo
-from pb.text import normalize_contact_phone
+from pb.text import login_phone, normalize_contact_phone
 
 NAME_MAX, TITLE_MAX, GROUP_MAX = 60, 60, 40
 NOTICE_TITLE_MAX, NOTICE_BODY_MAX = 80, 2000
@@ -300,6 +300,12 @@ def add_member_with_role(principal, tenant_id, phone, name, role_key, title=None
     if not can_manage(principal, tenant_id, "members.manage"):
         raise NotAllowed("You don't have permission to add members.")
     as_platform = rbac.can(principal, "platform.tenants.manage")
+    role_key = role_key or "member"
+    if role_key == tenancy.SUPER_ADMIN:
+        raise ValueError("There's only one Super Admin. Add them as a member, then use Edit to make them the Super Admin.")
+    new_phone = login_phone(str(phone or ""))
+    if role_key == tenancy.ADMIN and new_phone:
+        tenancy.check_admin_room(tenant_id, rbac.user_principal(new_phone))
     membership_id = tenancy.add_member(principal, tenant_id, phone, name)
     member_phone = TenantRepo(tenant_id).one("memberships", "id = ?", (membership_id,))["user_phone"]
     title = " ".join(str(title or "").split())[:60] or None
@@ -319,6 +325,8 @@ def remove_member(principal, tenant_id, membership_id):
     member_principal = rbac.user_principal(member["user_phone"])
     if member_principal == principal:
         raise ValueError("You can't remove yourself.")
+    if tenancy.super_admin(tenant_id) == member_principal:
+        raise ValueError("This is the Super Admin. Make someone else the Super Admin first.")
     as_platform = rbac.can(principal, "platform.tenants.manage")
     for a in rbac.tenant_assignments(tenant_id):
         if a["principal"] == member_principal:
@@ -370,12 +378,20 @@ def update_member(principal, tenant_id, membership_id, form):
     old_key, old_scope = member_role(tenant_id, member["user_phone"])
     if (role_key, scope) != (old_key, old_scope):
         if member_principal == principal:
-            raise ValueError("You can't change your own role. Ask another admin or the owner.")
+            raise ValueError("You can't change your own role. Ask the Super Admin (or Oduma Corp).")
+        if old_key == tenancy.SUPER_ADMIN:
+            raise ValueError("This is the Super Admin. To change that, make someone else the Super Admin: they take over the role.")
+        if role_key == tenancy.SUPER_ADMIN:
+            if not (as_platform or tenancy.super_admin(tenant_id) == principal):
+                raise NotAllowed("Only the Super Admin (or Oduma Corp) can hand over the Super Admin role.")
+            tenancy.appoint_owner(principal, tenant_id, member["user_phone"], as_platform=as_platform)
+            audit("member.update", tenant_id, ("member", membership_id), {**changes, "role": [old_key, role_key]}, actor=principal)
+            if "placements_sent" in form:
+                structure.set_placements(principal, tenant_id, membership_id, form.get("placements") or [])
+            return
+        if role_key == tenancy.ADMIN:
+            tenancy.check_admin_room(tenant_id, member_principal)
         current = [a for a in rbac.tenant_assignments(tenant_id) if a["principal"] == member_principal]
-        if any(a["key"] == "org_owner" for a in current) and role_key != "org_owner":
-            owners = {a["principal"] for a in rbac.tenant_assignments(tenant_id) if a["key"] == "org_owner"}
-            if owners == {member_principal}:
-                raise ValueError("This is the only owner. Make someone else the owner first.")
         rbac.grant(principal, tenant_id, member_principal, role_key, scope, as_platform=as_platform)  # checks the operator may
         for a in current:
             if (a["key"], (a["scope_type"], a["scope_id"])) != (role_key, scope):

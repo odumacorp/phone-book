@@ -7,6 +7,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Linking,
+  useWindowDimensions,
   Platform,
   Pressable,
   ScrollView,
@@ -124,6 +125,7 @@ export default function App() {
 
 function Main() {
   const ask = useDialog();
+  const narrow = useWindowDimensions().width < 480; // phones: logo only, so the header buttons fit
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [view, setView] = useState<View_>('login');
@@ -315,21 +317,26 @@ function Main() {
       <View style={styles.titleRow}>
         <View style={styles.brand}>
           <Image source={require('./assets/logo.png')} style={styles.logo} accessibilityLabel="Oduma Corp" />
-          <Text style={styles.title}>Remote Phonebook</Text>
+          {narrow && token ? null : <Text style={styles.title}>Remote Phonebook</Text>}
         </View>
         {token && !booting && view !== 'register' && view !== 'reset' ? (
-          <Pressable onPress={confirmLogout} hitSlop={10} accessibilityRole="button">
-            <Text style={styles.logout}>Log out</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            {me?.platform_access ? (
+              <Pressable onPress={() => openPlatform(token)} hitSlop={6} accessibilityRole="link">
+                <Text style={[styles.headerButton, styles.headerButtonMain]}>Platform</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => openSite('/help')} hitSlop={6} accessibilityRole="link">
+              <Text style={styles.headerButton}>Help</Text>
+            </Pressable>
+            <Pressable onPress={confirmLogout} hitSlop={6} accessibilityRole="button">
+              <Text style={styles.logout}>Log out</Text>
+            </Pressable>
+          </View>
         ) : null}
       </View>
         {token && !booting && view === 'sync' ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickNav} contentContainerStyle={styles.quickNavIn}>
-            {me?.platform_access ? (
-              <Pressable style={[styles.navChip, styles.navChipMain]} onPress={() => openPlatform(token)} accessibilityRole="link">
-                <Text style={[styles.navChipText, styles.navChipMainText]}>🛠️ Platform</Text>
-              </Pressable>
-            ) : null}
             {me?.organisations ? (
               <Pressable style={styles.navChip} onPress={() => setView('orgs')} accessibilityRole="button">
                 <Text style={styles.navChipText}>🏢 My organisations</Text>
@@ -342,9 +349,6 @@ function Main() {
             </Pressable>
             <Pressable style={styles.navChip} onPress={() => setView('emergency')} accessibilityRole="button">
               <Text style={styles.navChipText}>🚨 Emergency</Text>
-            </Pressable>
-            <Pressable style={styles.navChip} onPress={() => openSite('/help')} accessibilityRole="link">
-              <Text style={styles.navChipText}>❓ Help</Text>
             </Pressable>
           </ScrollView>
         ) : null}
@@ -2684,6 +2688,9 @@ const styles = StyleSheet.create({
   star: { fontSize: 26, color: COLORS.muted },
   starOn: { color: '#E0A100' },
   profileCard: { gap: 6 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  headerButton: { color: COLORS.primary, fontSize: 15, fontWeight: '600', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', overflow: 'hidden' },
+  headerButtonMain: { color: '#fff', backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   quickNav: { flexGrow: 0, marginTop: -10, marginBottom: 14 },
   quickNavIn: { gap: 8, paddingRight: 8 },
   navChip: { borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', borderRadius: 99, paddingVertical: 8, paddingHorizontal: 14 },

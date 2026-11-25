@@ -284,10 +284,60 @@ def memberships_of(phone):
     )
 
 
-def appoint_owner(actor, tenant_id, raw_phone, display_name=None):
-    """Platform staff appoint an organisation's owner (they then appoint admins themselves)."""
+SUPER_ADMIN, ADMIN = "org_owner", "org_admin"  # every organisation has exactly one Super Admin; Admins are optional
+
+
+def super_admin(tenant_id):
+    """The principal of the organisation's Super Admin, or None."""
+    owners = [a["principal"] for a in rbac.tenant_assignments(tenant_id) if a["key"] == SUPER_ADMIN]
+    return owners[0] if owners else None
+
+
+def admin_limit(tenant_id):
+    """How many Admins the plan allows (None = no limit). The Super Admin isn't counted."""
+    t = tenant(tenant_id)
+    value = plan_feature(t["plan_key"], "max_admins", "") if t and t["plan_key"] else ""
+    return int(value) if str(value).isdigit() else None
+
+
+def admins(tenant_id):
+    return sorted({a["principal"] for a in rbac.tenant_assignments(tenant_id) if a["key"] == ADMIN})
+
+
+def check_admin_room(tenant_id, principal):
+    """Raise if giving `principal` the Admin role would go over the plan's limit."""
+    limit = admin_limit(tenant_id)
+    current = admins(tenant_id)
+    if limit is not None and principal not in current and len(current) >= limit:
+        raise ValueError(f"This organisation's plan allows {limit} admin{'' if limit == 1 else 's'} "
+                         f"(besides the Super Admin). Remove an admin first, or upgrade the plan.")
+
+
+def appoint_owner(actor, tenant_id, raw_phone, display_name=None, as_platform=True):
+    """Make someone the organisation's Super Admin. If there already is one, the role moves: the previous
+    Super Admin becomes an Admin (or a Member if the plan has no admin room left)."""
     phone = login_phone(str(raw_phone or ""))
     if not phone:
-        raise ValueError("Enter the owner's Kenyan mobile number.")
+        raise ValueError("Enter the Super Admin's Kenyan mobile number.")
     add_member(actor, tenant_id, phone, display_name)
-    return rbac.grant(actor, tenant_id, rbac.user_principal(phone), "org_owner", as_platform=True)
+    new = rbac.user_principal(phone)
+    previous = super_admin(tenant_id)
+    if previous == new:
+        return None
+    assignment = rbac.grant(actor, tenant_id, new, SUPER_ADMIN, as_platform=as_platform)
+    for a in rbac.tenant_assignments(tenant_id):  # the new Super Admin doesn't need their old roles
+        if a["principal"] == new and a["key"] != SUPER_ADMIN:
+            rbac.revoke(actor, tenant_id, a["id"], as_platform=as_platform)
+    if previous:
+        try:
+            check_admin_room(tenant_id, previous)
+            fallback = ADMIN
+        except ValueError:
+            fallback = "member"
+        rbac.grant(actor, tenant_id, previous, fallback, as_platform=as_platform)
+        for a in rbac.tenant_assignments(tenant_id):
+            if a["principal"] == previous and a["key"] == SUPER_ADMIN:
+                rbac.revoke(actor, tenant_id, a["id"], as_platform=as_platform)
+        audit("tenant.super_admin_change", tenant_id, ("principal", new),
+              {"from": previous, "to": new, "previous_now": fallback}, actor=actor)
+    return assignment

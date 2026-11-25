@@ -83,7 +83,7 @@ def test_create_tenant_assign_code_and_settings(staff_client):
     assert resp.status_code == 302
     tenant_id = int(resp.headers["Location"].rstrip("/").split("/")[-1])
     page = client.get(f"/platform/tenants/{tenant_id}").get_data(as_text=True)
-    assert "Kilimani Academy" in page and "Organisation Owner" in page and "Result slips" in page
+    assert "Kilimani Academy" in page and "Organisation Super Admin" in page and "Result slips" in page
     with app_module.app.app_context():
         ext = ussd_codes.add_code("test", "*384*7#", "extension")
     client.post(f"/platform/tenants/{tenant_id}/code", data={"csrf": csrf, "code_id": ext})

@@ -257,7 +257,10 @@ def org_members(tenant_id):
                 departments=structure.departments(tenant_id), groups=structure.groups(tenant_id),
                 can_structure="structure" in g.org_areas, editing=editing, editing_scope=editing_scope,
                 editing_placements=editing_placements or [], title_lists=title_lists,
-                former=content.former_members(tenant_id), me=g.principal)
+                former=content.former_members(tenant_id), me=g.principal,
+                super_admin=tenancy.super_admin(tenant_id),
+                can_hand_over=g.org_staff_help or tenancy.super_admin(tenant_id) == g.principal,
+                admin_limit=tenancy.admin_limit(tenant_id), admin_count=len(tenancy.admins(tenant_id)))
 
 
 @bp.route("/org/<int:tenant_id>/members", methods=["POST"])

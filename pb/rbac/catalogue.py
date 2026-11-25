@@ -79,7 +79,7 @@ SYSTEM_ROLES = {
     "reseller": ("Reseller / Sales Agent", "platform", [
         "platform.tenants.view_own", "platform.tenants.create_own", "platform.pricing.view",
     ]),
-    "org_owner": ("Organisation Owner", "tenant", list(TENANT_PERMISSIONS)),
+    "org_owner": ("Organisation Super Admin", "tenant", list(TENANT_PERMISSIONS)),  # exactly one per organisation
     "org_admin": ("Organisation Admin / Operator", "tenant", [
         p for p in TENANT_PERMISSIONS if p not in ("tenant.billing.manage", "tenant.admins.manage")
     ]),
