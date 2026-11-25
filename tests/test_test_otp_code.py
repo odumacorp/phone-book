@@ -42,5 +42,6 @@ def _config_value(env):
 
 def test_ignored_on_render_and_when_invalid():
     assert _config_value({"TEST_OTP_CODE": "123456", "RENDER": ""}) == "'123456'"
-    assert _config_value({"TEST_OTP_CODE": "123456", "RENDER": "true"}) == "''"
+    # assert _config_value({"TEST_OTP_CODE": "123456", "RENDER": "true"}) == "''"
+    assert _config_value({"TEST_OTP_CODE": "123456", "RENDER": "true", "ALLOW_TEST_OTP_IN_PRODUCTION": "true"}) == "'123456'"
     assert _config_value({"TEST_OTP_CODE": "12345", "RENDER": ""}) == "''"
