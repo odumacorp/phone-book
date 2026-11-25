@@ -1,8 +1,8 @@
 """The app's view of a member's organisations: notices, contacts and emergency contacts (filtered by their roles)."""
 from flask import g, jsonify
 
-from pb.api.auth import api_error, require_auth
-from pb.org import content
+from pb.api.auth import api_error, body_json, require_auth
+from pb.org import content, joining
 from pb.tenancy import tenants as tenancy
 from pb.web import app
 
@@ -42,3 +42,21 @@ def api_org(tenant_id):
         "contacts": [_contact_json(c) for c in content.visible_contacts(tenant_id, g.phone, emergency=False)],
         "emergency": [_contact_json(c) for c in content.visible_contacts(tenant_id, g.phone, emergency=True)],
     })
+
+
+@app.route("/api/orgs/public", methods=["GET"])
+def api_orgs_public():
+    """Organisations people can choose when they sign up (invite-only ones aren't listed; use their code)."""
+    return jsonify({"orgs": joining.public_organisations()})
+
+
+@app.route("/api/orgs/join", methods=["POST"])
+@require_auth
+def api_orgs_join():
+    """Ask to join an organisation later (from the app): {"org_id"} or {"org_code"}."""
+    body = body_json()
+    org = joining.find(body.get("org_id"), body.get("org_code"))
+    if not org:
+        return api_error("We couldn't find that organisation. Check the code.", 404)
+    status, name = joining.request_join(org["id"], g.phone)
+    return jsonify({"organisation": {"name": name, "status": status}})

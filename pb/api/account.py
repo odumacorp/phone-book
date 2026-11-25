@@ -5,6 +5,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from pb.api.auth import ALREADY_REGISTERED, EMAIL_TAKEN, NO_ACCOUNT, api_error, auth_status, body_json, check_password, find_account, logged_in, password_error, pin_error, require_auth, revoke_app_session, set_password, token_version
 from pb.billing.ussd_codes import main_code
+from pb.org import joining
 from pb.org.content import manages_any_organisation, my_organisations, profile_organisations
 from pb.config import TEST_OTP_CODE, MAX_RESET_ATTEMPTS, RESET_CODE_TTL, RESET_RESEND_SECONDS, RESUME_SECONDS, SECRET_KEY, SESSION_HISTORY_DAYS, TOKEN_MAX_AGE
 from pb.contacts import sms_all
@@ -305,6 +306,12 @@ def api_register_confirm():
     )
     if error:
         return api_error(error, 400)
+    # Joining an organisation (optional): from the list, or by its org code. None = an individual account.
+    org = None
+    if body.get("org_id") or body.get("org_code"):
+        org = joining.find(body.get("org_id"), body.get("org_code"))
+        if not org:
+            return api_error("We couldn't find that organisation. Check the code, or choose \"Just me\".", 400)
     failed = use_code(phone, str(body.get("code", "")).strip())
     if failed:
         return api_error(*failed)
@@ -314,7 +321,13 @@ def api_register_confirm():
     email = clean_email(body.get("email"))
     if email:
         execute("INSERT INTO user_emails (owner, email, created_at) VALUES (?, ?, ?)", (phone, email, int(time.time())))
-    return logged_in(get_user(phone, fresh=True))
+    response = logged_in(get_user(phone, fresh=True))
+    if org:
+        status, org_name = joining.request_join(org["id"], phone, name)
+        data = response.get_json()
+        data["organisation"] = {"name": org_name, "status": status}
+        return jsonify(data)
+    return response
 
 
 @app.route("/api/password/reset/request", methods=["POST"])

@@ -25,8 +25,9 @@ SETTINGS = {
     "allow_other_phone": ("1", "Members can use USSD from another phone (phone number + PIN). Off: only from their own registered number."),
     "otp": ("inherit", "OTP by SMS for sensitive USSD views: inherit (the platform switch), on, or off."),
     "language": ("en", "Default language for members: en or sw."),
+    "join_mode": ("approval", "Joining at sign-up: open (anyone joins), approval (requests need approval) or closed (invite only)."),
 }
-SETTING_CHOICES = {"allow_other_phone": ("1", "0", "some"), "otp": ("inherit", "on", "off"), "language": ("en", "sw")}
+SETTING_CHOICES = {"join_mode": ("open", "approval", "closed"), "allow_other_phone": ("1", "0", "some"), "otp": ("inherit", "on", "off"), "language": ("en", "sw")}
 
 
 def slugify(name):

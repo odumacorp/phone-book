@@ -4,6 +4,21 @@
 {% block content %}
 <div class="page-head"><h1>Settings</h1><p>How your members use {{ org.name }} on USSD.</p></div>
 <div class="card">
+  <h2>Joining at sign-up</h2>
+  <p class="help">When people create a Remote Phonebook account, they can choose {{ org.name }}{% if org_code %} or type its
+    code <b>{{ org_code }}</b>{% endif %}. People you've already added by phone number are linked automatically.</p>
+  <form method="post" action="/platform/org/{{ org.id }}/settings">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="join_mode">
+    <div class="checks" style="flex-direction:column;gap:10px">
+      <label><input type="radio" name="value" value="approval" {{ 'checked' if join_mode == 'approval' }}> <span><b>Needs approval</b>: listed; requests wait for you on the Members page</span></label>
+      <label><input type="radio" name="value" value="open" {{ 'checked' if join_mode == 'open' }}> <span><b>Anyone can join</b>: listed; they become members straight away</span></label>
+      <label><input type="radio" name="value" value="closed" {{ 'checked' if join_mode == 'closed' }}> <span><b>Invite only</b>: not listed; people with the code can still ask, and you approve</span></label>
+    </div>
+    <button type="submit">Save</button>
+  </form>
+</div>
+
+<div class="card">
   <h2>Use from another phone</h2>
   <p class="help">Can members borrow a phone and log in with their phone number and PIN? If not, they can only reach {{ org.name }}
     from the phone number you registered for them. Their personal phone book isn't affected.</p>

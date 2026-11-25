@@ -253,6 +253,22 @@ def grant(granter, tenant_id, principal, role_key, scope=("tenant", None), as_pl
     return assignment_id
 
 
+def grant_system(tenant_id, principal, role_key, reason):
+    """A role given by the system itself, not a person (e.g. joining an open organisation at sign-up)."""
+    role = role_by_key(role_key, tenant_id)
+    if not role or role["scope"] != "tenant" or role_key in ("org_owner", "org_admin"):
+        raise ValueError("The system only gives ordinary roles.")
+    if fetch_one("SELECT 1 AS x FROM role_assignments WHERE tenant_id = ? AND principal = ? AND role_id = ?", (tenant_id, principal, role["id"])):
+        return
+    insert_id(
+        "INSERT INTO role_assignments (tenant_id, principal, role_id, scope_type, scope_id, granted_by, created_at) "
+        "VALUES (?, ?, ?, 'tenant', NULL, ?, ?)",
+        (tenant_id, principal, role["id"], f"system:{reason}", int(time.time())),
+    )
+    clear_cache()
+    audit("role.grant", tenant_id, ("principal", principal), {"role": role_key, "scope": ["tenant", None], "reason": reason}, actor="system")
+
+
 def revoke(granter, tenant_id, assignment_id, as_platform=False):
     row = fetch_one(
         "SELECT ra.id, ra.principal, ra.scope_type, ra.scope_id, r.key FROM role_assignments ra JOIN roles r ON r.id = ra.role_id "

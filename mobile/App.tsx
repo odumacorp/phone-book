@@ -56,6 +56,8 @@ import {
   getLogins,
   getSessions,
   getMe,
+  getPublicOrgs,
+  type PublicOrg,
   getOrg,
   getOrgs,
   type OrgContact,
@@ -186,7 +188,9 @@ function Main() {
   let content;
   if (booting) content = <ActivityIndicator size="large" color={COLORS.primary} />;
   else if (view === 'register')
-    content = <RegisterScreen onDone={(t) => loggedIn(t, 'Account created. Tap Sync contacts to upload them.')} onCancel={back} />;
+    content = (
+      <RegisterScreen onDone={(t, message) => loggedIn(t, message || 'Account created. Tap Sync contacts to upload them.')} onCancel={back} />
+    );
   else if (view === 'reset')
     content = <ResetPasswordScreen onDone={(t) => loggedIn(t, 'Password reset. You are logged in.')} onCancel={back} />;
   else if (view === 'report') content = <ReportScreen token={token} onBack={back} onLogout={logout} />;
@@ -449,8 +453,12 @@ function LoginScreen({
 }
 
 /** Register: name, phone (+ optional email) -> SMS code -> password and USSD PIN. */
-function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void; onCancel: () => void }) {
+function RegisterScreen({ onDone, onCancel }: { onDone: (token: string, message?: string) => void; onCancel: () => void }) {
   const [name, setNameText] = useState('');
+  const [joinOrg, setJoinOrg] = useState(false); // false = "Just me" (an individual account)
+  const [orgs, setOrgs] = useState<PublicOrg[]>([]);
+  const [orgQuery, setOrgQuery] = useState('');
+  const [org, setOrg] = useState<PublicOrg | null>(null);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [codeSent, setCodeSent] = useState(false);
@@ -471,11 +479,37 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void;
     });
   };
 
+  useEffect(() => {
+    if (joinOrg && !orgs.length) getPublicOrgs().then((r) => setOrgs(r.orgs)).catch(() => null);
+  }, [joinOrg]);
+
+  const orgCode = /^\d{3,6}$/.test(orgQuery.trim()) ? orgQuery.trim() : '';
+  const matches = orgQuery.trim()
+    ? orgs.filter((o) => o.name.toLowerCase().includes(orgQuery.trim().toLowerCase())).slice(0, 6)
+    : orgs.slice(0, 6);
+
+  const sendCodeChecked = () => {
+    if (joinOrg && !org && !orgCode) return setError('Choose your organisation, type its code, or choose "Just me".');
+    sendCode();
+  };
+
   const finish = () => {
     if (password.length < PASSWORD_MIN) return setError(`Password must be at least ${PASSWORD_MIN} characters.`);
     if (password !== confirmPassword) return setError('Passwords do not match.');
     if (pin !== confirmPin) return setError('PINs do not match.');
-    run(async () => onDone(await register({ phone, code, name: name.trim(), email: email.trim(), password, pin })));
+    run(async () => {
+      const res = await register({
+        phone, code, name: name.trim(), email: email.trim(), password, pin,
+        ...(joinOrg && org ? { org_id: org.id } : joinOrg && orgCode ? { org_code: orgCode } : {}),
+      });
+      const o = res.organisation;
+      const message = !o
+        ? undefined
+        : o.status === 'pending'
+          ? `Account created. Your request to join ${o.name} was sent: you'll see its notices and contacts once it's approved.`
+          : `Account created. You're a member of ${o.name}: see its notices and contacts under My organisations.`;
+      onDone(res.token, message);
+    });
   };
 
   return (
@@ -507,8 +541,50 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void;
             autoCorrect={false}
           />
           <Text style={styles.hint}>Lets you log in with your email instead of your phone number.</Text>
+          <Text style={styles.label}>Are you joining an organisation?</Text>
+          <View style={styles.choiceRow}>
+            <Pressable style={[styles.choice, !joinOrg && styles.choiceOn]} onPress={() => { setJoinOrg(false); setOrg(null); }} accessibilityRole="radio" accessibilityState={{ checked: !joinOrg }}>
+              <Text style={[styles.choiceTitle, !joinOrg && styles.choiceTitleOn]}>Just me</Text>
+              <Text style={styles.hintTight}>A personal account</Text>
+            </Pressable>
+            <Pressable style={[styles.choice, joinOrg && styles.choiceOn]} onPress={() => setJoinOrg(true)} accessibilityRole="radio" accessibilityState={{ checked: joinOrg }}>
+              <Text style={[styles.choiceTitle, joinOrg && styles.choiceTitleOn]}>An organisation</Text>
+              <Text style={styles.hintTight}>School, SACCO, employer…</Text>
+            </Pressable>
+          </View>
+          {joinOrg ? (
+            org ? (
+              <View style={styles.pickedOrg}>
+                <Text style={styles.rowName}>✓ {org.name}</Text>
+                {org.kind ? <Text style={styles.rowPhone}>{org.kind}</Text> : null}
+                <Link title="Choose another" onPress={() => setOrg(null)} />
+              </View>
+            ) : (
+              <>
+                <TextInput placeholderTextColor={COLORS.placeholder}
+                  style={styles.input}
+                  value={orgQuery}
+                  onChangeText={setOrgQuery}
+                  placeholder="Search by name, or type its code"
+                  autoCorrect={false}
+                />
+                {matches.map((o) => (
+                  <Pressable key={o.id} style={styles.orgOption} onPress={() => setOrg(o)} accessibilityRole="button">
+                    <Text style={styles.rowName}>{o.name}</Text>
+                    {o.kind ? <Text style={styles.rowPhone}>{o.kind}</Text> : null}
+                  </Pressable>
+                ))}
+                {orgCode && !matches.length ? (
+                  <Text style={styles.hint}>We'll use organisation code {orgCode}.</Text>
+                ) : orgQuery.trim() && !matches.length ? (
+                  <Text style={styles.hint}>No organisation by that name. Ask your organisation for its code.</Text>
+                ) : null}
+                <Text style={styles.hint}>Your organisation may need to approve you before you see its notices and contacts.</Text>
+              </>
+            )
+          ) : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Button title="Send code" onPress={sendCode} busy={busy} disabled={!name.trim() || !phone} />
+          <Button title="Send code" onPress={sendCodeChecked} busy={busy} disabled={!name.trim() || !phone} />
         </>
       ) : (
         <>
@@ -527,6 +603,9 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string) => void;
             busy={busy}
             disabled={code.length !== 6 || !password || !confirmPassword || pin.length !== 4 || confirmPin.length !== 4}
           />
+          {joinOrg && (org || orgCode) ? (
+            <Text style={styles.hint}>Joining: {org ? org.name : `organisation code ${orgCode}`}</Text>
+          ) : null}
           <Link title="Send a new code" onPress={sendCode} disabled={busy} />
         </>
       )}
@@ -2726,6 +2805,13 @@ const styles = StyleSheet.create({
   star: { fontSize: 26, color: COLORS.muted },
   starOn: { color: '#E0A100' },
   profileCard: { gap: 6 },
+  choiceRow: { flexDirection: 'row', gap: 10 },
+  choice: { flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, padding: 12, backgroundColor: '#fff' },
+  choiceOn: { borderColor: COLORS.primary, backgroundColor: COLORS.primarySoft },
+  choiceTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  choiceTitleOn: { color: COLORS.primary },
+  orgOption: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#fff' },
+  pickedOrg: { borderWidth: 1, borderColor: COLORS.primary, backgroundColor: COLORS.primarySoft, borderRadius: 12, padding: 12 },
   lastLogin: { fontSize: 13, color: COLORS.muted, marginTop: 2 },
   membership: { backgroundColor: COLORS.bg, borderRadius: 12, padding: 12, marginTop: 6, gap: 6 },
   membershipOrg: { fontSize: 15, fontWeight: '700', color: COLORS.text },

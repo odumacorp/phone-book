@@ -126,14 +126,30 @@ export type Registration = {
   email: string;
   password: string;
   pin: string;
+  org_id?: number; // joining an organisation from the list...
+  org_code?: string; // ...or by its code; neither = an individual account
 };
+/** What happened with the organisation chosen at sign-up. */
+export type JoinResult = { name: string; status: 'member' | 'pending' | 'already' };
+/** An organisation people can choose at sign-up. */
+export type PublicOrg = { id: number; name: string; kind: string };
+
+/** Organisations listed for sign-up (invite-only ones aren't listed: they're joined with their code). */
+export const getPublicOrgs = () => request<{ orgs: PublicOrg[] }>('/api/orgs/public');
 
 /** Register, step 1: checks the phone (and email, if given) and texts a 6-digit code to the phone. */
 export const requestRegistration = (phone: string, email: string) =>
   request<{ sent: boolean }>('/api/register/request', { method: 'POST', body: JSON.stringify({ phone, email }) });
 
 /** Register, step 2: the code plus name, optional email, app password and USSD PIN. */
-export const register = (r: Registration) => saveToken('/api/register/confirm', r);
+export async function register(r: Registration): Promise<{ token: string; organisation?: JoinResult }> {
+  const res = await request<{ token: string; organisation?: JoinResult }>('/api/register/confirm', {
+    method: 'POST',
+    body: JSON.stringify(r),
+  });
+  await tokenStore.set(TOKEN_KEY, res.token);
+  return res;
+}
 
 /** Forgot password: a code goes by SMS to the account's phone, found by email or phone number. */
 export const requestPasswordReset = (login: string) =>

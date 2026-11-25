@@ -9,6 +9,29 @@
   <p class="muted" style="margin-top:6px">Every organisation has one <b>Super Admin</b>, who can do everything and hand the role to someone else.
     <b>Admins</b> are optional: {{ admin_count }} of {{ admin_limit if admin_limit is not none else 'unlimited' }} allowed by your plan.</p></div>
 
+{% if join_requests %}
+<div class="card" style="border-color:#f0c46a">
+  <h2>Join requests <span class="pill warn">{{ join_requests|length }}</span></h2>
+  <p class="help">People who chose {{ org.name }} when they signed up. Approve them with a role, or decline.
+    Change how people join in <a href="/platform/org/{{ org.id }}/settings">Settings</a>.</p>
+  {% for r in join_requests %}
+  <div class="list-item">
+    <div><b>{{ r.display_name or local(r.user_phone) }}</b><div class="muted">{{ local(r.user_phone) }} · asked {{ fmt_time(r.joined_at) }}</div></div>
+    <div class="row" style="flex-wrap:nowrap">
+      <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/approve" class="row" style="flex-wrap:nowrap">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="notify" value="1">
+        <select name="role" style="width:auto">{% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == 'member' }}>{{ name }}</option>{% endfor %}</select>
+        <button class="small" type="submit">Approve</button></form>
+      <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/decline" class="inline" onsubmit="return confirm('Decline this request?')">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="notify" value="1">
+        <button class="danger small" type="submit">Decline</button></form>
+    </div>
+  </div>
+  {% endfor %}
+  <p class="muted" style="margin-bottom:0">They're told in the app either way.</p>
+</div>
+{% endif %}
+
 {% if editing %}
 <div class="card" id="form">
   <h2>Edit {{ editing.display_name or local(editing.user_phone) }}</h2>

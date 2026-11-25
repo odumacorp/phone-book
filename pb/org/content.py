@@ -405,7 +405,7 @@ def update_member(principal, tenant_id, membership_id, form):
 
 
 def former_members(tenant_id):
-    return TenantRepo(tenant_id).all("memberships", "status <> 'active'", order="left_at DESC", limit=200)
+    return TenantRepo(tenant_id).all("memberships", "status = 'inactive'", order="left_at DESC", limit=200)
 
 
 def readd_member(principal, tenant_id, membership_id):

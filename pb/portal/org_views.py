@@ -12,7 +12,7 @@ from flask import abort, g, redirect, render_template, request, url_for
 from pb.billing import ussd_codes
 from flask import jsonify
 
-from pb.org import change_notices, content, reminders, structure, suggestions
+from pb.org import change_notices, content, joining, reminders, structure, suggestions
 from pb.tenancy.repo import TenantRepo
 from pb.ussd import orgs as ussd_orgs
 from pb.portal import bp, done, failed, is_staff
@@ -262,7 +262,8 @@ def org_members(tenant_id):
                 former=content.former_members(tenant_id), me=g.principal,
                 super_admin=tenancy.super_admin(tenant_id),
                 can_hand_over=g.org_staff_help or tenancy.super_admin(tenant_id) == g.principal,
-                admin_limit=tenancy.admin_limit(tenant_id), admin_count=len(tenancy.admins(tenant_id)))
+                admin_limit=tenancy.admin_limit(tenant_id), admin_count=len(tenancy.admins(tenant_id)),
+                join_requests=joining.requests(tenant_id), join_mode=tenancy.get_setting(tenant_id, "join_mode"))
 
 
 @bp.route("/org/<int:tenant_id>/members", methods=["POST"])
@@ -306,6 +307,28 @@ def org_member_update(tenant_id, membership_id):
         if change_notices.member_changed(g.principal, tenant_id, after["phone"], before, after):
             message += " They were notified in the app."
     return done(message, "platform.org_members", tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/members/<int:membership_id>/approve", methods=["POST"])
+def org_member_approve(tenant_id, membership_id):
+    open_workspace(tenant_id)
+    require_area("members")
+    try:
+        joining.approve(g.principal, tenant_id, membership_id, request.form.get("role") or "member", bool(request.form.get("notify")))
+    except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
+        return failed(str(e), "platform.org_members", tenant_id=tenant_id)
+    return done("Request approved: they're a member now.", "platform.org_members", tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/members/<int:membership_id>/decline", methods=["POST"])
+def org_member_decline(tenant_id, membership_id):
+    open_workspace(tenant_id)
+    require_area("members")
+    try:
+        joining.decline(g.principal, tenant_id, membership_id, bool(request.form.get("notify")))
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_members", tenant_id=tenant_id)
+    return done("Request declined.", "platform.org_members", tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/members/<int:membership_id>/readd", methods=["POST"])
@@ -583,6 +606,7 @@ def org_settings(tenant_id):
     members = content.member_rows(tenant_id)
     titles = suggestions.title_options(g.org["edition"], [m["title"] for m in members if m["title"]])
     return page("platform/org/settings.html", mode=tenancy.get_setting(tenant_id, "allow_other_phone"),
+                join_mode=tenancy.get_setting(tenant_id, "join_mode"), org_code=g.org["org_code"],
                 rules=tenancy.other_phone_rules(tenant_id), choices=audience_choices(tenant_id),
                 departments=structure.departments(tenant_id), titles=titles)
 
@@ -592,6 +616,12 @@ def org_settings_save(tenant_id):
     open_workspace(tenant_id)
     require_area("settings")
     f = request.form
+    if f.get("key") == "join_mode":
+        try:
+            tenancy.set_setting(g.principal, tenant_id, "join_mode", f.get("value"))
+        except ValueError as e:
+            return failed(str(e), "platform.org_settings", tenant_id=tenant_id)
+        return done("Saved.", "platform.org_settings", tenant_id=tenant_id)
     if f.get("key") != "allow_other_phone":
         abort(400)
     try:
