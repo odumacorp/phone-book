@@ -11,6 +11,7 @@ import time
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from pb.config import TEST_OTP_CODE
 from pb.db import execute, fetch_one, insert_id
 from pb.features import feature_on
 from pb.messaging import send_sms_async
@@ -40,7 +41,7 @@ def login_needs_otp(phone):
 
 def send_otp(phone, purpose):
     """Text a code. Returns (ticket, None) or (None, error message)."""
-    if messaging.sms is None:
+    if messaging.sms is None and not TEST_OTP_CODE:
         return None, "SMS service is not available right now."
     now = int(time.time())
     last = fetch_one("SELECT MAX(sent_at) AS t FROM otp_codes WHERE phone = ? AND purpose = ?", (phone, purpose))
@@ -49,14 +50,15 @@ def send_otp(phone, purpose):
     hour = fetch_one("SELECT COUNT(*) AS n FROM otp_codes WHERE phone = ? AND sent_at > ?", (phone, now - 3600))
     if hour["n"] >= OTP_MAX_PER_HOUR:
         return None, "Too many codes requested. Try again in an hour."
-    code = f"{secrets.randbelow(10 ** 6):06d}"
+    code = TEST_OTP_CODE or f"{secrets.randbelow(10 ** 6):06d}"
     ticket = secrets.token_urlsafe(24)
     execute("DELETE FROM otp_codes WHERE expires_at < ?", (now - 86400,))
     insert_id(
         "INSERT INTO otp_codes (phone, purpose, code_hash, ticket, expires_at, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
         (phone, purpose, generate_password_hash(code), ticket, now + OTP_TTL, now),
     )
-    send_sms_async(phone, f"Your Remote Phonebook code is {code}. It expires in 5 minutes. Never share it.")
+    if not TEST_OTP_CODE:  # testing: the code is fixed and nothing is texted
+        send_sms_async(phone, f"Your Remote Phonebook code is {code}. It expires in 5 minutes. Never share it.")
     return ticket, None
 
 

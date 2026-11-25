@@ -16,6 +16,10 @@ DB_PATH = os.getenv("DB_PATH", os.path.join(ROOT, "phonebook.db"))
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 CONTACTS_KEY = os.getenv("CONTACTS_KEY", "")  # encrypts contacts at rest; never stored in the database
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")  # /admin is disabled until this is set
+# Testing only: every SMS code (signup, password reset, OTP login) is this fixed code and no SMS is sent.
+# Ignored on Render (production), so it can never apply to real users.
+_test_code = os.getenv("TEST_OTP_CODE", "").strip()
+TEST_OTP_CODE = _test_code if len(_test_code) == 6 and _test_code.isdigit() and not os.getenv("RENDER") else ""
 TICK_SECRET = os.getenv("TICK_SECRET", "")  # POST /internal/tick (background jobs) is disabled until set
 # Email (for verification codes and notifications), sent over SMTP: e.g. Gmail with an app password,
 # Brevo, Mailgun or SendGrid SMTP. Nothing is sent until the admin turns the email features on.
@@ -59,3 +63,8 @@ log = logging.getLogger("ussd")
 
 BACK, HOME, LOGOUT = "0", "00", "000"
 NAV = "0.Back 00.Home 000.Logout"  # on every screen after login
+
+if TEST_OTP_CODE:
+    log.warning("TEST_OTP_CODE is set: every SMS code is %s and no codes are texted. Testing only.", TEST_OTP_CODE)
+elif os.getenv("TEST_OTP_CODE") and os.getenv("RENDER"):
+    log.warning("TEST_OTP_CODE is ignored on Render (production).")

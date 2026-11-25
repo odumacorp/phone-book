@@ -6,7 +6,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from pb.api.auth import ALREADY_REGISTERED, EMAIL_TAKEN, NO_ACCOUNT, api_error, auth_status, body_json, check_password, find_account, logged_in, password_error, pin_error, require_auth, revoke_app_session, set_password, token_version
 from pb.billing.ussd_codes import main_code
 from pb.org.content import manages_any_organisation, my_organisations
-from pb.config import MAX_RESET_ATTEMPTS, RESET_CODE_TTL, RESET_RESEND_SECONDS, RESUME_SECONDS, SECRET_KEY, SESSION_HISTORY_DAYS, TOKEN_MAX_AGE
+from pb.config import TEST_OTP_CODE, MAX_RESET_ATTEMPTS, RESET_CODE_TTL, RESET_RESEND_SECONDS, RESUME_SECONDS, SECRET_KEY, SESSION_HISTORY_DAYS, TOKEN_MAX_AGE
 from pb.contacts import sms_all
 from pb.db import execute, fetch_all, fetch_one, get_db, sql
 from pb.features import feature_on
@@ -227,7 +227,7 @@ def send_code(phone, purpose):
     row = fetch_one("SELECT sent_at FROM pin_resets WHERE phone = ?", (phone,))
     if row and now - row["sent_at"] < RESET_RESEND_SECONDS:
         return "A code was just sent. Wait a minute before asking for another."
-    code = f"{secrets.randbelow(10 ** 6):06d}"
+    code = TEST_OTP_CODE or f"{secrets.randbelow(10 ** 6):06d}"
     db = get_db()
     db.execute(sql("DELETE FROM pin_resets WHERE phone = ?"), (phone,))
     db.execute(
@@ -235,7 +235,8 @@ def send_code(phone, purpose):
         (phone, generate_password_hash(code), now + RESET_CODE_TTL, now),
     )
     db.commit()
-    send_sms_async(phone, f"Your Remote Phone-Book {purpose} code is {code}. It expires in 10 minutes.")
+    if not TEST_OTP_CODE:  # testing: the code is fixed and nothing is texted
+        send_sms_async(phone, f"Your Remote Phone-Book {purpose} code is {code}. It expires in 10 minutes.")
     return None
 
 
@@ -277,7 +278,7 @@ def api_register_request():
     failed = registration_error(body, phone)
     if failed:
         return api_error(*failed)
-    if sms is None:
+    if sms is None and not TEST_OTP_CODE:
         return api_error("SMS service is not available right now.", 503)
     error = send_code(phone, "verification")
     if error:
@@ -322,7 +323,7 @@ def api_reset_request():
     user = find_account(body_json().get("login"))
     if not user:
         return api_error(NO_ACCOUNT, 404)
-    if sms is None:
+    if sms is None and not TEST_OTP_CODE:
         return api_error("SMS service is not available right now.", 503)
     error = send_code(user["phone"], "reset")
     if error:

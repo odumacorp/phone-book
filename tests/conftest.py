@@ -27,6 +27,7 @@ os.environ.update({
     "ADMIN_PASSWORD": "admin-pass",
     "TICK_SECRET": "tick-secret",
     "ANTHROPIC_API_KEY": "",  # the help chat never calls the real API in tests
+    "TEST_OTP_CODE": "",  # real random codes in tests (a local .env may set a fixed one)
     "CONTACTS_KEY": base64.urlsafe_b64encode(b"k" * 32).decode(),
     "SMTP_HOST": "",
     "SMTP_USER": "",
