@@ -13,7 +13,7 @@ from pb.audit import audit
 from pb.rbac import engine as rbac
 from pb.tenancy import tenants as tenancy
 from pb.tenancy.repo import TenantRepo
-from pb.text import login_phone, normalize_contact_phone
+from pb.text import local_number, login_phone, normalize_contact_phone
 
 NAME_MAX, TITLE_MAX, GROUP_MAX = 60, 60, 40
 NOTICE_TITLE_MAX, NOTICE_BODY_MAX = 80, 2000
@@ -124,6 +124,45 @@ def save_contact(principal, tenant_id, form, emergency, contact_id=None):
     new_id = repo.insert("org_contacts", is_emergency=1 if emergency else 0, created_by=principal, created_at=now, updated_at=now, **values)
     audit("org_contact.add", tenant_id, ("org_contact", new_id), {"name": values["name"], "emergency": bool(emergency)}, actor=principal)
     return new_id
+
+
+def members_for_contacts(tenant_id, emergency=False):
+    """Active members who aren't contacts yet (on this list), with what a contact needs: name, phone, title, group."""
+    from pb.org import structure
+
+    taken = {c["phone"] for c in contacts(tenant_id, emergency=emergency)}
+    placed = structure.placements_by_member(tenant_id)
+    out = []
+    for m in TenantRepo(tenant_id).all("memberships", "status = 'active'", order="display_name, user_phone"):
+        if m["user_phone"] in taken:
+            continue
+        groups = placed.get(m["id"], [])
+        out.append({"id": m["id"], "name": m["display_name"] or local_number(m["user_phone"]), "phone": m["user_phone"],
+                    "local": local_number(m["user_phone"]), "title": m["title"] or "", "group": groups[0] if groups else ""})
+    return out
+
+
+def add_contacts_from_members(principal, tenant_id, membership_ids, emergency=False, group=None, audience=""):
+    """Turn members into contacts in one go. group: one group for all, or None to use each member's own department or
+    group. Members already on the list are skipped. Returns (added ids, skipped count)."""
+    _require(principal, tenant_id, "emergency.manage" if emergency else "contacts.manage")
+    wanted = {int(i) for i in membership_ids if str(i).isdigit()}
+    if not wanted:
+        raise ValueError("Tick at least one member.")
+    available = {m["id"]: m for m in members_for_contacts(tenant_id, emergency)}
+    repo, now, added = TenantRepo(tenant_id), int(time.time()), []
+    for membership_id in sorted(wanted):
+        m = available.get(membership_id)
+        if not m:
+            continue
+        new_id = repo.insert("org_contacts", name=m["name"][:NAME_MAX], phone=m["phone"], title=(m["title"] or None),
+                             group_name=None if emergency else ((group if group is not None else m["group"]) or None),
+                             email=None, audience=audience, is_emergency=1 if emergency else 0, created_by=principal,
+                             created_at=now, updated_at=now)
+        added.append(new_id)
+    audit("org_contact.add_from_members", tenant_id, ("org_contact", ",".join(map(str, added))),
+          {"count": len(added), "emergency": bool(emergency)}, actor=principal)
+    return added, len(wanted) - len(added)
 
 
 def delete_contact(principal, tenant_id, contact_id):

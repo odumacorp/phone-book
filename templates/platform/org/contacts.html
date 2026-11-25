@@ -1,7 +1,6 @@
 {% extends "platform/base.html" %}
 {% set section = 'emergency' if emergency else 'contacts' %}
-{% block title %}{{ 'Emergency contacts' if emergency else 'Contacts' }} · {{ org.name }}{{ combo_script() }}
-{% endblock %}
+{% block title %}{{ 'Emergency contacts' if emergency else 'Contacts' }} · {{ org.name }}{% endblock %}
 {% from "platform/org/_combo.html" import combo, combo_script %}
 {% block content %}
 <div class="page-head">
@@ -16,6 +15,13 @@
   <form method="post" action="/platform/org/{{ org.id }}/{{ 'emergency' if emergency else 'contacts' }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     {% if editing %}<input type="hidden" name="contact_id" value="{{ editing.id }}">{% endif %}
+    {% if not editing and member_options %}
+    <label class="field" style="max-width:520px">Fill in from a member <small>Optional: or type the details yourself below</small>
+      <select id="from-member">
+        <option value="">Type the details myself</option>
+        {% for m in member_options %}<option value="{{ loop.index0 }}">{{ m.name }} · {{ m.local }}{{ ' · ' ~ m.title if m.title }}{{ ' · ' ~ m.group if m.group }}</option>{% endfor %}
+      </select></label>
+    {% endif %}
     <div class="grid2">
       {% if emergency %}
       <label class="field">Name <small>Pick a suggestion or type, e.g. "School nurse"</small>
@@ -43,6 +49,42 @@
   </form>
 </div>
 
+{% if member_options and not editing %}
+<details class="card" id="bulk">
+  <summary>👥 Add several members at once <span class="muted">({{ member_options|length }} not on this list yet)</span></summary>
+  <form method="post" action="/platform/org/{{ org.id }}/{{ 'emergency' if emergency else 'contacts' }}/from-members" style="margin-top:14px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="row" style="margin-bottom:10px">
+      <input id="bulk-search" placeholder="Search members…" style="max-width:300px">
+      <button type="button" class="secondary small" id="bulk-all">Tick all shown</button>
+      <button type="button" class="secondary small" id="bulk-none">Clear</button>
+      <span class="muted" id="bulk-count">0 ticked</span>
+    </div>
+    <div style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:6px 12px;margin-bottom:14px">
+      {% for m in member_options %}
+      <label class="bulk-row" style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)">
+        <input type="checkbox" name="members" value="{{ m.id }}">
+        <span><b>{{ m.name }}</b> <span class="muted">{{ m.local }}{{ ' · ' ~ m.title if m.title }}{{ ' · ' ~ m.group if m.group }}</span></span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if not emergency %}
+    <label class="field" style="margin-bottom:4px">Group on the contacts list</label>
+    <div class="checks">
+      <label><input type="radio" name="group_mode" value="own" checked> Each member's own department or group</label>
+      <label><input type="radio" name="group_mode" value="one"> All in one group:</label>
+      <input name="group_name" list="bulk-groups" maxlength="40" placeholder="e.g. Teachers" style="max-width:240px">
+      <datalist id="bulk-groups">{% for _t, items in group_lists %}{% for x in items %}<option value="{{ x }}">{% endfor %}{% endfor %}</datalist>
+    </div>
+    {% endif %}
+    {% set selected = [] %}
+    {% include "platform/org/_audience.html" with context %}
+    <div class="checks"><label><input type="checkbox" name="notify" value="1"> Notify members who can see them in the app (one message)</label></div>
+    <button type="submit" id="bulk-submit" disabled>Add ticked members</button>
+  </form>
+</details>
+{% endif %}
+
 <div class="card">
   <h2>{{ rows|length }} {{ 'emergency contact' if emergency else 'contact' }}{{ '' if rows|length == 1 else 's' }}</h2>
   {% if rows %}
@@ -62,4 +104,40 @@
   {% endif %}
 </div>
 {{ combo_script() }}
+<script>
+(() => {
+  const members = {{ member_options|tojson }};
+  const picker = document.getElementById('from-member');
+  function setCombo(name, value) {
+    const select = document.querySelector(`select[data-combo-for="${name}"]`);
+    if (!select) return;
+    const input = select.parentElement.querySelector('input.combo-text');
+    const option = [...select.options].find((o) => o.value !== '__other__' && o.value && o.textContent === value);
+    if (!value) { select.value = ''; input.hidden = true; input.value = ''; }
+    else if (option) { select.value = option.value; input.hidden = true; input.value = value; }
+    else { select.value = '__other__'; input.hidden = false; input.value = value; }
+  }
+  if (picker) picker.addEventListener('change', () => {
+    const m = members[picker.value];
+    const form = picker.form;
+    form.querySelector('[name=name]').value = m ? m.name : '';
+    form.querySelector('[name=phone]').value = m ? m.local : '';
+    setCombo('title', m ? m.title : '');
+    setCombo('group_name', m ? m.group : '');
+  });
+  const bulk = document.getElementById('bulk');
+  if (!bulk) return;
+  const boxes = [...bulk.querySelectorAll('input[name=members]')], count = document.getElementById('bulk-count');
+  const submit = document.getElementById('bulk-submit');
+  const update = () => { const n = boxes.filter((b) => b.checked).length; count.textContent = n + ' ticked'; submit.disabled = !n;
+    submit.textContent = n ? `Add ${n} member${n === 1 ? '' : 's'} as contacts` : 'Add ticked members'; };
+  boxes.forEach((b) => b.addEventListener('change', update));
+  document.getElementById('bulk-search').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    bulk.querySelectorAll('.bulk-row').forEach((row) => { row.hidden = q && !row.innerText.toLowerCase().includes(q); });
+  });
+  document.getElementById('bulk-all').onclick = () => { boxes.forEach((b) => { if (!b.closest('.bulk-row').hidden) b.checked = true; }); update(); };
+  document.getElementById('bulk-none').onclick = () => { boxes.forEach((b) => { b.checked = false; }); update(); };
+})();
+</script>
 {% endblock %}

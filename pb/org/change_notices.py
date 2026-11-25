@@ -81,6 +81,21 @@ def contact_saved(actor, tenant_id, contact_id, updated=False):
     return _sent(actor, tenant_id, "contact", count)
 
 
+def contacts_added(actor, tenant_id, contact_ids):
+    """One notification for several new contacts (added from members), to the people who can see them."""
+    repo = TenantRepo(tenant_id)
+    rows = [r for r in (repo.one("org_contacts", "id = ?", (cid,)) for cid in contact_ids) if r]
+    if not rows:
+        return 0
+    if len(rows) == 1:
+        return contact_saved(actor, tenant_id, rows[0]["id"])
+    org = _org(tenant_id)
+    names = ", ".join(r["name"] for r in rows[:5]) + (f" and {len(rows) - 5} more" if len(rows) > 5 else "")
+    body = f"{len(rows)} new contacts in {org}: {names}. {SEE_IT}"
+    count = app_notify(recipients(tenant_id, rows[0]["audience"]), f"{org}: {len(rows)} new contacts", body)
+    return _sent(actor, tenant_id, "contacts", count)
+
+
 def member_snapshot(tenant_id, membership_id):
     """Role, title and department/group names of a member, to compare before and after an edit."""
     from pb.org import structure

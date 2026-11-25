@@ -183,6 +183,7 @@ def _contacts_page(tenant_id, emergency):
     name_lists = [("Suggested", suggestions.emergency_options(edition, [c["name"] for c in rows]))] if emergency else []
     return page("platform/org/contacts.html", rows=rows, choices=choices, editing=editing, emergency=emergency,
                 group_lists=group_lists, title_lists=title_lists, name_lists=name_lists,
+                member_options=content.members_for_contacts(tenant_id, emergency),
                 can_structure="structure" in g.org_areas,
                 editing_audience=content.audience_roles(editing["audience"]) if editing else [],
                 endpoint="platform.org_emergency" if emergency else "platform.org_contacts")
@@ -222,6 +223,27 @@ def org_emergency(tenant_id):
 @bp.route("/org/<int:tenant_id>/emergency", methods=["POST"])
 def org_emergency_save(tenant_id):
     return _contact_save(tenant_id, emergency=True)
+
+
+@bp.route("/org/<int:tenant_id>/<any(contacts, emergency):kind>/from-members", methods=["POST"])
+def org_contacts_from_members(tenant_id, kind):
+    emergency = kind == "emergency"
+    open_workspace(tenant_id)
+    require_area("emergency" if emergency else "contacts")
+    endpoint = "platform.org_emergency" if emergency else "platform.org_contacts"
+    f = request.form
+    group = None if f.get("group_mode", "own") == "own" else (" ".join((f.get("group_name") or "").split())[:40])
+    try:
+        audience = content.parse_audience(f.getlist("audience"), tenant_id)
+        added, skipped = content.add_contacts_from_members(g.principal, tenant_id, f.getlist("members"), emergency, group, audience)
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), endpoint, tenant_id=tenant_id)
+    message = f"Added {len(added)} contact{'' if len(added) == 1 else 's'} from your members."
+    if skipped:
+        message += f" {skipped} already on the list."
+    if f.get("notify"):
+        message += _told(change_notices.contacts_added(g.principal, tenant_id, added))
+    return done(message, endpoint, tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/contacts/<int:contact_id>/delete", methods=["POST"])

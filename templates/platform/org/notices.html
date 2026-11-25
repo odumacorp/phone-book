@@ -1,52 +1,6 @@
 {% extends "platform/base.html" %}
 {% set section = 'notices' %}
-{% block title %}Notices · {{ org.name }}<script>
-(() => {
-  const mode = document.getElementById('expires_mode'), field = document.getElementById('expires_date_field');
-  const date = document.getElementById('expires_date'), preview = document.getElementById('expires_preview');
-  const fmt = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
-  function update() {
-    const picking = mode.value === 'date';
-    field.hidden = !picking;
-    date.required = picking;
-    if (picking && !date.value) { date.focus(); if (date.showPicker) { try { date.showPicker(); } catch (e) {} } }
-    if (!mode.value) preview.textContent = 'Shown until you delete it.';
-    else if (picking) preview.textContent = date.value ? 'Shown until the end of ' + fmt(new Date(date.value + 'T00:00')) + '.' : 'Pick the last day on the calendar.';
-    else preview.textContent = 'Shown until ' + fmt(new Date(Date.now() + Number(mode.value) * 86400000)) + '.';
-  }
-  mode.addEventListener('change', update);
-  // live preview of the draft: real USSD screens from the server, and the app card
-  const form = mode.form, title = form.querySelector('[name=title]'), body = form.querySelector('[name=body]');
-  const urgent = form.querySelector('[name=is_emergency]');
-  const out = document.getElementById('pv-ussd'), cap = document.getElementById('pv-cap');
-  let screens = [], at = 0, timer;
-  function draw() {
-    out.textContent = screens[at] || '';
-    cap.textContent = at === 0 ? 'On USSD: the notices list' : 'On USSD: the notice, page ' + at + ' of ' + (screens.length - 1);
-    document.getElementById('pv-app-title').textContent = (urgent.checked ? 'URGENT: ' : '') + (title.value || 'Your title');
-    document.getElementById('pv-app-body').textContent = body.value || 'Your message';
-  }
-  function refresh() {
-    clearTimeout(timer);
-    draw();
-    timer = setTimeout(async () => {
-      const res = await fetch('/platform/org/{{ org.id }}/preview/notice', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf|tojson }} },
-        body: JSON.stringify({ title: title.value, body: body.value, urgent: urgent.checked }) });
-      const data = await res.json().catch(() => null);
-      if (data) { screens = data.screens; at = Math.min(at, screens.length - 1); draw(); }
-    }, 250);
-  }
-  document.getElementById('pv-prev').onclick = () => { at = Math.max(0, at - 1); draw(); };
-  document.getElementById('pv-next').onclick = () => { at = Math.min(screens.length - 1, at + 1); draw(); };
-  [title, body, urgent].forEach((el) => el.addEventListener('input', refresh));
-  urgent.addEventListener('change', refresh);
-  refresh();
-  date.addEventListener('change', update);
-  update();
-})();
-</script>
-{% endblock %}
+{% block title %}Notices · {{ org.name }}{% endblock %}
 {% block content %}
 <div class="page-head"><h1>Notices</h1>
   <p>Short messages for your members: news, reminders, meeting dates. On USSD members see the title first and open it to read

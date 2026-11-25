@@ -12,3 +12,14 @@ def test_every_page_renders(staff_client):
     for p in pages:
         r = client.get(p)
         assert r.status_code in (200,), (p, r.status_code)
+
+
+def test_page_titles_are_plain_text():
+    """Scripts must never end up inside {% block title %} (they'd show as the browser tab's title and never run)."""
+    import glob
+    import os
+    import re
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+    for path in glob.glob(os.path.join(root, "**", "*.html"), recursive=True):
+        for title in re.findall(r"{% block title %}(.*?){% endblock %}", open(path).read(), re.S):
+            assert "<" not in title and "combo_script" not in title, path
