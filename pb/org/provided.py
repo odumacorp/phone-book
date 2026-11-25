@@ -6,6 +6,7 @@ last saved it: edits show at once; unticking or deleting removes it. Members can
 They're listed with negative ids (-org contact id), so they never clash with the member's own contacts.
 """
 from pb.org import content
+from pb.org.contact_groups import given_contacts
 from pb.tenancy.repo import TenantRepo
 
 
@@ -16,6 +17,7 @@ def provided_contacts(owner):
         tags = content.viewer_roles(org["tenant_id"], owner) or set()
         member = TenantRepo(org["tenant_id"]).one("memberships", "user_phone = ? AND status = 'active'", (owner,))
         picked = content.selected_only(member)  # None: the defaults; else only the contacts picked for them
+        by_groups = given_contacts(org["tenant_id"], tags) if picked is None else {}
         for emergency in (True, False):
             for c in content.visible_contacts(org["tenant_id"], owner, emergency=emergency):
                 if c["phone"] in seen or c["phone"] == owner:
@@ -23,8 +25,11 @@ def provided_contacts(owner):
                 if picked is not None:
                     if c["id"] not in picked:
                         continue
-                elif not c["in_phone_books"] or not content.matches(c["phone_book_audience"], tags):
-                    continue  # not in this person's list (roles, departments, groups, or changes for them)
+                else:
+                    left_out = f"!m:{member['id']}" in content.audience_roles(c["phone_book_audience"]) if member else False
+                    by_rules = bool(c["in_phone_books"]) and content.matches(c["phone_book_audience"], tags)
+                    if not by_rules and (c["id"] not in by_groups or left_out):
+                        continue  # not in this person's list (defaults, contact groups, or changes for them)
                 seen.add(c["phone"])
                 rows.append({"id": -c["id"], "name": c["name"], "phone": c["phone"], "priority": 0, "enc": 0,
                              "org": org["name"], "org_id": org["tenant_id"], "title": c["title"]})

@@ -245,15 +245,18 @@ def member_list_contacts(tenant_id, membership_id):
         return []
     tags = member_tags(tenant_id).get(member["user_phone"], set())
     picked = selected_only(member)
+    from pb.org.contact_groups import given_contacts
+    by_groups = given_contacts(tenant_id, tags) if picked is None else {}
     out = []
     for c in contacts(tenant_id):
         if not matches(c["audience"], tags):
             continue
+        via = by_groups.get(c["id"], []) if f"!m:{membership_id}" not in audience_roles(c["phone_book_audience"]) else []
         if picked is not None:
             shown = c["id"] in picked
         else:
-            shown = bool(c["in_phone_books"]) and matches(c["phone_book_audience"], tags)
-        out.append(dict(c, shown=shown))
+            shown = (bool(c["in_phone_books"]) and matches(c["phone_book_audience"], tags)) or bool(via)
+        out.append(dict(c, shown=shown, via_groups=via))
     return out
 
 
@@ -313,18 +316,24 @@ def set_member_list_contacts(principal, tenant_id, membership_id, wanted_ids):
         original = audience_roles(c["phone_book_audience"])
         entries = [e for e in original if e not in (tag, "!" + tag)]
         tags = member_tags(tenant_id).get(_phone_of(repo, membership_id), set())
-        in_books = 1
+        in_books = c["in_phone_books"]
+
+        def by_rules(es):
+            return bool(in_books) and matches(json.dumps(es) if es else "", tags)
+
         if should:
-            if not c["in_phone_books"]:
-                entries = [tag]  # it was in nobody's list: now just this person's
-            elif not matches(json.dumps(entries) if entries else "", tags):
-                entries.append(tag)
+            # dropping a "left out for them" may be enough (rules or a contact group give it back)
+            if not (by_rules(entries) or c["via_groups"] or _given_by_groups(tenant_id, tags, c["id"])):
+                if not in_books:
+                    entries, in_books = [e for e in entries if e.startswith("!")] + [tag], 1
+                else:
+                    entries.append(tag)
         else:
             had_people = [e for e in original if not e.startswith("!")]
             left = [e for e in entries if not e.startswith("!")]
-            if had_people and not left:
+            if in_books and had_people and not left and not c["via_groups"]:
                 in_books, entries = 0, []  # it was in this person's list only
-            elif matches(json.dumps(entries) if entries else "", tags):
+            elif by_rules(entries) or c["via_groups"]:
                 entries.append("!" + tag)  # others keep it; leave this person out
         repo.update("org_contacts", "id = ?", (c["id"],), in_phone_books=in_books,
                     phone_book_audience=json.dumps(sorted(set(entries))) if entries else "")
@@ -398,6 +407,11 @@ def set_list_defaults(principal, tenant_id, tag, wanted_ids):
     if changed:
         audit("org_contact.list_defaults", tenant_id, ("audience", tag), {"contacts": sorted(wanted_ids)}, actor=principal)
     return changed
+
+
+def _given_by_groups(tenant_id, tags, contact_id):
+    from pb.org.contact_groups import given_contacts
+    return contact_id in given_contacts(tenant_id, tags)
 
 
 def _phone_of(repo, membership_id):

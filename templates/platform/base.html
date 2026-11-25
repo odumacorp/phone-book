@@ -19,6 +19,7 @@
       {% if 'notices' in areas %}<a class="item {{ 'active' if section == 'notices' }}" href="/platform/org/{{ org.id }}/notices"><span class="icon">📢</span>Notices</a>{% endif %}
       {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contacts' }}" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span>Contacts</a>{% endif %}
       {% if 'emergency' in areas %}<a class="item {{ 'active' if section == 'emergency' }}" href="/platform/org/{{ org.id }}/emergency"><span class="icon">🚨</span>Emergency contacts</a>{% endif %}
+      {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contact_groups' }}" href="/platform/org/{{ org.id }}/contact-groups"><span class="icon">🗂</span>Contact groups</a>{% endif %}
       {% if 'lists' in areas %}<a class="item {{ 'active' if section == 'lists' }}" href="/platform/org/{{ org.id }}/lists"><span class="icon">🏷️</span>Roles and titles</a>{% endif %}
       {% if 'reminders' in areas %}<a class="item {{ 'active' if section == 'reminders' }}" href="/platform/org/{{ org.id }}/reminders"><span class="icon">⏰</span>Reminders</a>{% endif %}
       {% if 'members' in areas %}<a class="item {{ 'active' if section == 'members' }}" href="/platform/org/{{ org.id }}/members"><span class="icon">👥</span>Members</a>{% endif %}

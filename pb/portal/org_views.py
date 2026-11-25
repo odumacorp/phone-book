@@ -12,7 +12,7 @@ from flask import abort, g, redirect, render_template, request, url_for
 from pb.billing import ussd_codes
 from flask import jsonify
 
-from pb.org import change_notices, content, joining, managed_contacts, reminders, structure, suggestions
+from pb.org import change_notices, contact_groups, content, joining, managed_contacts, reminders, structure, suggestions
 from pb.tenancy.repo import TenantRepo
 from pb.text import local_number
 from pb.ussd import orgs as ussd_orgs
@@ -353,7 +353,9 @@ def org_members(tenant_id):
         names.update({f"g:{x['id']}": x["name"] for x in structure.groups(tenant_id)})
         only = editing["list_mode"] == "selected"
         list_contacts_for = [dict(c, reason=("picked for them" if c["shown"] else "not picked") if only
-                                  else content.list_reason(c, tags, editing["id"], names))
+                                  else ("from contact group " + ", ".join(c["via_groups"])
+                                        if c["shown"] and c["via_groups"] and not (c["in_phone_books"] and content.matches(c["phone_book_audience"], tags))
+                                        else content.list_reason(c, tags, editing["id"], names)))
                              for c in content.member_list_contacts(tenant_id, editing["id"])]
         _key, editing_scope = content.member_role(tenant_id, editing["user_phone"])
         editing_placements = structure.placements_of(tenant_id, editing["id"])
@@ -461,6 +463,62 @@ def org_member_new_contact(tenant_id, membership_id):
     except (ValueError, content.NotAllowed) as e:
         return failed(str(e), "platform.org_members", tenant_id=tenant_id, edit=membership_id, _anchor="their-contacts")
     return done("Contact added to their list.", "platform.org_members", tenant_id=tenant_id, edit=membership_id, _anchor="their-contacts")
+
+
+@bp.route("/org/<int:tenant_id>/contact-groups", methods=["GET"])
+def org_contact_groups(tenant_id):
+    open_workspace(tenant_id)
+    require_area("contacts")
+    choices = audience_choices(tenant_id)
+    rows = []
+    for grp in contact_groups.groups(tenant_id):
+        given = "Not given to anyone yet" if grp["audience"] is None else audience_text(grp["audience"], choices)
+        rows.append(dict(grp, given=given))
+    editing = next((r for r in rows if str(r["id"]) == request.args.get("group")), None)
+    tag_counts = content.member_tags(tenant_id)
+    for r in rows:
+        r["people"] = 0 if r["audience"] is None else sum(1 for tags in tag_counts.values() if content.matches(r["audience"], tags))
+    return page("platform/org/contact_groups.html", rows=rows, editing=editing, choices=choices,
+                all_contacts=content.contacts(tenant_id),
+                editing_audience=content.audience_roles(editing["audience"]) if editing and editing["audience"] else [])
+
+
+@bp.route("/org/<int:tenant_id>/contact-groups", methods=["POST"])
+def org_contact_group_save(tenant_id):
+    open_workspace(tenant_id)
+    require_area("contacts")
+    group_id = int(request.form["group_id"]) if str(request.form.get("group_id") or "").isdigit() else None
+    try:
+        new_id = contact_groups.save(g.principal, tenant_id, request.form.get("name"), group_id)
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_contact_groups", tenant_id=tenant_id)
+    return done("Contact group saved. Now add contacts to it and choose who gets it.", "platform.org_contact_groups",
+                tenant_id=tenant_id, group=new_id, _anchor="edit-group")
+
+
+@bp.route("/org/<int:tenant_id>/contact-groups/<int:group_id>", methods=["POST"])
+def org_contact_group_update(tenant_id, group_id):
+    open_workspace(tenant_id)
+    require_area("contacts")
+    f = request.form
+    try:
+        contact_groups.update(g.principal, tenant_id, group_id, f.getlist("contacts"), f.getlist("audience"),
+                              given=f.get("given") == "1")
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_contact_groups", tenant_id=tenant_id, group=group_id, _anchor="edit-group")
+    return done("Contact group saved: everyone it's given to has its contacts in their list now.", "platform.org_contact_groups",
+                tenant_id=tenant_id, group=group_id, _anchor="edit-group")
+
+
+@bp.route("/org/<int:tenant_id>/contact-groups/<int:group_id>/delete", methods=["POST"])
+def org_contact_group_delete(tenant_id, group_id):
+    open_workspace(tenant_id)
+    require_area("contacts")
+    try:
+        contact_groups.delete(g.principal, tenant_id, group_id)
+    except content.NotAllowed as e:
+        return failed(str(e), "platform.org_contact_groups", tenant_id=tenant_id)
+    return done("Contact group deleted. Its contacts are still in Contacts.", "platform.org_contact_groups", tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/contact-lists", methods=["GET", "POST"])

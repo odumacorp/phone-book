@@ -1,0 +1,80 @@
+{% extends "platform/base.html" %}
+{% set section = 'contact_groups' %}
+{% block title %}Contact groups · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Contact groups</h1>
+  <p>Put contacts together (e.g. "Claims team", "Branch managers") and give the group to departments, groups or roles: everyone
+    in them finds those contacts in their own contact list, and new people get them automatically. To change one person's list,
+    open them on the <a href="/platform/org/{{ org.id }}/members">Members</a> page.</p></div>
+
+<div class="card">
+  <h2>{{ 'New contact group' }}</h2>
+  <form method="post" action="/platform/org/{{ org.id }}/contact-groups" class="row" style="max-width:560px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="name" maxlength="40" required placeholder="e.g. Claims team">
+    <button type="submit">Create</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>{{ rows|length }} contact group{{ '' if rows|length == 1 else 's' }}</h2>
+  {% for r in rows %}
+  <div class="list-item">
+    <div><b>{{ r.name }}</b> <span class="pill {{ 'on' if r.audience is not none else 'off' }}">{{ r.contact_ids|length }} contact{{ '' if r.contact_ids|length == 1 else 's' }}</span>
+      <div class="muted">Given to: {{ r.given }}{% if r.audience is not none %} · {{ r.people }} {{ 'person' if r.people == 1 else 'people' }}{% endif %}</div></div>
+    <div class="row" style="flex-wrap:nowrap">
+      <a class="btn secondary small" href="?group={{ r.id }}#edit-group">Open</a>
+      <form method="post" action="/platform/org/{{ org.id }}/contact-groups/{{ r.id }}/delete" class="inline" onsubmit="return confirm('Delete the {{ r.name }} contact group? Its contacts stay in Contacts.')">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Delete</button></form>
+    </div>
+  </div>
+  {% else %}<div class="empty"><b>No contact groups yet</b>Create one above.</div>{% endfor %}
+</div>
+
+{% if editing %}
+<div class="card" id="edit-group" style="border-color:var(--primary)">
+  <form method="post" action="/platform/org/{{ org.id }}/contact-groups" class="row" style="margin-bottom:14px">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="group_id" value="{{ editing.id }}">
+    <input name="name" maxlength="40" value="{{ editing.name }}" style="max-width:320px;font-weight:700">
+    <button class="secondary small" type="submit">Rename</button>
+  </form>
+  <form method="post" action="/platform/org/{{ org.id }}/contact-groups/{{ editing.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="field" style="margin-bottom:4px">Contacts in {{ editing.name }}</label>
+    {% if all_contacts %}
+    <input id="cg-search" placeholder="Search contacts…" style="max-width:300px;margin-bottom:8px">
+    <div style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:4px 12px;margin-bottom:16px">
+      {% for c in all_contacts %}
+      <label class="cg-row" style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:{{ '0' if loop.first else '1px solid var(--line)' }}">
+        <input type="checkbox" name="contacts" value="{{ c.id }}" {{ 'checked' if c.id in editing.contact_ids }}>
+        <span><b>{{ c.name }}</b>{% if c.is_emergency %} <span class="pill bad">Emergency</span>{% endif %}
+          <span class="muted">{{ local(c.phone) }}{{ ' · ' ~ c.title if c.title }}{{ ' · ' ~ c.group_name if c.group_name }}</span></span>
+      </label>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted">No contacts yet. <a href="/platform/org/{{ org.id }}/contacts">Add contacts</a> first.</p>{% endif %}
+
+    <div class="checks"><label><input type="checkbox" name="given" value="1" id="cg-given" {{ 'checked' if editing.audience is not none }}>
+      Give this contact group to people (their contact lists get its contacts)</label></div>
+    <div id="cg-who" style="margin-left:24px">
+      {% set selected = editing_audience %}{% set aud_name = 'audience' %}{% set aud_label = 'Who gets it' %}{% set aud_everyone = 'Everyone in the organisation' %}
+      {% include "platform/org/_audience.html" with context %}
+    </div>
+    <div class="row"><button type="submit">Save {{ editing.name }}</button>
+      <a class="btn secondary" href="/platform/org/{{ org.id }}/contact-groups">Close</a>
+      <span class="muted">People only get contacts they're allowed to see ("Who can see this" on each contact).</span></div>
+  </form>
+</div>
+<script>
+(() => {
+  const given = document.getElementById('cg-given'), who = document.getElementById('cg-who');
+  const f = () => { who.hidden = !given.checked; }; given.addEventListener('change', f); f();
+  const q = document.getElementById('cg-search');
+  if (q) q.addEventListener('input', () => {
+    const t = q.value.toLowerCase();
+    document.querySelectorAll('.cg-row').forEach((r) => { r.hidden = t && !r.innerText.toLowerCase().includes(t); });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
