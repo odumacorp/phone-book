@@ -1,8 +1,8 @@
 {% extends "platform/base.html" %}
 {% set section = 'overview' %}
 {% block title %}{{ org.name }}{% endblock %}
+{% if staff_help %}{% set back_href = '/platform/tenants/' ~ org.id %}{% set back_label = "Organisation's platform page" %}{% endif %}
 {% block content %}
-{% if staff_help %}<a class="crumb" href="/platform/tenants/{{ org.id }}">← Back to the organisation's platform page</a>{% endif %}
 <div class="page-head">
   <h1>{{ org.name }}</h1>
   <p>Add the notices and contacts your members need. They see them straight away on USSD (any phone, no internet) and in

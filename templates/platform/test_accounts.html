@@ -1,0 +1,58 @@
+{% extends "platform/base.html" %}
+{% block title %}Test accounts{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Test accounts</h1>
+  <p>Accounts made for testing by <code>scripts/seed_test_accounts.py</code> (password <code>12345678</code>, USSD PIN <code>1234</code>).
+    Turn one off and it can't log in anywhere (app, website, organisation portal or USSD) and its open sessions end; its data
+    stays. Turn it back on any time. {% if off %}<b>{{ off }} turned off.</b>{% endif %}</p></div>
+
+<div class="card">
+  <h2>All test accounts at once</h2>
+  <form method="post" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <select name="org" style="max-width:320px">
+      <option value="">Every test account (and test staff)</option>
+      {% for o in org_names %}<option value="{{ o }}">Members of {{ o }}</option>{% endfor %}
+      <option value="-">Individuals (no organisation)</option>
+    </select>
+    <button class="danger" type="submit" name="action" value="all_off" onclick="return confirm('Turn these test accounts off?')">Turn off</button>
+    <button class="secondary" type="submit" name="action" value="all_on">Turn on</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>{{ users|length }} app, website and USSD account{{ '' if users|length == 1 else 's' }}</h2>
+  <input id="ta-search" placeholder="Search name, number or organisation…" style="max-width:340px;margin-bottom:10px">
+  <table><tr><th>Name</th><th>Phone</th><th>Organisations</th><th>Status</th><th></th></tr>
+    {% for u in users %}
+    <tr class="ta-row"><td>{{ u.name or '—' }}</td><td><code>{{ u.local }}</code></td>
+      <td class="muted">{{ u.orgs|join(', ') if u.orgs else 'Individual' }}</td>
+      <td><span class="pill {{ 'off' if u.disabled else 'on' }}">{{ 'Off' if u.disabled else 'On' }}</span></td>
+      <td><form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="phone" value="{{ u.phone }}">
+        {% if u.disabled %}<button class="secondary small" type="submit" name="action" value="user_on">Turn on</button>
+        {% else %}<button class="danger small" type="submit" name="action" value="user_off">Turn off</button>{% endif %}</form></td></tr>
+    {% else %}<tr><td colspan="5" class="muted">No test accounts yet. Run <code>python scripts/seed_test_accounts.py</code>.</td></tr>{% endfor %}
+  </table>
+</div>
+
+{% if staff_rows %}
+<div class="card">
+  <h2>Test staff accounts</h2>
+  <table><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr>
+    {% for s in staff_rows %}
+    <tr><td>{{ s.name }}</td><td><code>{{ s.email }}</code></td>
+      <td><span class="pill {{ 'on' if s.active else 'off' }}">{{ 'On' if s.active else 'Off' }}</span></td>
+      <td>{% if s.id != me %}<form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="staff_id" value="{{ s.id }}">
+        {% if s.active %}<button class="danger small" type="submit" name="action" value="staff_off">Turn off</button>
+        {% else %}<button class="secondary small" type="submit" name="action" value="staff_on">Turn on</button>{% endif %}</form>
+        {% else %}<span class="muted">You</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+<script>
+(() => { const q = document.getElementById('ta-search'); if (!q) return;
+  q.addEventListener('input', () => { const t = q.value.toLowerCase();
+    document.querySelectorAll('.ta-row').forEach((r) => { r.hidden = t && !r.innerText.toLowerCase().includes(t); }); }); })();
+</script>
+{% endblock %}

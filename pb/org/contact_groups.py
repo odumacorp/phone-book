@@ -4,6 +4,7 @@ Everyone a contact group is given to finds its contacts in their own contact lis
 contact). A contact left out for one person on their member page stays out for them. audience NULL = not given to
 anyone yet; "" = everyone in the organisation; else roles / "d:<id>" / "g:<id>".
 """
+import json
 import time
 
 from pb.audit import audit
@@ -77,12 +78,41 @@ def delete(principal, tenant_id, group_id):
     audit("contact_group.delete", tenant_id, ("contact_group", group_id), {"name": row["name"]}, actor=principal)
 
 
+def for_tag(tenant_id, tag):
+    """Every contact group, with whether people with this tag (a role, "d:<id>" or "g:<id>") get it."""
+    out = []
+    for g in groups(tenant_id):
+        everyone = g["audience"] == ""
+        out.append(dict(g, for_everyone=everyone,
+                        on=everyone or (g["audience"] is not None and tag in content.audience_roles(g["audience"]))))
+    return out
+
+
+def set_for_tag(principal, tenant_id, tag, group_ids):
+    """Give exactly these contact groups to people with this tag (adds or removes it in each group's "given to").
+    Groups given to everyone stay as they are; a group left with nobody becomes "not given to anyone yet"."""
+    _require(principal, tenant_id)
+    content.parse_audience([tag], tenant_id)  # a real role, department or group
+    repo = TenantRepo(tenant_id)
+    wanted, changed = {int(i) for i in group_ids if str(i).isdigit()}, 0
+    for g in for_tag(tenant_id, tag):
+        if g["for_everyone"] or (g["id"] in wanted) == g["on"]:
+            continue
+        current = content.audience_roles(g["audience"]) if g["audience"] else []
+        current = [*current, tag] if not g["on"] else [e for e in current if e != tag]
+        audience = json.dumps(sorted(set(current))) if current else None
+        repo.update("contact_groups", "id = ?", (g["id"],), audience=audience)
+        audit("contact_group.update", tenant_id, ("contact_group", g["id"]), {"given_to": audience}, actor=principal)
+        changed += 1
+    return changed
+
+
 def given_contacts(tenant_id, tags):
-    """{contact id: [names of the contact groups that give it]} for someone with these tags."""
+    """{contact id: ["contact group <name>", ...]}: the contact groups that give it to someone with these tags."""
     out = {}
     for g in groups(tenant_id):
         if g["audience"] is None or not content.matches(g["audience"], tags):
             continue
         for cid in g["contact_ids"]:
-            out.setdefault(cid, []).append(g["name"])
+            out.setdefault(cid, []).append(f"contact group {g['name']}")
     return out

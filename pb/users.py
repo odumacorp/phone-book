@@ -9,8 +9,9 @@ from pb.text import EMAIL_RE
 USER_COLUMNS = (
     "phone, pin_hash, failed_attempts, locked_until, show_others, name, "
     "email, password_hash, pw_failed_attempts, pw_locked_until, token_epoch, email_verified, "
-    "notify_inapp, notify_security, notify_messages, sms_all"
+    "notify_inapp, notify_security, notify_messages, sms_all, disabled, is_test"
 )
+DISABLED_MESSAGE = "This account is turned off. Contact Oduma Corp support."
 
 
 def get_user(phone, fresh=False):
@@ -72,3 +73,22 @@ def emails_json(owner):
         {"id": r["id"], "email": r["email"], "verified": bool(r["verified"]), "notify": bool(r["notify"])}
         for r in user_emails(owner)
     ]
+
+
+def set_disabled(actor, phone, disabled):
+    """Turn an account off (it can't log in anywhere and its open sessions end) or back on. Data is kept."""
+    from pb.audit import audit
+    if not get_user(phone, fresh=True):
+        raise ValueError("No account with that number.")
+    now = int(time.time())
+    if disabled:
+        execute("UPDATE users SET disabled = 1, token_epoch = token_epoch + 1 WHERE phone = ?", (phone,))
+        execute("UPDATE app_sessions SET ended_at = ?, end_reason = 'account turned off' WHERE owner = ? AND ended_at IS NULL",
+                (now, phone))
+        execute("DELETE FROM ussd_resume WHERE owner = ? OR resume_owner = ?", (phone, phone))
+        execute("UPDATE ussd_sessions SET ended_at = ?, end_reason = 'account turned off' WHERE owner = ? AND ended_at IS NULL",
+                (now, phone))
+    else:
+        execute("UPDATE users SET disabled = 0 WHERE phone = ?", (phone,))
+    audit("user.disabled" if disabled else "user.enabled", None, ("user", phone), None, actor=actor)
+    return get_user(phone, fresh=True)

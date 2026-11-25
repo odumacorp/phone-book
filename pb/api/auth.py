@@ -12,7 +12,7 @@ from pb.db import execute, fetch_one, get_db, sql
 from pb.features import feature_on
 from pb.notify import notify_event
 from pb.text import LOGIN_PHONE_FORMAT, PIN_RE, login_phone
-from pb.users import clean_email, email_owner, get_user
+from pb.users import DISABLED_MESSAGE, clean_email, email_owner, get_user
 from pb.web import app
 
 
@@ -99,7 +99,7 @@ def require_auth(view):
         except BadSignature:
             return api_error("Please log in again.", 401)
         user = get_user(data.get("phone", ""))
-        if not user or token_version(user) != data.get("v"):
+        if not user or token_version(user) != data.get("v") or user["disabled"]:
             return api_error("Please log in again.", 401)
         jti = data.get("jti")
         if jti and fetch_one("SELECT 1 AS x FROM revoked_tokens WHERE jti = ?", (jti,)):
@@ -162,6 +162,8 @@ def check_password(user, password):
         return "Wrong email/phone or password."
     if user["pw_failed_attempts"]:
         execute("UPDATE users SET pw_failed_attempts = 0 WHERE phone = ?", (phone,))
+    if user["disabled"]:
+        return DISABLED_MESSAGE
     return None
 
 
@@ -178,6 +180,8 @@ def set_password(phone, password):
 
 
 def logged_in(user, same_session=False):
+    if user["disabled"]:
+        return api_error(DISABLED_MESSAGE, 403)
     keep = getattr(g, "jti", None) if same_session else None
     return jsonify({"token": make_token(user, keep), "phone": user["phone"]})
 

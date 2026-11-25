@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -21,6 +21,8 @@ import {
 import {
   API_URL,
   ApiError,
+  removePhoto,
+  setPhoto,
   AppNotification,
   Complaint,
   Contact,
@@ -94,6 +96,7 @@ import {
   readDeviceContacts,
 } from './src/deviceContacts';
 import { DialogProvider, useDialog } from './src/dialog';
+import { pickPhoto } from './src/photo';
 import { isWeb } from './src/platform';
 
 const BATCH_SIZE = 1000;
@@ -172,6 +175,15 @@ function Main() {
   };
 
   const back = () => setView(token ? 'sync' : 'login');
+  // The header's Back button (top left). A screen with its own inner pages (My organisations) can take it first:
+  // innerBack returns true when it went back inside the screen.
+  const innerBack = useRef<(() => boolean) | null>(null);
+  const headerBack = () => {
+    if (innerBack.current?.()) return;
+    if (view === 'notifications' && token) getMe(token).then(setMe).catch(() => null); // refresh the unread count
+    back();
+  };
+  const showBack = !booting && view !== 'sync' && view !== 'login' && (token !== null || ['register', 'reset', 'report'].includes(view));
 
   const confirmLogout = () => {
     const out = async (everywhere: boolean) => {
@@ -238,7 +250,8 @@ function Main() {
   else if (view === 'logins') content = <LoginHistoryScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'sessions') content = <SessionsScreen token={token} onBack={back} onLogout={logout} />;
   else if (view === 'emergency') content = <EmergencyScreen token={token} onBack={back} onLogout={logout} />;
-  else if (view === 'orgs') content = <OrganisationsScreen token={token} onBack={back} onLogout={logout} />;
+  else if (view === 'orgs')
+    content = <OrganisationsScreen token={token} onBack={back} onLogout={logout} setInnerBack={(fn) => (innerBack.current = fn)} />;
   else if (view === 'addContact')
     content = <AddContactScreen token={token} onDone={(msg) => loggedIn(token, msg)} onCancel={back} onLogout={logout} />;
   else if (view === 'editContact' && editing)
@@ -320,8 +333,13 @@ function Main() {
       <View style={styles.column}>
       <View style={styles.titleRow}>
         <View style={styles.brand}>
+          {showBack ? (
+            <Pressable onPress={headerBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back">
+              <Text style={styles.backButton}>‹ Back</Text>
+            </Pressable>
+          ) : null}
           <Image source={require('./assets/logo.png')} style={styles.logo} accessibilityLabel="Oduma Corp" />
-          {narrow && token ? null : <Text style={styles.title}>Remote Phonebook</Text>}
+          {(narrow && token) || (narrow && showBack) ? null : <Text style={styles.title}>Remote Phonebook</Text>}
         </View>
         {token && !booting && view !== 'register' && view !== 'reset' ? (
           <View style={styles.headerActions}>
@@ -569,9 +587,12 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string, message?
                   autoCorrect={false}
                 />
                 {matches.map((o) => (
-                  <Pressable key={o.id} style={styles.orgOption} onPress={() => setOrg(o)} accessibilityRole="button">
-                    <Text style={styles.rowName}>{o.name}</Text>
-                    {o.kind ? <Text style={styles.rowPhone}>{o.kind}</Text> : null}
+                  <Pressable key={o.id} style={[styles.orgOption, styles.orgOptionRow]} onPress={() => setOrg(o)} accessibilityRole="button">
+                    <OrgLogo url={o.logo_url} size={32} />
+                    <View style={styles.rowText}>
+                      <Text style={styles.rowName}>{o.name}</Text>
+                      {o.kind ? <Text style={styles.rowPhone}>{o.kind}</Text> : null}
+                    </View>
                   </Pressable>
                 ))}
                 {orgCode && !matches.length ? (
@@ -1708,6 +1729,49 @@ function formatWhen(seconds: number) {
   return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}, ${time}`;
 }
 
+/** An organisation's logo, or a building icon when it hasn't added one. */
+function OrgLogo({ url, size = 40 }: { url?: string | null; size?: number }) {
+  const box = { width: size, height: size, borderRadius: size / 5 };
+  return url ? (
+    <Image source={{ uri: API_URL + url }} style={[styles.orgLogo, box]} resizeMode="contain" accessibilityIgnoresInvertColors />
+  ) : (
+    <View style={[styles.orgLogo, styles.orgLogoEmpty, box]}>
+      <Text style={{ fontSize: size * 0.5 }}>🏢</Text>
+    </View>
+  );
+}
+
+/** The profile photo, or a person icon when there isn't one. Tap to add, change or remove it. */
+function ProfilePhoto({ photo, busy, onPress }: { photo: string | null; busy?: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={busy}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={photo ? 'Change or remove your profile photo' : 'Add a profile photo'}
+      style={styles.photoWrap}
+    >
+      {photo ? (
+        <Image source={{ uri: photo }} style={styles.photo} accessibilityIgnoresInvertColors />
+      ) : (
+        <View style={[styles.photo, styles.photoEmpty]}>
+          <View style={styles.personHead} />
+          <View style={styles.personBody} />
+        </View>
+      )}
+      {busy ? (
+        <View style={[styles.photo, styles.photoBusy]}>
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : null}
+      <View style={styles.photoBadge}>
+        <Text style={styles.photoBadgeText}>{photo ? '✎' : '+'}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 /** One labelled fact on the profile card ("Title: Bursar"). */
 function Fact({ label, value }: { label: string; value: string }) {
   return (
@@ -1748,9 +1812,30 @@ function callNumber(phone: string) {
 
 /** Free emergency and help lines: call straight from the phone, or add to the contacts. */
 /** The user's organisations (school, SACCO, employer...): their notices, emergency contacts and contacts. */
-function OrganisationsScreen({ token, onBack, onLogout }: { token: string; onBack: () => void; onLogout: () => void }) {
+function OrganisationsScreen({
+  token,
+  onBack,
+  onLogout,
+  setInnerBack,
+}: {
+  token: string;
+  onBack: () => void;
+  onLogout: () => void;
+  setInnerBack?: (fn: (() => boolean) | null) => void;
+}) {
   const [orgs, setOrgs] = useState<OrgSummary[] | null>(null);
   const [detail, setDetail] = useState<OrgDetail | null>(null);
+  useEffect(() => {
+    // The header's Back closes an open organisation first (when there's a list to go back to)
+    setInnerBack?.(() => {
+      if (detail && orgs && orgs.length > 1) {
+        setDetail(null);
+        return true;
+      }
+      return false;
+    });
+    return () => setInnerBack?.(null);
+  }, [detail, orgs, setInnerBack]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [saved, setSaved] = useState<Set<string>>(new Set());
@@ -1827,9 +1912,38 @@ function OrganisationsScreen({ token, onBack, onLogout }: { token: string; onBac
     </View>
   );
 
+  const o = detail?.org;
   const header = (
     <View style={styles.card}>
-      <Text style={styles.heading}>{detail ? detail.org.name : 'My organisations'}</Text>
+      {o ? (
+        <View style={styles.orgHead}>
+          <OrgLogo url={o.logo_url} size={56} />
+          <Text style={[styles.heading, styles.orgHeadName]}>{o.name}</Text>
+        </View>
+      ) : (
+        <Text style={styles.heading}>My organisations</Text>
+      )}
+      {o?.about ? <Text style={styles.orgAbout}>{o.about}</Text> : null}
+      {o && (o.phone || o.email || o.website || o.address) ? (
+        <View style={styles.orgLinks}>
+          {o.phone ? (
+            <Pressable onPress={() => callNumber(o.phone!)} accessibilityRole="button" accessibilityLabel={`Call ${o.name}`}>
+              <Text style={styles.showLink}>📞 {o.phone}</Text>
+            </Pressable>
+          ) : null}
+          {o.email ? (
+            <Pressable onPress={() => Linking.openURL(`mailto:${o.email}`).catch(() => {})} accessibilityRole="link">
+              <Text style={styles.showLink}>✉️ {o.email}</Text>
+            </Pressable>
+          ) : null}
+          {o.website ? (
+            <Pressable onPress={() => Linking.openURL(o.website!).catch(() => {})} accessibilityRole="link">
+              <Text style={styles.showLink}>🌐 {o.website.replace(/^https?:\/\//, '')}</Text>
+            </Pressable>
+          ) : null}
+          {o.address ? <Text style={styles.rowPhone}>📍 {o.address}</Text> : null}
+        </View>
+      ) : null}
       <Text style={styles.hint}>
         {detail
           ? `Notices and contacts from ${detail.org.name}. Also on ${ussdCode()}: choose 7. My organisations.`
@@ -1853,6 +1967,7 @@ function OrganisationsScreen({ token, onBack, onLogout }: { token: string; onBac
         {orgs && orgs.length > 1
           ? orgs.map((o) => (
               <Pressable key={o.id} style={styles.sessionRow} onPress={() => open(o.id)} accessibilityRole="button">
+                <OrgLogo url={o.logo_url} />
                 <View style={styles.rowText}>
                   <Text style={styles.rowName}>{o.name}</Text>
                   <Text style={styles.rowPhone}>
@@ -2036,6 +2151,46 @@ function SyncScreen({
   const [query, setQuery] = useState('');
   const [name, setNameText] = useState(me?.name ?? '');
   const [savedName, setSavedName] = useState(me?.name ?? '');
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  // Profile photo: add, change or remove it. Without one, a person icon shows.
+  const changePhoto = () => {
+    const use = async (source: 'library' | 'camera') => {
+      try {
+        const image = await pickPhoto(source);
+        if (!image) return;
+        setPhotoBusy(true);
+        const photo = await setPhoto(token, image);
+        if (me) setMe({ ...me, photo });
+        setStatus('Profile photo saved.');
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return onLogout();
+        ask("Couldn't save the photo", e instanceof Error ? e.message : 'Try again.');
+      } finally {
+        setPhotoBusy(false);
+      }
+    };
+    const remove = async () => {
+      try {
+        setPhotoBusy(true);
+        await removePhoto(token);
+        if (me) setMe({ ...me, photo: null });
+        setStatus('Profile photo removed.');
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return onLogout();
+        ask("Couldn't remove the photo", e instanceof Error ? e.message : 'Try again.');
+      } finally {
+        setPhotoBusy(false);
+      }
+    };
+    const has = Boolean(me?.photo);
+    ask(has ? 'Profile photo' : 'Add a profile photo', has ? 'Change your photo or remove it.' : 'Choose a photo of yourself.', [
+      { text: 'Cancel', style: 'cancel' },
+      ...(has ? [{ text: 'Remove photo', style: 'destructive' as const, onPress: remove }] : []),
+      ...(isWeb ? [] : [{ text: 'Take a photo', onPress: () => use('camera') }]),
+      { text: has ? 'Choose a new photo' : 'Choose a photo', onPress: () => use('library') },
+    ]);
+  };
 
   useEffect(() => {
     setNameText(me?.name ?? '');
@@ -2210,13 +2365,6 @@ function SyncScreen({
     return q ? sorted.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)) : sorted;
   }, [contacts, query]);
 
-  const initials =
-    (savedName || '')
-      .split(' ')
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0].toUpperCase())
-      .join('') || '👤';
   const localPhone = me?.phone?.startsWith('+254') ? '0' + me.phone.slice(4) : me?.phone;
 
   const managedBy = me?.contacts_managed_by ?? null; // the organisation provides this person's contacts
@@ -2225,9 +2373,7 @@ function SyncScreen({
     <>
       <View style={[styles.card, styles.profileCard]}>
         <View style={styles.profileTop}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
+          <ProfilePhoto photo={me?.photo ?? null} busy={photoBusy} onPress={changePhoto} />
           <View style={styles.rowText}>
             <Text style={styles.greeting}>{savedName ? `Hi, ${savedName.split(' ')[0]}` : 'Welcome'}</Text>
             <Text style={styles.rowPhone}>{localPhone ?? '…'}</Text>
@@ -2856,6 +3002,7 @@ const styles = StyleSheet.create({
   factValue: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   headerButton: { color: COLORS.primary, fontSize: 15, fontWeight: '600', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', overflow: 'hidden' },
+  backButton: { color: COLORS.primary, fontSize: 16, fontWeight: '700', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 99, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', overflow: 'hidden' },
   headerButtonMain: { color: '#fff', backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   quickNav: { flexGrow: 0, marginTop: -10, marginBottom: 14 },
   quickNavIn: { gap: 8, paddingRight: 8 },
@@ -2865,6 +3012,21 @@ const styles = StyleSheet.create({
   navChipMainText: { color: '#fff' },
   profileTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
   avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  orgLogo: { backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border },
+  orgLogoEmpty: { backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  orgHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
+  orgHeadName: { flex: 1, marginBottom: 0 },
+  orgAbout: { color: COLORS.text, fontSize: 15, lineHeight: 21, marginBottom: 8 },
+  orgLinks: { gap: 6, marginBottom: 8 },
+  orgOptionRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  photoWrap: { width: 64, height: 64 },
+  photo: { width: 64, height: 64, borderRadius: 32 },
+  photoEmpty: { backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'flex-end', overflow: 'hidden' },
+  personHead: { width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary, opacity: 0.55, marginBottom: 3 },
+  personBody: { width: 44, height: 20, borderTopLeftRadius: 22, borderTopRightRadius: 22, backgroundColor: COLORS.primary, opacity: 0.55 },
+  photoBusy: { position: 'absolute', top: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+  photoBadge: { position: 'absolute', right: -2, bottom: -2, width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary, borderWidth: 2, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  photoBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800', lineHeight: 15 },
   avatarText: { color: COLORS.primary, fontSize: 20, fontWeight: '700' },
   greeting: { fontSize: 20, fontWeight: '700', color: COLORS.text },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },

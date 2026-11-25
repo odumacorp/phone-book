@@ -2,7 +2,39 @@
 {% set section = 'settings' %}
 {% block title %}Settings · {{ org.name }}{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Settings</h1><p>How your members use {{ org.name }} on USSD.</p></div>
+<div class="page-head"><h1>Settings</h1><p>{{ org.name }}'s profile, and how your members use Remote Phonebook.</p></div>
+<div class="card" id="profile">
+  <h2>Organisation profile</h2>
+  <p class="help">What your members see about {{ org.name }} in the app (under My organisations) and when they sign up.
+    Leave a box empty to hide it.</p>
+  <div class="row" style="align-items:center;gap:16px;margin-bottom:14px">
+    {% if profile.logo_url %}<img src="{{ profile.logo_url }}" alt="{{ org.name }} logo" class="org-logo big">
+    {% else %}<div class="org-logo big" style="display:flex;align-items:center;justify-content:center;font-size:34px" aria-hidden="true">🏢</div>{% endif %}
+    <div>
+      <b>Logo</b>
+      <div class="muted">{{ 'Shown to your members and on the platform.' if profile.logo_url else 'No logo yet: a building icon shows instead.' }}
+        Square works best; JPEG, PNG or WebP up to 400 KB.</div>
+      {% if profile.logo_url %}
+      <form method="post" action="/platform/org/{{ org.id }}/profile" class="inline" onsubmit="return confirm('Remove the logo?')">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="remove_logo">
+        <button class="danger small" type="submit" style="margin-top:6px">Remove logo</button></form>{% endif %}
+    </div>
+  </div>
+  <form method="post" action="/platform/org/{{ org.id }}/profile" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="field">{{ 'Change the logo' if profile.logo_url else 'Add a logo' }} <small>Optional</small>
+      <input type="file" name="logo" accept="image/jpeg,image/png,image/webp"></label>
+    <label class="field">About {{ org.name }} <small>Up to 600 characters</small>
+      <textarea name="about" maxlength="600" rows="4" placeholder="e.g. A mixed day and boarding secondary school in Kilimani, Nairobi, founded in 1998.">{{ profile.about or '' }}</textarea></label>
+    <div class="grid2">
+      <label class="field">Phone<input name="phone" maxlength="40" value="{{ profile.phone or '' }}" placeholder="e.g. 020 123 4567"></label>
+      <label class="field">Email<input name="email" type="email" maxlength="120" value="{{ profile.email or '' }}" placeholder="e.g. info@example.co.ke"></label>
+      <label class="field">Website<input name="website" maxlength="120" value="{{ profile.website or '' }}" placeholder="e.g. www.example.co.ke"></label>
+      <label class="field">Address<input name="address" maxlength="200" value="{{ profile.address or '' }}" placeholder="e.g. Argwings Kodhek Rd, Kilimani, Nairobi"></label>
+    </div>
+    <button type="submit">Save profile</button>
+  </form>
+</div>
 <div class="card">
   <h2>Members' own contacts</h2>
   <p class="help">Who looks after the contacts in each member's own Remote Phonebook? Admins and operators always keep their own.</p>

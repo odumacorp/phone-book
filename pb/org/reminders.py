@@ -194,6 +194,7 @@ def app_notify(phones, title, body, now=None):
 def send_bulk_sms(phones, text):
     """Africa's Talking takes many recipients per request: send in batches from a background thread."""
     client = messaging.sms
+    phones = messaging.without_test_accounts(phones)
 
     def _send():
         for i in range(0, len(phones), SMS_BATCH):

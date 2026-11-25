@@ -10,7 +10,7 @@ from pb.db import fetch_all, fetch_one, get_db, insert_id, sql
 
 TENANT_TABLES = {
     "tenant_modules", "tenant_settings", "memberships", "departments", "member_groups", "group_members",
-    "department_members", "ussd_code_allocations", "org_contacts", "notices", "reminders", "contact_groups", "contact_group_items",
+    "department_members", "ussd_code_allocations", "org_contacts", "notices", "reminders", "contact_groups", "contact_group_items", "org_profiles",
 }
 IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 

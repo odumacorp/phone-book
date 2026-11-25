@@ -30,6 +30,65 @@ def kes(cents):
     return f"KES {whole:,}" + (f".{part:02d}" if part else "")
 
 
+def quote(plan_row, members=0, tiers=(), interval=None, transactions=1):
+    """The total price for a plan, worked out step by step (all amounts in cents).
+
+    seat:            base per month + each member above the included ones at the per-member price (or the price of the
+                     highest volume tier the member count reaches); annual = 12 months less the annual discount
+    recurring:       the base price per billing period (annual discount applies to a yearly plan)
+    per_transaction: price x number of transactions
+    quoted:          no total (agreed per customer)
+    Returns {"lines": [(label, cents)], "total": cents or None, "per": "month" | "year" | "transaction(s)" | None,
+             "per_month": cents or None}.
+    """
+    model = plan_row["model"]
+    base = plan_row["base_price"] or 0
+    interval = interval or plan_row["billing_interval"] or "month"
+    discount = max(0, min(100, plan_row["annual_discount_pct"] or 0))
+    lines = []
+    if model == "quoted":
+        return {"lines": [], "total": None, "per": None, "per_month": None}
+    if model == "per_transaction":
+        n = max(0, int(transactions or 0))
+        total = base * n
+        lines.append((f"{n} x {kes(base)}", total))
+        return {"lines": lines, "total": total, "per": "transactions", "per_month": None}
+    if model == "seat":
+        members = max(0, int(members or 0))
+        included = plan_row["included_members"] or 0
+        extra = max(0, members - included)
+        rate = plan_row["per_member_price"] or 0
+        tier = None
+        for t in sorted(tiers, key=lambda t: t["from_members"]):
+            if members >= t["from_members"]:
+                tier = t
+        if tier:
+            rate = tier["per_member_price"]
+        monthly = base + extra * rate
+        lines.append((f"Base price (includes {included:,} members)", base))
+        if extra:
+            label = f"{extra:,} extra member{'' if extra == 1 else 's'} x {kes(rate)}"
+            if tier:
+                label += f" (volume price from {tier['from_members']:,} members)"
+            lines.append((label, extra * rate))
+        if interval == "year":
+            year = monthly * 12
+            lines.append(("Monthly total x 12 months", year))
+            cut = round(year * discount / 100)
+            if cut:
+                lines.append((f"Annual discount {discount}%", -cut))
+            return {"lines": lines, "total": year - cut, "per": "year", "per_month": round((year - cut) / 12)}
+        return {"lines": lines, "total": monthly, "per": "month", "per_month": monthly}
+    # recurring
+    lines.append(("Price", base))
+    if interval == "year" and discount:
+        cut = round(base * discount / 100)
+        lines.append((f"Annual discount {discount}%", -cut))
+        return {"lines": lines, "total": base - cut, "per": "year", "per_month": round((base - cut) / 12)}
+    return {"lines": lines, "total": base, "per": "year" if interval == "year" else "month",
+            "per_month": round(base / 12) if interval == "year" else base}
+
+
 def parse_kes(text, allow_empty=False):
     """ "25,000" / "KES 25000" / "49.50" -> cents. Raises ValueError for anything else."""
     text = str(text or "").strip().upper().replace("KES", "").replace(",", "").strip()

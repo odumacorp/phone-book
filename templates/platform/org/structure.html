@@ -6,7 +6,8 @@
   <p>Organise {{ org.name }} your way. <b>Departments</b> are offices or units (e.g. Finance, Sales), and can sit inside each other.
     <b>Groups</b> are sets of people (e.g. Form 2, Youth, Corporate clients). Both appear in the Group list when you add a contact,
     and you can place members in them. Roles and job titles are on the <a href="/platform/org/{{ org.id }}/lists">Roles and titles</a> page.
-    To give a department or group a set of contacts, use <a href="/platform/org/{{ org.id }}/contact-groups">Contact groups</a>.</p></div>
+    To show contacts to a department, open it with <b>Edit</b> and tick its contacts. To give a set of contacts to several
+    departments, groups or roles at once, use <a href="/platform/org/{{ org.id }}/contact-groups">Contact groups</a>.</p></div>
 
 <div class="grid2" style="gap:18px;align-items:start">
   <div class="card" id="dept">
@@ -25,6 +26,18 @@
       <div class="row"><button type="submit">{{ 'Save' if editing_dept else 'Add department' }}</button>
         {% if editing_dept %}<a class="btn secondary" href="/platform/org/{{ org.id }}/groups">Cancel</a>{% endif %}</div>
     </form>
+    {% if editing_dept and can_contacts %}
+    <form method="post" action="/platform/org/{{ org.id }}/departments/{{ editing_dept.id }}/contacts" id="dept-contacts"
+      style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="field" style="margin-bottom:4px">Contacts for {{ editing_dept.name }}</label>
+      <p class="muted" style="margin:0 0 8px">Everyone in {{ editing_dept.name }} (and departments inside it) finds these in their own contact list.</p>
+      {% set pick_scroll = 300 %}{% include "platform/org/_list_picker.html" with context %}
+      {% if pick_rows or pick_groups %}<div class="row"><button type="submit">Save</button>
+        <a class="muted" href="/platform/org/{{ org.id }}/contact-lists?for=d:{{ editing_dept.id }}">Open as default list</a></div>
+      {% else %}<p class="muted">No contacts yet. <a href="/platform/org/{{ org.id }}/contacts">Add contacts</a> first.</p>{% endif %}
+    </form>
+    {% endif %}
     {% if dept_suggestions and not editing_dept %}
     <p class="muted" style="margin:16px 0 6px">Quick add:</p>
     <div class="row">{% for name in dept_suggestions %}
@@ -35,7 +48,7 @@
     {% for d in departments %}
       <div class="list-item">
         <div><b>{{ d.name }}</b>{% if d.parent_name %}<div class="muted">inside {{ d.parent_name }}</div>{% endif %}
-          <div class="muted">{{ d.members }} member{{ '' if d.members == 1 else 's' }}</div></div>
+          <div class="muted">{{ d.members }} member{{ '' if d.members == 1 else 's' }}{% if d.contact_count %} · {{ d.contact_count }} contact{{ '' if d.contact_count == 1 else 's' }}{% endif %}</div></div>
         <div class="row" style="flex-wrap:nowrap">
           <a class="btn secondary small" href="?dept={{ d.id }}#dept">Edit</a>
           <form method="post" action="/platform/org/{{ org.id }}/departments/{{ d.id }}/delete" class="inline"

@@ -1,0 +1,30 @@
+{% extends "platform/base.html" %}
+{% block title %}People{% endblock %}
+{% block content %}
+<div class="page-head"><h1>People</h1>
+  <p>Everyone with a Remote Phonebook account: individuals using their own phone book, and members of organisations.
+    Open someone to see their account, turn it off or on, log them out everywhere or unlock it. Their own contacts stay private.</p></div>
+<div class="card">
+  <form method="get" class="row" style="align-items:flex-end">
+    <label class="field" style="flex:2;margin:0">Search<input name="q" value="{{ q }}" placeholder="Name, phone number or email"></label>
+    <label class="field" style="flex:1;margin:0">Show<select name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ v }}</option>{% endfor %}</select></label>
+    <button type="submit">Search</button>
+  </form>
+</div>
+<div class="card">
+  <h2>{{ '{:,}'.format(total) }} {{ 'person' if total == 1 else 'people' }}</h2>
+  <table><tr><th>Name</th><th>Phone</th><th>Email</th><th>Kind</th><th>Status</th></tr>
+    {% for r in rows %}
+    <tr><td><a href="/platform/people/{{ r.phone.lstrip('+') }}">{{ r.name or '(no name)' }}</a></td>
+      <td><code>{{ r.local }}</code></td><td class="muted">{{ r.emails|join(', ') or '-' }}</td>
+      <td>{{ 'Organisation member' if r.in_orgs else 'Individual' }}{% if r.is_test %} <span class="pill off">test</span>{% endif %}</td>
+      <td><span class="pill {{ 'off' if r.disabled else 'on' }}">{{ 'Off' if r.disabled else 'On' }}</span></td></tr>
+    {% else %}<tr><td colspan="5" class="muted">Nobody matches.</td></tr>{% endfor %}
+  </table>
+  {% if pages > 1 %}<div class="row" style="margin-top:12px">
+    {% if page_no > 1 %}<a class="btn secondary small" href="?q={{ q|urlencode }}&kind={{ kind }}&page={{ page_no - 1 }}">← Previous</a>{% endif %}
+    <span class="muted">Page {{ page_no }} of {{ pages }}</span>
+    {% if page_no < pages %}<a class="btn secondary small" href="?q={{ q|urlencode }}&kind={{ kind }}&page={{ page_no + 1 }}">Next →</a>{% endif %}
+  </div>{% endif %}
+</div>
+{% endblock %}

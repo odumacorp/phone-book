@@ -1,15 +1,36 @@
 {% extends "platform/base.html" %}
 {% block title %}{{ t.name }}{% endblock %}
+{% set back_href = '/platform/tenants' %}{% set back_label = 'All organisations' %}
 {% block content %}
-<a class="crumb" href="/platform/tenants">← All organisations</a>
 <div class="page-head row" style="justify-content:space-between">
-  <div><h1>{{ t.name }}</h1><p>Everything about this organisation. To add its notices, contacts and members, open its workspace.</p></div>
+  <div class="row" style="gap:16px;align-items:center">{% if profile.logo_url %}<img src="{{ profile.logo_url }}" alt="{{ t.name }} logo" class="org-logo big">{% endif %}
+    <div><h1>{{ t.name }}</h1><p>Everything about this organisation. To add its notices, contacts and members, open its workspace.</p></div></div>
   {% if manage %}<a class="btn" href="/platform/org/{{ t.id }}">Open workspace →</a>{% endif %}
 </div>
+{% if profile.about or profile.phone or profile.email or profile.website or profile.address %}
+<div class="card">
+  <h2>Profile <span class="muted" style="font-size:13px;font-weight:400">(set by the organisation in its Settings)</span></h2>
+  {% if profile.about %}<p style="white-space:pre-line">{{ profile.about }}</p>{% endif %}
+  <div class="muted">
+    {% if profile.phone %}📞 {{ profile.phone }} &nbsp; {% endif %}
+    {% if profile.email %}✉️ <a href="mailto:{{ profile.email }}">{{ profile.email }}</a> &nbsp; {% endif %}
+    {% if profile.website %}🌐 <a href="{{ profile.website }}" target="_blank" rel="noopener noreferrer">{{ profile.website }}</a> &nbsp; {% endif %}
+    {% if profile.address %}📍 {{ profile.address }}{% endif %}
+  </div>
+</div>
+{% endif %}
 <div class="card">
   <h2>Plan and status <span class="pill {{ 'on' if t.status == 'active' else 'warn' if t.status in ('trial', 'grace') else 'off' }}">{{ statuses[t.status] }}</span></h2>
   <p class="muted">Edition <b>{{ edition_name(t.edition) }}</b> · Plan <b>{{ plan_name(t.plan_key) }}</b> · Org code <b>{{ t.org_code or 'none yet' }}</b> ·
     {{ member_count }} members · created {{ fmt_date(t.created_at) }}</p>
+  {% if price and price.total is not none %}
+  <div class="price-total" style="margin:10px 0 14px">
+    <table class="price-lines">{% for label, cents in price.lines %}<tr><td>{{ label }}</td><td class="num">{{ kes(cents) if cents >= 0 else '− ' ~ kes(-cents) }}</td></tr>{% endfor %}
+      <tr class="price-sum"><td>Total for {{ member_count }} member{{ '' if member_count == 1 else 's' }}</td><td class="num">{{ kes(price.total) }} / {{ price.per }}</td></tr>
+      {% if price.per == 'year' and price.per_month %}<tr><td class="muted">Works out at</td><td class="num muted">{{ kes(price.per_month) }} / month</td></tr>{% endif %}
+    </table>
+  </div>
+  {% elif price %}<p class="muted">This plan is quoted: no automatic total.</p>{% endif %}
   {% if manage %}
   <form method="post" action="/platform/tenants/{{ t.id }}/update">
     <input type="hidden" name="csrf" value="{{ csrf }}">

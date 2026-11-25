@@ -25,7 +25,8 @@ def public_organisations():
     """Organisations people can choose at sign-up (open or by approval; invite-only ones aren't listed)."""
     rows = fetch_all("SELECT id, name, edition FROM tenants WHERE status IN ('trial', 'active') ORDER BY name")
     names = {e["key"]: e["name"] for e in tenancy.editions()}
-    return [{"id": r["id"], "name": r["name"], "kind": names.get(r["edition"], "")} for r in rows
+    from pb.org.profile import logo_url
+    return [{"id": r["id"], "name": r["name"], "kind": names.get(r["edition"], ""), "logo_url": logo_url(r["id"])} for r in rows
             if tenancy.get_setting(r["id"], "join_mode") != "closed"]
 
 

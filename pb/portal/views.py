@@ -12,6 +12,7 @@ from pb.messaging import sms
 from pb.portal import bp, done, failed, is_staff, needs
 from pb.rbac import engine as rbac
 from pb.rbac.catalogue import ALL_PERMISSIONS, SYSTEM_ROLES
+from pb.org import profile as org_profile
 from pb.org import structure
 from pb.tenancy import tenants as tenancy
 from pb.audit import audit
@@ -60,7 +61,8 @@ def dashboard():
 def tenants_list():
     status = request.args.get("status") or None
     query = (request.args.get("q") or "").strip() or None
-    rows = tenancy.tenants(status=status, reseller_id=_reseller_id(), query=query)
+    from pb.org.profile import logo_url
+    rows = [dict(t, logo_url=logo_url(t["id"])) for t in tenancy.tenants(status=status, reseller_id=_reseller_id(), query=query)]
     return render_template(
         "platform/tenants.html", page="tenants", rows=rows, status=status, q=query or "", statuses=tenancy.STATUSES,
         editions=tenancy.editions(active_only=True), plans=catalogue.plans(audience="enterprise", active_only=False),
@@ -90,8 +92,12 @@ def tenant_detail(tenant_id):
     if not t or not _can_open_tenant(t):
         abort(404)
     allocations = ussd_codes.allocations(tenant_id)
+    member_total = len(tenancy.members(tenant_id, limit=100000))
+    plan_row = catalogue.plan(t["plan_key"]) if t["plan_key"] else None
+    price = catalogue.quote(plan_row, member_total, catalogue.plan_tiers(plan_row["key"])) if plan_row else None
     return render_template(
-        "platform/tenant.html", page="tenants", t=t, statuses=tenancy.STATUSES, modules=tenancy.tenant_modules(tenant_id),
+        "platform/tenant.html", page="tenants", t=t, profile=org_profile.get(tenant_id), statuses=tenancy.STATUSES,
+        price=price, kes=catalogue.kes, modules=tenancy.tenant_modules(tenant_id),
         settings=tenancy.settings(tenant_id), setting_help=tenancy.SETTINGS, setting_choices=tenancy.SETTING_CHOICES,
         plans=catalogue.plans(audience="enterprise"), editions=tenancy.editions(),
         members=tenancy.members(tenant_id, limit=50), member_count=len(tenancy.members(tenant_id, limit=100000)),
@@ -410,6 +416,131 @@ def staff_update(staff_id):
     except (ValueError, rbac.PermissionDenied) as e:
         return failed(str(e), "platform.staff_page")
     return done("Saved.", "platform.staff_page")
+
+
+# ---------------------------------------------------------------- people (everyone's accounts)
+
+def _phone_from_url(digits):
+    from pb.users import get_user
+    phone = "+" + digits if digits.isdigit() else None
+    if not phone or not get_user(phone, fresh=True):
+        abort(404)
+    return phone
+
+
+@bp.route("/people", methods=["GET"])
+@needs("platform.users.view", "platform.users.manage")
+def people_page():
+    from pb import accounts_admin
+    kind = request.args.get("kind") if request.args.get("kind") in accounts_admin.KINDS else "all"
+    q = (request.args.get("q") or "").strip()
+    page_no = int(request.args.get("page") or 1) if str(request.args.get("page") or "1").isdigit() else 1
+    rows, total = accounts_admin.search(q, kind, page_no)
+    return render_template("platform/people.html", page="people", rows=rows, total=total, q=q, kind=kind,
+                           kinds=accounts_admin.KINDS, page_no=page_no, pages=max(1, -(-total // accounts_admin.PAGE)))
+
+
+@bp.route("/people/<digits>", methods=["GET"])
+@needs("platform.users.view", "platform.users.manage")
+def person_page(digits):
+    from pb import accounts_admin
+    from pb.ussd.session import NETWORKS
+    phone = _phone_from_url(digits)
+    return render_template("platform/person.html", page="people", p=accounts_admin.detail(phone), digits=digits,
+                           networks=NETWORKS, manage=rbac.can(g.principal, "platform.users.manage"))
+
+
+@bp.route("/people/<digits>", methods=["POST"])
+@needs("platform.users.manage")
+def person_update(digits):
+    from pb import accounts_admin
+    phone = _phone_from_url(digits)
+    action = request.form.get("action")
+    try:
+        if action == "off":
+            accounts_admin.turn(g.principal, phone, True)
+            message = "Account turned off: it can't log in anywhere until you turn it back on. Its data is kept."
+        elif action == "on":
+            accounts_admin.turn(g.principal, phone, False)
+            message = "Account turned on."
+        elif action == "logout":
+            accounts_admin.log_out_everywhere(g.principal, phone)
+            message = "Logged out everywhere: the app, the website and USSD."
+        elif action == "unlock":
+            accounts_admin.unlock(g.principal, phone)
+            message = "Unlocked: wrong PIN and password counts are cleared."
+        elif action == "rename":
+            accounts_admin.rename(g.principal, phone, request.form.get("name"))
+            message = "Name saved."
+        else:
+            abort(400)
+    except ValueError as e:
+        return failed(str(e), "platform.person_page", digits=digits)
+    return done(message, "platform.person_page", digits=digits)
+
+
+# ---------------------------------------------------------------- test accounts (made by scripts/seed_test_accounts.py)
+
+def _test_users():
+    from pb.db import fetch_all
+    users = fetch_all("SELECT phone, name, disabled FROM users WHERE is_test = 1 ORDER BY name, phone")
+    return [dict(u, orgs=[o["name"] for o in tenancy.memberships_of(u["phone"])], local="0" + u["phone"][4:] if u["phone"].startswith("+254") else u["phone"])
+            for u in users]
+
+
+@bp.route("/test-accounts", methods=["GET"])
+@needs("platform.flags.manage")
+def test_accounts_page():
+    from pb.db import fetch_all
+    users = _test_users()
+    staff_rows = fetch_all("SELECT id, email, name, active FROM staff_users WHERE is_test = 1 ORDER BY name")
+    org_names = sorted({o for u in users for o in u["orgs"]}, key=str.lower)
+    return render_template("platform/test_accounts.html", page="test_accounts", users=users, staff_rows=staff_rows,
+                           org_names=org_names, off=sum(1 for u in users if u["disabled"]) + sum(1 for s in staff_rows if not s["active"]),
+                           me=g.staff["id"] if g.staff else None)
+
+
+@bp.route("/test-accounts", methods=["POST"])
+@needs("platform.flags.manage")
+def test_accounts_update():
+    from pb.db import fetch_all
+    from pb.users import set_disabled
+    f, me = request.form, g.staff["id"] if g.staff else None
+    action = f.get("action")
+    try:
+        if action in ("user_on", "user_off"):
+            row = fetch_one("SELECT phone FROM users WHERE phone = ? AND is_test = 1", (f.get("phone"),))
+            if not row:
+                raise ValueError("That isn't a test account.")
+            set_disabled(g.principal, row["phone"], action == "user_off")
+            message = "Account turned off: it can't log in until you turn it back on." if action == "user_off" else "Account turned on."
+        elif action in ("staff_on", "staff_off"):
+            row = fetch_one("SELECT id FROM staff_users WHERE id = ? AND is_test = 1", (int(f.get("staff_id") or 0),))
+            if not row:
+                raise ValueError("That isn't a test staff account.")
+            if row["id"] == me and action == "staff_off":
+                raise ValueError("You can't turn off the account you're logged in with.")
+            staff_auth.set_active(g.principal, row["id"], action == "staff_on")
+            message = "Staff account turned off." if action == "staff_off" else "Staff account turned on."
+        elif action in ("all_on", "all_off"):
+            off = action == "all_off"
+            org = f.get("org") or ""
+            count = 0
+            for u in _test_users():
+                if (not org or org in u["orgs"] or (org == "-" and not u["orgs"])) and bool(u["disabled"]) != off:
+                    set_disabled(g.principal, u["phone"], off)
+                    count += 1
+            if not org:
+                for s in fetch_all("SELECT id, active FROM staff_users WHERE is_test = 1"):
+                    if s["id"] != me and bool(s["active"]) == off:
+                        staff_auth.set_active(g.principal, s["id"], not off)
+                        count += 1
+            message = f"{count} test account{'' if count == 1 else 's'} turned {'off' if off else 'on'}."
+        else:
+            abort(400)
+    except ValueError as e:
+        return failed(str(e), "platform.test_accounts_page")
+    return done(message, "platform.test_accounts_page")
 
 
 # ---------------------------------------------------------------- settings (platform switches, editions)

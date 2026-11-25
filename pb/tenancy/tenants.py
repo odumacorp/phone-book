@@ -398,3 +398,8 @@ def set_org_titles(actor, tenant_id, titles):
         audit("tenant.titles", tenant_id, ("setting", "titles"), {"added": [t for t in clean if t not in old],
                                                                     "removed": [t for t in old if t not in clean]}, actor=actor)
     return clean
+
+
+def phones_in_organisations():
+    """Every phone number with an active membership somewhere (the platform's People page: who is an individual)."""
+    return {r["user_phone"] for r in fetch_all("SELECT DISTINCT user_phone FROM memberships WHERE status = 'active'")}

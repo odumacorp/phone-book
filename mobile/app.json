@@ -42,6 +42,13 @@
         {
           "contactsPermission": "Remote Phonebook lets you choose contacts to add to your phone book, so you can reach them by USSD."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Remote Phonebook lets you choose a profile photo.",
+          "cameraPermission": "Remote Phonebook lets you take a profile photo."
+        }
       ]
     ]
   }

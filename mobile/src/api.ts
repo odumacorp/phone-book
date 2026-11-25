@@ -25,6 +25,7 @@ export type Me = {
   memberships?: Membership[]; // organisations, with role, title and departments
   last_login?: { at: number; how: 'app' | 'USSD'; where: string } | null; // the login before this one
   contacts_managed_by?: string | null; // an organisation provides this person's contacts: no adding or syncing
+  photo?: string | null; // profile photo as a data URL; null: show the person icon
 };
 /** The user's place in one organisation, for the profile card. */
 export type Membership = {
@@ -134,7 +135,7 @@ export type Registration = {
 /** What happened with the organisation chosen at sign-up. */
 export type JoinResult = { name: string; status: 'member' | 'pending' | 'already' };
 /** An organisation people can choose at sign-up. */
-export type PublicOrg = { id: number; name: string; kind: string };
+export type PublicOrg = { id: number; name: string; kind: string; logo_url?: string | null };
 
 /** Organisations listed for sign-up (invite-only ones aren't listed: they're joined with their code). */
 export const getPublicOrgs = () => request<{ orgs: PublicOrg[] }>('/api/orgs/public');
@@ -322,11 +323,21 @@ export const syncContacts = (token: string, contacts: SyncContact[]) =>
   request<SyncResult>('/api/contacts/sync', { method: 'POST', body: JSON.stringify({ contacts }) }, token);
 
 /** An organisation the user belongs to (school, SACCO, employer...). */
-export type OrgSummary = { id: number; name: string; notices: number; urgent: number };
+export type OrgSummary = { id: number; name: string; notices: number; urgent: number; logo_url?: string | null };
 export type OrgContact = { id: number; name: string; phone: string; title: string | null; group: string | null };
 export type OrgNotice = { id: number; title: string; body: string; urgent: boolean; pinned: boolean; at: number };
 export type OrgDetail = {
-  org: { id: number; name: string };
+  org: {
+    id: number;
+    name: string;
+    // the organisation's own profile (each may be null) and logo; logo_url is a path on the server
+    about?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+    address?: string | null;
+    logo_url?: string | null;
+  };
   notices: OrgNotice[];
   contacts: OrgContact[];
   emergency: OrgContact[];
@@ -337,3 +348,14 @@ export const getOrgs = (token: string) => request<{ orgs: OrgSummary[] }>('/api/
 
 /** What an organisation shares with this user: notices, contacts and emergency contacts. */
 export const getOrg = (token: string, id: number) => request<OrgDetail>(`/api/orgs/${id}`, {}, token);
+
+/** Set the profile photo (a data URL of a small square JPEG). Returns the stored photo. */
+export async function setPhoto(token: string, image: string): Promise<string | null> {
+  const res = await request<{ photo: string | null }>('/api/me/photo', { method: 'PUT', body: JSON.stringify({ image }) }, token);
+  return res.photo;
+}
+
+/** Remove the profile photo (the app goes back to the person icon). */
+export async function removePhoto(token: string): Promise<void> {
+  await request('/api/me/photo', { method: 'DELETE' }, token);
+}

@@ -28,7 +28,11 @@ def otp_on():
 
 
 def login_needs_otp(phone):
-    """App/website login: the platform switch, or any organisation the person belongs to that forces OTP on."""
+    """App/website login: the platform switch, or any organisation the person belongs to that forces OTP on.
+    Test accounts never get one (they're never texted: see messaging.is_test_account)."""
+    from pb.messaging import is_test_account
+    if is_test_account(phone):
+        return False
     if otp_on():
         return True
     row = fetch_one(

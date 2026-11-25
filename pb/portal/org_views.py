@@ -12,6 +12,8 @@ from flask import abort, g, redirect, render_template, request, url_for
 from pb.billing import ussd_codes
 from flask import jsonify
 
+from pb.org import profile as org_profile
+from pb.photos import data_url_from_upload
 from pb.org import change_notices, contact_groups, content, joining, managed_contacts, reminders, structure, suggestions
 from pb.tenancy.repo import TenantRepo
 from pb.text import local_number
@@ -68,6 +70,7 @@ def open_workspace(tenant_id):
 def page(template, **values):
     tenant_id = g.org["id"]
     return render_template(template, org=g.org, areas=g.org_areas, staff_help=g.org_staff_help, page="org",
+                           org_logo=org_profile.logo_url(tenant_id),
                            audience_departments=[(d["id"], d["name"]) for d in structure.departments(tenant_id)],
                            audience_groups=[(x["id"], x["name"]) for x in structure.groups(tenant_id)], **values)
 
@@ -353,7 +356,7 @@ def org_members(tenant_id):
         names.update({f"g:{x['id']}": x["name"] for x in structure.groups(tenant_id)})
         only = editing["list_mode"] == "selected"
         list_contacts_for = [dict(c, reason=("picked for them" if c["shown"] else "not picked") if only
-                                  else ("from contact group " + ", ".join(c["via_groups"])
+                                  else ("from " + ", ".join(c["via_groups"])
                                         if c["shown"] and c["via_groups"] and not (c["in_phone_books"] and content.matches(c["phone_book_audience"], tags))
                                         else content.list_reason(c, tags, editing["id"], names)))
                              for c in content.member_list_contacts(tenant_id, editing["id"])]
@@ -521,6 +524,22 @@ def org_contact_group_delete(tenant_id, group_id):
     return done("Contact group deleted. Its contacts are still in Contacts.", "platform.org_contact_groups", tenant_id=tenant_id)
 
 
+def list_picker(tenant_id, tag):
+    """For a role / department / group: (contacts with on = in their default list and via = the contact groups
+    giving it to them; the contact groups, with on = given to them)."""
+    via = contact_groups.given_contacts(tenant_id, {tag})
+    rows = [dict(c, via=via.get(c["id"], [])) for c in content.list_defaults(tenant_id, tag)]
+    return rows, contact_groups.for_tag(tenant_id, tag)
+
+
+def save_list_picker(tenant_id, tag):
+    """Save a list_picker form: the contact groups ticked (when the form showed them), then the single contacts."""
+    changed = 0
+    if request.form.get("groups_shown"):
+        changed += contact_groups.set_for_tag(g.principal, tenant_id, tag, request.form.getlist("contact_groups"))
+    return changed + content.set_list_defaults(g.principal, tenant_id, tag, request.form.getlist("contacts"))
+
+
 @bp.route("/org/<int:tenant_id>/contact-lists", methods=["GET", "POST"])
 def org_contact_lists(tenant_id):
     """Default contact lists: which contacts each role, department or group gets in their own lists."""
@@ -536,14 +555,14 @@ def org_contact_lists(tenant_id):
         tag = choices[0][0] if choices else "member"
     if request.method == "POST":
         try:
-            changed = content.set_list_defaults(g.principal, tenant_id, tag, request.form.getlist("contacts"))
+            changed = save_list_picker(tenant_id, tag)
         except (ValueError, content.NotAllowed) as e:
             return failed(str(e), "platform.org_contact_lists", tenant_id=tenant_id, **{"for": tag})
         return done(f"Default list for {every[tag]} saved." if changed else "Nothing changed.",
                     "platform.org_contact_lists", tenant_id=tenant_id, **{"for": tag})
-    rows = content.list_defaults(tenant_id, tag)
+    rows, picker_groups = list_picker(tenant_id, tag)
     people = len([p for p, tags in content.member_tags(tenant_id).items() if tag in tags])
-    return page("platform/org/contact_lists.html", rows=rows, tag=tag, tag_name=every[tag], roles=choices,
+    return page("platform/org/contact_lists.html", rows=rows, pick_groups=picker_groups, tag=tag, tag_name=every[tag], roles=choices,
                 departments=departments, groups=groups, people=people)
 
 
@@ -610,7 +629,11 @@ def org_structure(tenant_id):
     every = [d["name"] for d in depts] + [x["name"] for x in grps]
     editing_dept = next((d for d in depts if str(d["id"]) == request.args.get("dept")), None)
     editing_group = next((x for x in grps if str(x["id"]) == request.args.get("group")), None)
+    depts = [dict(d, contact_count=sum(1 for c in list_picker(tenant_id, f"d:{d['id']}")[0] if c["on"] or c["via"])) for d in depts]
+    can_contacts = content.can_manage(g.principal, tenant_id, "contacts.manage")
+    pick_rows, pick_groups = list_picker(tenant_id, f"d:{editing_dept['id']}") if editing_dept and can_contacts else ([], [])
     return page("platform/org/structure.html", departments=depts, groups=grps, kinds=structure.GROUP_KINDS,
+                pick_rows=pick_rows, pick_groups=pick_groups, can_contacts=can_contacts,
                 dept_suggestions=suggestions.department_suggestions(edition, every)[:16],
                 group_suggestions=suggestions.group_suggestions(edition, every)[:16],
                 editing_dept=editing_dept, editing_group=editing_group)
@@ -637,6 +660,18 @@ def org_department_save(tenant_id):
     return _structure_action(tenant_id, lambda: structure.save_department(
         g.principal, tenant_id, f.get("name"), _int_or_none(f.get("parent_id")), dept_id),
         "Department saved." if dept_id else f"Department {' '.join((f.get('name') or '').split())} added.")
+
+
+@bp.route("/org/<int:tenant_id>/departments/<int:department_id>/contacts", methods=["POST"])
+def org_department_contacts(tenant_id, department_id):
+    open_workspace(tenant_id)
+    require_area("structure")
+    try:
+        save_list_picker(tenant_id, f"d:{department_id}")
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_structure", tenant_id=tenant_id, dept=department_id, _anchor="dept-contacts")
+    return done("Saved: everyone in this department has the ticked contacts and contact groups in their own list.",
+                "platform.org_structure", tenant_id=tenant_id)
 
 
 @bp.route("/org/<int:tenant_id>/departments/<int:department_id>/delete", methods=["POST"])
@@ -914,11 +949,32 @@ def org_settings(tenant_id):
     require_area("settings")
     members = content.member_rows(tenant_id)
     titles = suggestions.title_options(g.org["edition"], [m["title"] for m in members if m["title"]])
-    return page("platform/org/settings.html", mode=tenancy.get_setting(tenant_id, "allow_other_phone"),
+    return page("platform/org/settings.html", profile=org_profile.get(tenant_id), mode=tenancy.get_setting(tenant_id, "allow_other_phone"),
                 join_mode=tenancy.get_setting(tenant_id, "join_mode"), org_code=g.org["org_code"],
                 member_contacts=tenancy.get_setting(tenant_id, "member_contacts"),
                 rules=tenancy.other_phone_rules(tenant_id), choices=audience_choices(tenant_id),
                 departments=structure.departments(tenant_id), titles=titles)
+
+
+@bp.route("/org/<int:tenant_id>/profile", methods=["POST"])
+def org_profile_save(tenant_id):
+    """The organisation profile card on Settings: details, a new logo (file), or removing the logo."""
+    open_workspace(tenant_id)
+    require_area("settings")
+    f = request.form
+    try:
+        if f.get("action") == "remove_logo":
+            org_profile.remove_logo(g.principal, tenant_id)
+            message = "Logo removed."
+        else:
+            org_profile.save(g.principal, tenant_id, f)
+            upload = data_url_from_upload(request.files.get("logo"))
+            if upload:
+                org_profile.set_logo(g.principal, tenant_id, upload)
+            message = "Profile saved. Your members see it in the app under My organisations." + (" Logo updated." if upload else "")
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), "platform.org_settings", tenant_id=tenant_id, _anchor="profile")
+    return done(message, "platform.org_settings", tenant_id=tenant_id, _anchor="profile")
 
 
 @bp.route("/org/<int:tenant_id>/settings", methods=["POST"])

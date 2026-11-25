@@ -1,7 +1,7 @@
 {% extends "platform/base.html" %}
 {% block title %}{{ item.name }}{% endblock %}
+{% set back_href = '/platform/pricing' %}{% set back_label = 'All prices' %}
 {% block content %}
-<a class="crumb" href="/platform/pricing">← All prices</a>
 <div class="card">
   <h2>{{ item.name }} <span class="muted">({{ item.key }}, {{ item.audience }})</span></h2>
   <form method="post" action="/platform/pricing/plan/{{ item.key }}">
@@ -24,6 +24,71 @@
     </fieldset>
   </form>
 </div>
+
+<div class="card" id="calc">
+  <h2>Total price</h2>
+  <p class="muted">Worked out from the prices above (it updates as you type, before you save){{ ' and the volume tiers below' if item.model == 'seat' }}.</p>
+  <div class="row" style="gap:16px;margin-bottom:12px">
+    <label class="field" id="calc-members-box" style="max-width:220px;margin:0">Members<input id="calc-members" type="number" min="0" step="1"
+      value="{{ [((item.included_members or 0) * 2), 100]|max }}"></label>
+    <label class="field" id="calc-tx-box" style="max-width:220px;margin:0">Transactions<input id="calc-tx" type="number" min="0" step="1" value="1"></label>
+  </div>
+  <table class="price-lines" id="calc-lines"></table>
+</div>
+<script>
+(() => {
+  const form = document.querySelector('form[action$="/{{ item.key }}"]');
+  const tiers = {{ tiers|map(attribute='from_members')|list|tojson }}.map((f, i) => ({ from: f, price: {{ tiers|map(attribute='per_member_price')|list|tojson }}[i] }));
+  const $ = (n) => form.querySelector(`[name="${n}"]`);
+  const cents = (n) => Math.round((parseFloat(($(n).value || '0').replace(/,/g, '')) || 0) * 100);
+  const int = (el) => Math.max(0, parseInt(el.value || '0', 10) || 0);
+  const kes = (c) => {
+    const neg = c < 0, v = Math.abs(Math.round(c)), whole = Math.floor(v / 100), part = v % 100;
+    return (neg ? '− ' : '') + 'KES ' + whole.toLocaleString('en-KE') + (part ? '.' + String(part).padStart(2, '0') : '');
+  };
+  const out = document.getElementById('calc-lines'), membersEl = document.getElementById('calc-members'), txEl = document.getElementById('calc-tx');
+  function render() {
+    const model = $('model').value, interval = $('billing_interval').value || 'month';
+    const base = cents('base_price'), discount = Math.min(100, Math.max(0, parseInt($('annual_discount_pct').value || '0', 10) || 0));
+    document.getElementById('calc-members-box').hidden = model !== 'seat';
+    document.getElementById('calc-tx-box').hidden = model !== 'per_transaction';
+    const lines = []; let total = null, per = null, perMonth = null, who = '';
+    if (model === 'per_transaction') {
+      const n = int(txEl); total = base * n; per = n === 1 ? 'transaction' : `${n.toLocaleString('en-KE')} transactions`;
+      lines.push([`${n.toLocaleString('en-KE')} x ${kes(base)}`, total]); per = null; who = ` for ${n.toLocaleString('en-KE')} transaction${n === 1 ? '' : 's'}`;
+    } else if (model === 'seat') {
+      const members = int(membersEl), included = int($('included_members')), extra = Math.max(0, members - included);
+      let rate = cents('per_member_price'), tier = null;
+      tiers.slice().sort((a, b) => a.from - b.from).forEach((t) => { if (members >= t.from) tier = t; });
+      if (tier) rate = tier.price;
+      const monthly = base + extra * rate;
+      lines.push([`Base price (includes ${included.toLocaleString('en-KE')} members)`, base]);
+      if (extra) lines.push([`${extra.toLocaleString('en-KE')} extra member${extra === 1 ? '' : 's'} x ${kes(rate)}` + (tier ? ` (volume price from ${tier.from.toLocaleString('en-KE')} members)` : ''), extra * rate]);
+      who = ` for ${members.toLocaleString('en-KE')} member${members === 1 ? '' : 's'}`;
+      if (interval === 'year') {
+        const year = monthly * 12, cut = Math.round(year * discount / 100);
+        lines.push(['Monthly total x 12 months', year]);
+        if (cut) lines.push([`Annual discount ${discount}%`, -cut]);
+        total = year - cut; per = 'year'; perMonth = Math.round(total / 12);
+      } else { total = monthly; per = 'month'; }
+    } else if (model === 'recurring') {
+      lines.push(['Price', base]);
+      if (interval === 'year' && discount) { const cut = Math.round(base * discount / 100); lines.push([`Annual discount ${discount}%`, -cut]); total = base - cut; }
+      else total = base;
+      per = interval === 'year' ? 'year' : 'month'; if (per === 'year') perMonth = Math.round(total / 12);
+    }
+    out.innerHTML = '';
+    const row = (a, b, cls) => { const tr = out.insertRow(); if (cls) tr.className = cls; tr.insertCell().textContent = a; const td = tr.insertCell(); td.className = 'num'; td.textContent = b; };
+    if (total === null) { row('Quoted plans are priced per customer: no automatic total.', ''); return; }
+    lines.forEach(([label, c]) => row(label, kes(c)));
+    row('Total' + who, kes(total) + (per ? ' / ' + per : ''), 'price-sum');
+    if (perMonth !== null) row('Works out at', kes(perMonth) + ' / month', 'muted');
+  }
+  form.addEventListener('input', render); form.addEventListener('change', render);
+  membersEl.addEventListener('input', render); txEl.addEventListener('input', render);
+  render();
+})();
+</script>
 
 <div class="card">
   <h2>What's included</h2>

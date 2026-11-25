@@ -30,7 +30,7 @@
     <tr><th>Organisation</th><th>Edition</th><th>Plan</th><th>Status</th><th>Org code</th><th class="num">Members</th><th>Created</th></tr>
     {% for t in rows %}
     <tr>
-      <td><a href="/platform/tenants/{{ t.id }}">{{ t.name }}</a></td><td>{{ edition_name(t.edition) }}</td><td>{{ plan_name(t.plan_key) }}</td>
+      <td><a href="/platform/tenants/{{ t.id }}" style="display:inline-flex;align-items:center;gap:8px">{% if t.logo_url %}<img src="{{ t.logo_url }}" alt="" class="org-logo" style="width:28px;height:28px;border-radius:6px">{% endif %}{{ t.name }}</a></td><td>{{ edition_name(t.edition) }}</td><td>{{ plan_name(t.plan_key) }}</td>
       <td><span class="pill {{ 'on' if t.status == 'active' else 'warn' if t.status in ('trial', 'grace') else 'off' }}">{{ statuses[t.status] }}</span></td>
       <td>{{ t.org_code or '-' }}</td><td class="num">{{ t.members }}</td><td>{{ fmt_date(t.created_at) }}</td>
     </tr>

@@ -14,6 +14,7 @@ from pb.db import execute, fetch_all, fetch_one, get_db, sql
 from pb.features import feature_on
 from pb.messaging import send_sms_async, sms
 from pb.notify import email_configured, notify_event, unread_count
+from pb.photos import photo_url, remove_photo, set_photo
 from pb.text import LOGIN_PHONE_FORMAT, clean_name, local_number, login_phone
 from pb.users import MAX_EMAILS, clean_email, email_owner, emails_json, get_user, set_pin, update_pin
 from pb.ussd.session import LOGIN_LOG_DAYS, NETWORKS, close_idle_ussd_logins, masked
@@ -394,7 +395,25 @@ def api_me():
         "memberships": profile_organisations(g.phone),  # organisation, role, title, departments for the profile card
         "last_login": previous_login(g.phone, getattr(g, "jti", None)),
         "contacts_managed_by": (managed_by(g.phone) or {}).get("name"),  # their organisation provides their contacts
+        "photo": photo_url(g.phone),  # data URL, or None: the app shows a person icon
     })
+
+
+@app.route("/api/me/photo", methods=["PUT"])
+@require_auth
+def api_set_photo():
+    try:
+        url = set_photo(g.phone, body_json().get("image"))
+    except ValueError as e:
+        return api_error(str(e), 400)
+    return jsonify({"ok": True, "photo": url})
+
+
+@app.route("/api/me/photo", methods=["DELETE"])
+@require_auth
+def api_remove_photo():
+    remove_photo(g.phone)
+    return jsonify({"ok": True, "photo": None})
 
 
 def previous_login(phone, current_jti):

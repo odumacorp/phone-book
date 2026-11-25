@@ -47,3 +47,24 @@ def website_icons(filename):
     response = send_from_directory(WEB_DIR, filename)
     response.headers["Cache-Control"] = "public, max-age=86400"
     return response
+
+
+@app.route("/logos/<int:tenant_id>.<any(jpg, png, webp):ext>", methods=["GET"])
+def org_logo(tenant_id, ext):
+    """An organisation's logo (public branding, like a website logo). The ?v= in links changes when it does."""
+    import base64
+
+    from flask import abort, request
+
+    from pb.org import profile
+    from pb.tenancy import tenants as tenancy
+    t = tenancy.tenant(tenant_id)
+    found = profile.logo(tenant_id) if t and t["status"] != "closed" else None
+    if not found:
+        abort(404)
+    mime, data = found
+    response = app.response_class(base64.b64decode(data), mimetype=mime)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable" if request.args.get("v") else "public, max-age=300"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "default-src 'none'"
+    return response

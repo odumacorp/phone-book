@@ -1,0 +1,71 @@
+{% extends "platform/base.html" %}
+{% block title %}{{ p.name or p.local }}{% endblock %}
+{% set back_href = '/platform/people' %}{% set back_label = 'People' %}
+{% block content %}
+<div class="page-head row" style="gap:16px;align-items:center">
+  {% if p.photo %}<img src="{{ p.photo }}" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover">
+  {% else %}<div style="width:72px;height:72px;border-radius:50%;background:var(--line);display:flex;align-items:center;justify-content:center;font-size:34px" aria-hidden="true">👤</div>{% endif %}
+  <div><h1 style="margin:0">{{ p.name or '(no name)' }}</h1>
+    <p style="margin:4px 0 0"><code>{{ p.local }}</code> ·
+      <span class="pill {{ 'off' if p.disabled else 'on' }}">{{ 'Turned off' if p.disabled else 'On' }}</span>
+      {% if p.is_test %}<span class="pill off">test account</span>{% endif %}
+      {% if p.locked %}<span class="pill warn">wrong PIN/password attempts</span>{% endif %}</p></div>
+</div>
+
+{% if manage %}
+<div class="card">
+  <h2>Manage</h2>
+  <div class="row">
+    <form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if p.disabled %}<button type="submit" name="action" value="on">Turn on</button>
+      {% else %}<button class="danger" type="submit" name="action" value="off" onclick="return confirm('Turn this account off? They can\'t log in anywhere until you turn it back on.')">Turn off</button>{% endif %}</form>
+    <form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="secondary" type="submit" name="action" value="logout" onclick="return confirm('Log them out of the app, website and USSD?')">Log out everywhere</button></form>
+    {% if p.locked %}<form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="secondary" type="submit" name="action" value="unlock">Unlock</button></form>{% endif %}
+  </div>
+  <form method="post" class="row" style="margin-top:14px;max-width:520px"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="action" value="rename"><input name="name" value="{{ p.name or '' }}" maxlength="80" placeholder="Their name">
+    <button class="secondary" type="submit">Save name</button></form>
+</div>
+{% endif %}
+
+<div class="grid2" style="gap:18px;align-items:start">
+  <div class="card">
+    <h2>Account</h2>
+    <table>
+      <tr><td class="muted">Phone</td><td><code>{{ p.local }}</code></td></tr>
+      <tr><td class="muted">Email</td><td>{% for e in p.emails %}{{ e.email }}{% if not e.verified %} <span class="muted">(not verified)</span>{% endif %}<br>{% else %}-{% endfor %}</td></tr>
+      <tr><td class="muted">App password</td><td>{{ 'Set' if p.has_password else 'Not set (USSD only)' }}</td></tr>
+      <tr><td class="muted">Own contacts</td><td>{{ p.contacts }} <span class="muted">(private: not shown)</span></td></tr>
+      <tr><td class="muted">First seen</td><td>{{ fmt_time(p.first_seen) if p.first_seen else '-' }}</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Organisations</h2>
+    {% for o in p.organisations %}
+      <div class="list-item"><div><a href="/platform/tenants/{{ o.id }}"><b>{{ o.name }}</b></a>
+        <div class="muted">{{ o.roles|join(', ') }}{{ ' · ' ~ o.title if o.title }}{{ ' · ' ~ o.groups|join(', ') if o.groups }}</div></div></div>
+    {% else %}<p class="muted">None: an individual using their own phone book.</p>{% endfor %}
+  </div>
+</div>
+
+<div class="grid2" style="gap:18px;align-items:start">
+  <div class="card">
+    <h2>Open app and website sessions</h2>
+    <table><tr><th>Device</th><th>Since</th><th>Last active</th></tr>
+      {% for s in p.sessions %}<tr><td>{{ s.device or 'Unknown device' }}</td><td>{{ fmt_time(s.created_at) }}</td><td>{{ fmt_time(s.last_seen) }}</td></tr>
+      {% else %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Recent USSD logins</h2>
+    <table><tr><th>When</th><th>From</th><th></th></tr>
+      {% for l in p.logins %}<tr><td>{{ fmt_time(l.created_at) }}</td>
+        <td>{{ 'their phone' if l.caller == p.phone else l.caller }}{{ ' (' ~ networks.get(l.network, '') ~ ')' if networks.get(l.network) }}</td>
+        <td><span class="pill {{ 'on' if l.success else 'off' }}">{{ 'OK' if l.success else 'Failed' }}</span></td></tr>
+      {% else %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+{% endblock %}

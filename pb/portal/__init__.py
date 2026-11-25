@@ -40,7 +40,7 @@ def current_principal():
         session.pop("staff_id", None)
     if session.get("user_phone"):
         user = get_user(session["user_phone"])
-        if user and user["password_hash"]:
+        if user and user["password_hash"] and not user["disabled"]:
             return rbac.user_principal(user["phone"]), {"id": None, "name": user["name"] or user["phone"], "email": "",
                                                         "phone": user["phone"], "kind": "org"}
         session.pop("user_phone", None)

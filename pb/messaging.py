@@ -15,8 +15,22 @@ if AT_API_KEY:
 else:
     log.warning("AT_API_KEY not set - SMS features are disabled")
 
+def is_test_account(phone):
+    """Test accounts (scripts/seed_test_accounts.py) use made-up numbers that may belong to real people: never text or
+    call them."""
+    from pb.db import fetch_one
+    return bool(fetch_one("SELECT 1 AS x FROM users WHERE phone = ? AND is_test = 1", (phone,)))
+
+
+def without_test_accounts(phones):
+    return [p for p in phones if not is_test_account(p)]
+
+
 def send_sms_async(to, message):
     g.action_done = True  # a USSD path that sent an SMS must not be resumed (it would send again)
+    if is_test_account(to):
+        log.info("SMS to test account %s not sent: %s", to, message[:60])
+        return
 
     def _send():
         try:
@@ -29,6 +43,9 @@ def send_sms_async(to, message):
 
 
 def start_call_async(to):
+    if is_test_account(to):
+        log.info("Call to test account %s not started", to)
+        return
     def _call():
         try:
             resp = voice.call(callFrom=AT_VOICE_NUMBER, callTo=[to])

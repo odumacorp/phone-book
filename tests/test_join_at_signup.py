@@ -23,7 +23,7 @@ def test_public_list_hides_invite_only(client, register):
         tenancy.set_setting(rbac.ROOT, hidden, "join_mode", "closed")
     names = [o["name"] for o in client.get("/api/orgs/public").get_json()["orgs"]]
     assert "Test Advocates" in names and "Secret Club" not in names
-    assert client.get("/api/orgs/public").get_json()["orgs"][0].keys() == {"id", "name", "kind"}  # nothing private
+    assert client.get("/api/orgs/public").get_json()["orgs"][0].keys() == {"id", "name", "kind", "logo_url"}  # nothing private (the logo is public branding)
     del t
 
 

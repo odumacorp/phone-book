@@ -2,7 +2,7 @@
 from flask import g, jsonify
 
 from pb.api.auth import api_error, body_json, require_auth
-from pb.org import content, joining
+from pb.org import content, joining, profile
 from pb.tenancy import tenants as tenancy
 from pb.web import app
 
@@ -20,6 +20,7 @@ def api_orgs():
         orgs.append({
             "id": o["tenant_id"],
             "name": o["name"],
+            "logo_url": profile.logo_url(o["tenant_id"]),
             "notices": len(notices),
             "urgent": sum(1 for n in notices if n["is_emergency"]),
         })
@@ -33,7 +34,7 @@ def api_org(tenant_id):
         return api_error("You're not a member of this organisation.", 404)
     t = tenancy.tenant(tenant_id)
     return jsonify({
-        "org": {"id": tenant_id, "name": t["name"]},
+        "org": {"id": tenant_id, "name": t["name"], **profile.public(tenant_id)},
         "notices": [
             {"id": n["id"], "title": n["title"], "body": n["body"], "urgent": bool(n["is_emergency"]), "pinned": bool(n["pinned"]),
              "at": n["publish_at"]}

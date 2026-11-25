@@ -3,7 +3,8 @@ services:
     name: phone-book-ussd
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    # Test accounts (scripts/seed_test_accounts.py) are created only when SEED_TEST_ACCOUNTS=true is set below
+    buildCommand: pip install -r requirements.txt && python scripts/seed_test_accounts.py --deploy
     startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
     healthCheckPath: /health
     envVars:
@@ -38,4 +39,8 @@ services:
       - key: SMTP_PASSWORD
         sync: false
       - key: EMAIL_FROM
+        sync: false
+      - key: SEED_TEST_ACCOUNTS  # "true": create the test organisations and people on each deploy (password 12345678, PIN 1234)
+        sync: false
+      - key: SEED_TEST_STAFF  # "true": also the test platform staff (incl. a Super Admin with password 12345678). Leave unset in production
         sync: false

@@ -27,6 +27,18 @@
   .page-head h1 { font-size: 26px; margin: 0 0 4px; font-weight: 700; }
   .page-head p { margin: 0; color: var(--muted); max-width: 720px; }
   .crumb { font-size: 14px; margin-bottom: 8px; display: inline-block; }
+  .price-lines { width: 100%; max-width: 640px; border-collapse: collapse; }
+  .price-lines td { padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .price-lines td.num { text-align: right; white-space: nowrap; padding-left: 16px; }
+  .price-lines tr.price-sum td { font-weight: 800; font-size: 17px; border-bottom: 2px solid var(--text, #111); padding-top: 10px; }
+  .org-head { display: flex; align-items: center; gap: 10px; margin: 18px 10px 6px; }
+  .org-head h6 { margin: 0; }
+  .org-logo { width: 36px; height: 36px; border-radius: 8px; object-fit: contain; background: #fff; border: 1px solid var(--line); flex: none; }
+  .org-logo.big { width: 88px; height: 88px; border-radius: 14px; }
+  .back-btn { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 6px 12px 6px 10px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--card); color: inherit; font-size: 14px; font-weight: 600; text-decoration: none; }
+  .back-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .back-btn span { font-size: 16px; line-height: 1; }
   h2 { font-size: 18px; margin: 0 0 6px; }
   h3 { font-size: 16px; margin: 0 0 4px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; margin-bottom: 18px; box-shadow: var(--shadow); }

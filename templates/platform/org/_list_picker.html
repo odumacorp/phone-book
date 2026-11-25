@@ -1,0 +1,32 @@
+{# Contact groups and single contacts for one role / department / group. Set: pick_rows, pick_groups, and optionally
+   pick_scroll (max height in px). Contacts that only come from a ticked contact group are ticked and locked. #}
+{% if pick_groups %}
+<input type="hidden" name="groups_shown" value="1">
+<div class="muted" style="margin:4px 0 6px">Contact groups</div>
+<div class="checks" style="margin-bottom:14px">
+  {% for x in pick_groups %}<label><input type="checkbox" name="contact_groups" value="{{ x.id }}" {{ 'checked' if x.on }} {{ 'disabled' if x.for_everyone }}>
+    {{ x.name }} <span class="muted">({{ x.contact_ids|length }} contact{{ '' if x.contact_ids|length == 1 else 's' }}{{ ', everyone has it' if x.for_everyone }})</span></label>{% endfor %}
+</div>
+<div class="muted" style="margin:4px 0 6px">Single contacts</div>
+{% endif %}
+{% if pick_rows %}
+<input class="lp-search" placeholder="Search contacts…" style="max-width:300px;margin-bottom:8px">
+<div style="{{ 'max-height:%dpx;overflow-y:auto;' % pick_scroll if pick_scroll }}border:1px solid var(--line);border-radius:12px;padding:4px 12px;margin-bottom:12px">
+{% for c in pick_rows %}
+  {% set locked = c.via and not c.on %}
+  <label class="lp-row" style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:{{ '0' if loop.first else '1px solid var(--line)' }}">
+    <input type="checkbox" name="contacts" value="{{ c.id }}" {{ 'checked' if c.on or locked }} {{ 'disabled' if locked }}>
+    <span><b>{{ c.name }}</b>{% if c.is_emergency %} <span class="pill bad">Emergency</span>{% endif %}
+      <span class="muted">{{ local(c.phone) }}{{ ' · ' ~ c.title if c.title }}{{ ' · ' ~ c.group_name if c.group_name }}{{ ' · in everyone\'s list' if c.everyone and c.on }}</span>
+      {% if c.via %}<span class="pill on">{{ 'also ' if c.on }}from {{ c.via|join(', ') }}</span>{% endif %}</span>
+    <a class="muted" style="margin-left:auto" href="/platform/org/{{ org.id }}/{{ 'emergency' if c.is_emergency else 'contacts' }}?edit={{ c.id }}#form">Edit</a>
+  </label>
+{% endfor %}
+</div>
+<script>
+document.querySelectorAll('.lp-search').forEach((q) => q.addEventListener('input', () => {
+  const t = q.value.toLowerCase();
+  q.closest('form').querySelectorAll('.lp-row').forEach((r) => { r.hidden = t && !r.innerText.toLowerCase().includes(t); });
+}));
+</script>
+{% endif %}

@@ -21,6 +21,8 @@ PLATFORM_PERMISSIONS = {
     "platform.finance.manage": "Refunds and payment adjustments",
     "platform.impersonate": "Open an organisation as its admin to fix a support ticket (audited)",
     "platform.support.view": "View support tickets",
+    "platform.users.view": "View people's accounts (individuals and organisation members)",
+    "platform.users.manage": "Turn accounts off and on, log them out everywhere, unlock them, correct names",
 }
 
 TENANT_PERMISSIONS = {
@@ -72,6 +74,7 @@ SYSTEM_ROLES = {
     ]),
     "platform_support": ("Platform Support", "platform", [
         "platform.tenants.view", "platform.pricing.view", "platform.audit.view", "platform.impersonate", "platform.support.view",
+        "platform.users.view",
     ]),
     "platform_finance": ("Platform Finance", "platform", [
         "platform.tenants.view", "platform.pricing.view", "platform.finance.view", "platform.finance.manage",

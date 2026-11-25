@@ -9,7 +9,7 @@ from pb.config import BACK, DATABASE_URL, LOCKOUT_SECONDS, MAX_PIN_ATTEMPTS, RES
 from pb.db import execute, fetch_one, get_db, sql
 from pb.notify import notify_event
 from pb.text import LOGIN_PHONE_FORMAT, con, end, login_phone
-from pb.users import get_user
+from pb.users import DISABLED_MESSAGE, get_user
 from pb.ussd.personal import menu
 from pb.ussd.screens import resolve_nav
 
@@ -39,6 +39,8 @@ def check_pin(phone, pin):
         return None, "Wrong phone number or PIN."
     if user["failed_attempts"]:
         execute("UPDATE users SET failed_attempts = 0 WHERE phone = ?", (phone,))
+    if user["disabled"]:
+        return None, DISABLED_MESSAGE
     return user, None
 
 
@@ -137,6 +139,8 @@ def authenticate(owner, inputs, session_id, state, caller, network):
             mac, error = login(owner, pin, session_id, state, caller, network)
             if error is None:
                 return mac, inputs[attempt + 1:], None
+            if error == DISABLED_MESSAGE:
+                return None, None, end(error)
             if not error.startswith("Too many"):
                 remember_wrong(session_id, owner, pin)
         if error.startswith("Too many"):

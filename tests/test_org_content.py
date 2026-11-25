@@ -124,7 +124,7 @@ def test_app_api_shows_visible_content(client, register):
     client.post(f"/platform/org/{t}/emergency", data={"csrf": csrf, "name": "Security", "phone": "0700999888"})
     token = client.post("/api/login", json={"login": MEMBER, "password": "secret-pass-1"}).get_json()["token"]
     orgs = client.get("/api/orgs", headers=auth(token)).get_json()["orgs"]
-    assert orgs == [{"id": t, "name": "Test Advocates", "notices": 1, "urgent": 1}]
+    assert orgs == [{"id": t, "name": "Test Advocates", "logo_url": None, "notices": 1, "urgent": 1}]
     detail = client.get(f"/api/orgs/{t}", headers=auth(token)).get_json()
     assert [n["title"] for n in detail["notices"]] == ["For everyone"]
     assert detail["emergency"][0]["name"] == "Security"

@@ -14,7 +14,7 @@
     <div class="brand"><img src="/favicon.png" alt="">Remote Phonebook</div>
     <nav>
     {% if org is defined and org %}
-      <h6>{{ org.name }}</h6>
+      <div class="org-head">{% if org_logo %}<img src="{{ org_logo }}" alt="" class="org-logo">{% endif %}<h6>{{ org.name }}</h6></div>
       <a class="item {{ 'active' if section == 'overview' }}" href="/platform/org/{{ org.id }}"><span class="icon">🏠</span>Home</a>
       {% if 'notices' in areas %}<a class="item {{ 'active' if section == 'notices' }}" href="/platform/org/{{ org.id }}/notices"><span class="icon">📢</span>Notices</a>{% endif %}
       {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contacts' }}" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span>Contacts</a>{% endif %}
@@ -34,10 +34,12 @@
       <a class="item {{ 'active' if page == 'dashboard' }}" href="/platform/"><span class="icon">📊</span>Overview</a>
       {% if allowed('platform.tenants.view') or allowed('platform.tenants.manage') or allowed('platform.tenants.view_own') %}
         <a class="item {{ 'active' if page == 'tenants' }}" href="/platform/tenants"><span class="icon">🏢</span>Organisations</a>{% endif %}
+      {% if allowed('platform.users.view') or allowed('platform.users.manage') %}<a class="item {{ 'active' if page == 'people' }}" href="/platform/people"><span class="icon">👤</span>People</a>{% endif %}
       {% if allowed('platform.pricing.view') %}<a class="item {{ 'active' if page == 'pricing' }}" href="/platform/pricing"><span class="icon">💰</span>Prices</a>{% endif %}
       {% if allowed('platform.ussd_codes.manage') or allowed('platform.tenants.view') %}
         <a class="item {{ 'active' if page == 'codes' }}" href="/platform/ussd-codes"><span class="icon">#️⃣</span>USSD codes</a>{% endif %}
       {% if allowed('platform.staff.manage') %}<a class="item {{ 'active' if page == 'staff' }}" href="/platform/staff"><span class="icon">🧑‍💼</span>Staff</a>{% endif %}
+      {% if allowed('platform.flags.manage') %}<a class="item {{ 'active' if page == 'test_accounts' }}" href="/platform/test-accounts"><span class="icon">🧪</span>Test accounts</a>{% endif %}
       {% if allowed('platform.flags.manage') %}<a class="item {{ 'active' if page == 'settings' }}" href="/platform/settings"><span class="icon">⚙️</span>Settings</a>{% endif %}
       {% if allowed('platform.audit.view') %}<a class="item {{ 'active' if page == 'audit' }}" href="/platform/audit"><span class="icon">🕘</span>Activity log</a>{% endif %}
       {% if allowed('platform.flags.manage') %}<a class="item" href="/admin"><span class="icon">📱</span>Phone book admin</a>{% endif %}
@@ -50,6 +52,14 @@
     </div>
   </aside>
   <main class="content">
+    {# Back (top left): to the page this one belongs to. A page can set back_href / back_label; an edit view (?edit=...)
+       goes back to its list; any other page to Home. Not shown on Home itself. #}
+    {% set _home = ('/platform/org/' ~ org.id) if (org is defined and org) else '/platform/' %}
+    {% if back_href is defined %}{% set _back, _back_label = back_href, back_label|default('Back') %}
+    {% elif request.args and request.path.rstrip('/') != '/platform' %}{% set _back, _back_label = request.path, 'Back' %}
+    {% elif request.path.rstrip('/') not in (_home.rstrip('/'), '/platform/org') %}{% set _back, _back_label = _home, 'Home' if (org is defined and org) else 'Overview' %}
+    {% else %}{% set _back = None %}{% endif %}
+    {% if _back %}<a class="back-btn" href="{{ _back }}" aria-label="Back to {{ _back_label }}"><span aria-hidden="true">←</span> {{ _back_label }}</a>{% endif %}
     {% for category, message in get_flashed_messages(with_categories=true) %}
       <div class="{{ 'error' if category == 'error' else 'flash' }}">{{ message }}</div>
     {% endfor %}
