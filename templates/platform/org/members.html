@@ -9,28 +9,6 @@
   <p class="muted" style="margin-top:6px">Every organisation has one <b>Super Admin</b>, who can do everything and hand the role to someone else.
     <b>Admins</b> are optional: {{ admin_count }} of {{ admin_limit if admin_limit is not none else 'unlimited' }} allowed by your plan.</p></div>
 
-{% if join_requests %}
-<div class="card" style="border-color:#f0c46a">
-  <h2>Join requests <span class="pill warn">{{ join_requests|length }}</span></h2>
-  <p class="help">People who chose {{ org.name }} when they signed up. Approve them with a role, or decline.
-    Change how people join in <a href="/platform/org/{{ org.id }}/settings">Settings</a>.</p>
-  {% for r in join_requests %}
-  <div class="list-item">
-    <div><b>{{ r.display_name or local(r.user_phone) }}</b><div class="muted">{{ local(r.user_phone) }} · asked {{ fmt_time(r.joined_at) }}</div></div>
-    <div class="row" style="flex-wrap:nowrap">
-      <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/approve" class="row" style="flex-wrap:nowrap">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="notify" value="1">
-        <select name="role" style="width:auto">{% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == 'member' }}>{{ name }}</option>{% endfor %}</select>
-        <button class="small" type="submit">Approve</button></form>
-      <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/decline" class="inline" onsubmit="return confirm('Decline this request?')">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="notify" value="1">
-        <button class="danger small" type="submit">Decline</button></form>
-    </div>
-  </div>
-  {% endfor %}
-  <p class="muted" style="margin-bottom:0">They're told in the app either way.</p>
-</div>
-{% endif %}
 
 {% if editing %}
 <div class="card" id="form">
@@ -95,46 +73,84 @@
 </div>
 {% endif %}
 
-<div class="card">
-  <div class="row" style="justify-content:space-between;margin-bottom:10px">
-    <h2 style="margin:0">{{ rows|length }} member{{ '' if rows|length == 1 else 's' }}</h2>
-    <div class="row">
-      <input id="msearch" placeholder="Search name, phone, title…" style="width:240px">
-      <select id="mrole" style="width:auto"><option value="">All roles</option>
-        {% for key, name in choices %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select>
-    </div>
-  </div>
-  <div class="checks"><label><input type="checkbox" id="notify-list" checked> Notify people in the app when I remove them or add them back</label></div>
-  {% if rows %}
-  <table id="mtable">
-    <tr><th>Name</th><th>Phone</th><th>Title</th><th>Role</th><th>Department / group</th><th>Last active</th><th></th></tr>
-    {% for m in rows %}
-    <tr data-role="{{ m.roles|join('|') }}"><td><b>{{ m.display_name or '-' }}</b>{% if m.member_no %}<div class="muted">No. {{ m.member_no }}</div>{% endif %}</td>
-      <td>{{ local(m.user_phone) }}</td><td>{{ m.title or '-' }}</td><td>{{ m.roles|join(', ') }}</td><td>{{ m.placed|join(', ') or '-' }}</td>
-      <td class="muted">{% if m.last_seen %}{{ fmt_date(m.last_seen[0]) }}<br>{{ m.last_seen[1] }}{% else %}Never{% endif %}</td>
-      <td style="text-align:right;white-space:nowrap">
-        <a class="btn secondary small" href="?edit={{ m.id }}#form">Edit</a>
-        {% if not me.endswith(m.user_phone) %}<form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/remove" class="inline notify-aware"
-        onsubmit="return confirm('Remove {{ m.display_name or local(m.user_phone) }} from {{ org.name }}? You can add them back later.')">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Remove</button></form>{% endif %}</td></tr>
+
+{% set counts = {'all': rows|length, 'requests': join_requests|length, 'removed': former|length} %}
+{% for key, _label in tabs if key not in ('all', 'requests', 'removed') %}{% set _ = counts.update({key: rows|selectattr('category', 'equalto', key)|list|length}) %}{% endfor %}
+<div class="card" id="people">
+  <div class="tabbar" role="tablist">
+    {% for key, label in tabs %}
+      {% if counts[key] or key in ('all', 'members') %}
+      <button type="button" role="tab" class="tab {{ 'active' if key == tab }} {{ 'tab-alert' if key == 'requests' }}" data-tab="{{ key }}">{{ label }} <span class="count">{{ counts[key] }}</span></button>
+      {% endif %}
     {% endfor %}
-  </table>
-  <p class="muted" id="mnone" hidden>No members match.</p>
-  {% else %}<div class="empty"><b>No members yet</b>Add your first member above.</div>{% endif %}
+  </div>
+
+  <div class="tabpanel" data-panel="list">
+    <div class="row" style="justify-content:space-between;margin:14px 0 6px">
+      <input id="msearch" placeholder="Search name, phone, title…" style="max-width:300px">
+      <label style="display:flex;align-items:center;gap:6px" class="muted"><input type="checkbox" id="notify-list" checked> Tell people in the app when I remove them or add them back</label>
+    </div>
+    {% if rows %}
+    <table id="mtable">
+      <tr><th>Name</th><th>Phone</th><th>Title</th><th>Role</th><th>Department / group</th><th>Last active</th><th></th></tr>
+      {% for m in rows %}
+      <tr data-cat="{{ m.category }}"><td><b>{{ m.display_name or '-' }}</b>{% if m.joined_via == 'signup' %} <span class="pill on" title="Chose {{ org.name }} when they signed up">Signed up</span>{% endif %}
+          {% if m.member_no %}<div class="muted">No. {{ m.member_no }}</div>{% endif %}</td>
+        <td>{{ local(m.user_phone) }}</td><td>{{ m.title or '-' }}</td><td>{{ m.roles|join(', ') }}</td><td>{{ m.placed|join(', ') or '-' }}</td>
+        <td class="muted">{% if m.last_seen %}{{ fmt_date(m.last_seen[0]) }}<br>{{ m.last_seen[1] }}{% else %}Never{% endif %}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <a class="btn secondary small" href="?edit={{ m.id }}#form">Edit</a>
+          {% if not me.endswith(m.user_phone) %}<form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/remove" class="inline notify-aware"
+          onsubmit="return confirm('Remove {{ m.display_name or local(m.user_phone) }} from {{ org.name }}? You can add them back later.')">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger small" type="submit">Remove</button></form>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    <p class="muted" id="mnone" hidden>Nobody here.</p>
+    {% else %}<div class="empty"><b>No members yet</b>Add your first member above.</div>{% endif %}
+  </div>
+
+  <div class="tabpanel" data-panel="requests" hidden>
+    <p class="help" style="margin-top:14px">People who chose {{ org.name }} when they signed up. Approve them with a role, or decline;
+      they're told in the app either way. Change how people join in <a href="/platform/org/{{ org.id }}/settings">Settings</a>.</p>
+    {% for r in join_requests %}
+    <div class="list-item">
+      <div><b>{{ r.display_name or local(r.user_phone) }}</b> <span class="pill warn">Signed up</span>
+        <div class="muted">{{ local(r.user_phone) }} · asked {{ fmt_time(r.joined_at) }}</div></div>
+      <div class="row" style="flex-wrap:nowrap">
+        <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/approve" class="row" style="flex-wrap:nowrap">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="notify" value="1">
+          <select name="role" style="width:auto">{% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == 'member' }}>{{ name }}</option>{% endfor %}</select>
+          <button class="small" type="submit">Approve</button></form>
+        <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/decline" class="inline" onsubmit="return confirm('Decline this request?')">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="notify" value="1">
+          <button class="danger small" type="submit">Decline</button></form>
+      </div>
+    </div>
+    {% else %}<div class="empty"><b>No join requests</b>People who choose {{ org.name }} when they sign up appear here.</div>{% endfor %}
+  </div>
+
+  <div class="tabpanel" data-panel="removed" hidden>
+    <p class="help" style="margin-top:14px">People you removed. They no longer see anything from {{ org.name }}. Add them back with one click.</p>
+    {% if former %}
+    <table>
+      <tr><th>Name</th><th>Phone</th><th>Removed</th><th></th></tr>
+      {% for m in former %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td class="muted">{{ fmt_date(m.left_at) }}</td>
+        <td style="text-align:right"><form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/readd" class="inline notify-aware">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary small" type="submit">Add back</button></form></td></tr>{% endfor %}
+    </table>
+    {% else %}<div class="empty"><b>Nobody removed</b></div>{% endif %}
+  </div>
 </div>
 
-{% if former %}
-<div class="card">
-  <h2>Removed members</h2>
-  <p class="help">People you removed. They no longer see anything from {{ org.name }}. Add them back with one click.</p>
-  <table>
-    <tr><th>Name</th><th>Phone</th><th>Removed</th><th></th></tr>
-    {% for m in former %}<tr><td>{{ m.display_name or '-' }}</td><td>{{ local(m.user_phone) }}</td><td class="muted">{{ fmt_date(m.left_at) }}</td>
-      <td style="text-align:right"><form method="post" action="/platform/org/{{ org.id }}/members/{{ m.id }}/readd" class="inline notify-aware">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary small" type="submit">Add back</button></form></td></tr>{% endfor %}
-  </table>
-</div>
-{% endif %}
+<style>
+  .tabbar { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  .tab { background: var(--card); color: var(--text); border: 1px solid var(--line); font-weight: 600; padding: 7px 14px; border-radius: 99px; font-size: 14px; }
+  .tab:hover { border-color: var(--primary); }
+  .tab .count { color: var(--muted); font-weight: 500; margin-left: 2px; }
+  .tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .tab.active .count { color: #dbe7ff; }
+  .tab-alert:not(.active) { border-color: #f0c46a; background: var(--warn-bg); }
+</style>
 
 <script>
 (() => {
@@ -145,18 +161,26 @@
       const i = document.createElement('input'); i.type = 'hidden'; i.name = 'notify'; i.value = '1'; f.appendChild(i);
     }
   }));
-  const q = document.getElementById('msearch'), r = document.getElementById('mrole'), table = document.getElementById('mtable');
-  if (!table) return;
-  function filter() {
-    const text = q.value.toLowerCase().replace(/\s+/g, ''), want = r.value;
+  const tabs = [...document.querySelectorAll('.tab')], q = document.getElementById('msearch'), table = document.getElementById('mtable');
+  let current = {{ tab|tojson }};
+  if (!tabs.some((t) => t.dataset.tab === current)) current = 'all';
+  function show() {
+    tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === current));
+    const panel = current === 'requests' || current === 'removed' ? current : 'list';
+    document.querySelectorAll('.tabpanel').forEach((p) => { p.hidden = p.dataset.panel !== panel; });
+    if (!table) return;
+    const text = q.value.toLowerCase().replace(/\s+/g, '');
     let shown = 0;
-    table.querySelectorAll('tr[data-role]').forEach((tr) => {
-      const ok = (!text || tr.innerText.toLowerCase().replace(/\s+/g, '').includes(text)) && (!want || tr.dataset.role.split('|').includes(want));
+    table.querySelectorAll('tr[data-cat]').forEach((tr) => {
+      const ok = (current === 'all' || tr.dataset.cat === current) && (!text || tr.innerText.toLowerCase().replace(/\s+/g, '').includes(text));
       tr.hidden = !ok; shown += ok;
     });
     document.getElementById('mnone').hidden = shown > 0;
+    const url = new URL(location.href); url.searchParams.set('tab', current); url.searchParams.delete('edit'); history.replaceState(null, '', url);
   }
-  q.addEventListener('input', filter); r.addEventListener('change', filter);
+  tabs.forEach((t) => t.addEventListener('click', () => { current = t.dataset.tab; show(); }));
+  if (q) q.addEventListener('input', show);
+  show();
 })();
 </script>
 {{ combo_script() }}

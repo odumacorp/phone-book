@@ -116,7 +116,7 @@ def test_remove_and_add_back(client, register, dial):
     mid = member_id(client, t, MEMBER)
     client.post(f"/platform/org/{t}/members/{mid}/remove", data={"csrf": csrf})
     page = client.get(f"/platform/org/{t}/members").get_data(as_text=True)
-    assert "Removed members" in page
+    assert 'data-tab="removed"' in page and "Add back" in page
     assert "7. My organisations" not in login_ussd(dial, "+254712345678").last
     client.post(f"/platform/org/{t}/members/{mid}/readd", data={"csrf": csrf})
     assert "7. My organisations" in login_ussd(dial, "+254712345678").last

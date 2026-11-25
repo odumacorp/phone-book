@@ -100,3 +100,22 @@ def test_join_later_from_the_app(client, register):
     token = register(phone="0705000009")
     resp = client.post("/api/orgs/join", json={"org_id": t}, headers=auth(token))
     assert resp.get_json()["organisation"]["status"] == "pending"
+
+
+def test_members_page_tabs_and_signed_up_label(client, register, fake_sms):
+    t = setup_org(register)  # admin (Admins), member (Members), client (Clients)
+    with app_module.app.test_request_context():
+        tenancy.set_setting(rbac.ROOT, t, "join_mode", "open")
+    signup(client, fake_sms, "0705000010", org_id=t)
+    _r, csrf = portal_login(client, ADMIN)
+    page = client.get(f"/platform/org/{t}/members").get_data(as_text=True)
+    for tab, count in (("all", 4), ("admins", 1), ("members", 2), ("clients", 1)):
+        assert re.search(rf'data-tab="{tab}">[^<]*<span class="count">{count}</span>', page), tab
+    assert 'data-tab="guardians"' not in page  # empty tabs are hidden
+    assert page.count('data-cat="members"') == 2 and "Signed up" in page
+    with app_module.app.test_request_context():
+        tenancy.set_setting(rbac.ROOT, t, "join_mode", "approval")
+    signup(client, fake_sms, "0705000011", org_id=t)
+    page = client.get(f"/platform/org/{t}/members").get_data(as_text=True)
+    assert re.search(r'data-tab="requests">Join requests <span class="count">1</span>', page)
+    assert '"requests"' in page  # opens on the Join requests tab while there are requests

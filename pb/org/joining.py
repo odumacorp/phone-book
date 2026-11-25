@@ -58,16 +58,16 @@ def request_join(tenant_id, phone, name=None):
     now = int(time.time())
     if mode == "open":
         if member:
-            repo.update("memberships", "id = ?", (member["id"],), status="active", left_at=None, joined_at=now)
+            repo.update("memberships", "id = ?", (member["id"],), status="active", left_at=None, joined_at=now, joined_via="signup")
         else:
-            repo.insert("memberships", user_phone=phone, display_name=name, status="active", joined_at=now)
+            repo.insert("memberships", user_phone=phone, display_name=name, status="active", joined_at=now, joined_via="signup")
         rbac.grant_system(tenant_id, rbac.user_principal(phone), "member", "joined at sign-up")
         audit("member.join", tenant_id, ("phone", phone), {"mode": "open"}, actor=rbac.user_principal(phone))
         return "member", t["name"]
     if member:
-        repo.update("memberships", "id = ?", (member["id"],), status="pending", joined_at=now)
+        repo.update("memberships", "id = ?", (member["id"],), status="pending", joined_at=now, joined_via="signup")
     else:
-        repo.insert("memberships", user_phone=phone, display_name=name, status="pending", joined_at=now)
+        repo.insert("memberships", user_phone=phone, display_name=name, status="pending", joined_at=now, joined_via="signup")
     audit("member.join_request", tenant_id, ("phone", phone), {"mode": mode}, actor=rbac.user_principal(phone))
     _tell_managers(tenant_id, t["name"], phone, name)
     return "pending", t["name"]

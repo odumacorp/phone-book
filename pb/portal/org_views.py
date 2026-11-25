@@ -284,6 +284,18 @@ def org_contact_delete(tenant_id, contact_id):
 
 # ---------------------------------------------------------------- members
 
+MEMBER_TABS = [  # (key, label) for the Members page tabs
+    ("all", "All"), ("admins", "Admins"), ("staff", "Staff"), ("members", "Members"), ("clients", "Clients"),
+    ("guardians", "Guardians"), ("requests", "Join requests"), ("removed", "Removed"),
+]
+
+
+def member_category(role_key):
+    """Which tab a member's main role puts them in."""
+    return {"org_owner": "admins", "org_admin": "admins", "member": "members", "client": "clients",
+            "guardian": "guardians"}.get(role_key, "staff")
+
+
 @bp.route("/org/<int:tenant_id>/members", methods=["GET"])
 def org_members(tenant_id):
     open_workspace(tenant_id)
@@ -292,7 +304,8 @@ def org_members(tenant_id):
     placements = structure.placements_by_member(tenant_id)
     members = content.member_rows(tenant_id)
     seen = content.last_logins(m["user_phone"] for m in members)
-    rows = [dict(m, placed=placements.get(m["id"], []), last_seen=seen.get(m["user_phone"])) for m in members]
+    rows = [dict(m, placed=placements.get(m["id"], []), last_seen=seen.get(m["user_phone"]),
+                 category=member_category(m["role_key"])) for m in members]
     editing = next((m for m in rows if str(m["id"]) == request.args.get("edit")), None)
     editing_scope = editing_placements = None
     if editing:
@@ -309,7 +322,8 @@ def org_members(tenant_id):
                 super_admin=tenancy.super_admin(tenant_id),
                 can_hand_over=g.org_staff_help or tenancy.super_admin(tenant_id) == g.principal,
                 admin_limit=tenancy.admin_limit(tenant_id), admin_count=len(tenancy.admins(tenant_id)),
-                join_requests=joining.requests(tenant_id), join_mode=tenancy.get_setting(tenant_id, "join_mode"))
+                join_requests=joining.requests(tenant_id), join_mode=tenancy.get_setting(tenant_id, "join_mode"),
+                tabs=MEMBER_TABS, tab=request.args.get("tab") or ("requests" if joining.requests(tenant_id) and not request.args.get("edit") else "all"))
 
 
 @bp.route("/org/<int:tenant_id>/members", methods=["POST"])
