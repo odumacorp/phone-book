@@ -57,7 +57,7 @@
       <label class="field">Phone number<input name="phone" inputmode="tel" required placeholder="0712 345 678"></label>
       <label class="field">Name<input name="name" maxlength="80" placeholder="Optional"></label>
       {{ combo('title', 'Job title', 'Optional', title_lists, '', 'e.g. Bursar') }}
-      <label class="field">Role <small>Decides what they can see and do</small>
+      <label class="field">Role <small>Decides what they can see and do{% if 'lists' in areas %} · <a href="/platform/org/{{ org.id }}/lists#add-role">add a role</a>{% endif %}</small>
         <select name="role">{% for key, name in choices %}<option value="{{ key }}" {{ 'selected' if key == 'member' }}>{{ name }}</option>{% endfor %}</select></label>
       {% if can_structure %}
       <label class="field">Department or group <small>Optional{% if not departments and not groups %}: <a href="/platform/org/{{ org.id }}/groups">create some first</a>{% endif %}</small>

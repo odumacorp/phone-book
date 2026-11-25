@@ -340,6 +340,8 @@ def add_member_with_role(principal, tenant_id, phone, name, role_key, title=None
         raise NotAllowed("You don't have permission to add members.")
     as_platform = rbac.can(principal, "platform.tenants.manage")
     role_key = role_key or "member"
+    if not tenancy.role_offered(tenant_id, role_key):
+        raise ValueError("That role isn't used in this organisation.")
     if role_key == tenancy.SUPER_ADMIN:
         raise ValueError("There's only one Super Admin. Add them as a member, then use Edit to make them the Super Admin.")
     new_phone = login_phone(str(phone or ""))
@@ -408,6 +410,8 @@ def update_member(principal, tenant_id, membership_id, form):
                               "title": [member["title"], title]}
 
     role_key = form.get("role") or "member"
+    if not tenancy.role_offered(tenant_id, role_key):
+        raise ValueError("That role isn't used in this organisation.")
     scope = ("tenant", None)
     if role_key == "department_supervisor":
         dept = str(form.get("supervises") or "")
@@ -441,6 +445,62 @@ def update_member(principal, tenant_id, membership_id, form):
         structure.set_placements(principal, tenant_id, membership_id, form.get("placements") or [])
     if changes:
         audit("member.update", tenant_id, ("member", membership_id), changes, actor=principal)
+
+
+def add_role(principal, tenant_id, name, base_key, permission_keys=None):
+    """An organisation's own role, e.g. "Nurse" that works like Staff. With the same permissions as an existing role
+    it's just a new name and always allowed; different permissions need a plan with custom roles. People can only
+    make roles with permissions they hold themselves."""
+    import re as _re
+    from pb.db import execute, insert_id
+
+    staff = rbac.can(principal, "platform.tenants.manage")
+    if not (staff or rbac.can(principal, "tenant.admins.manage", tenant_id) or rbac.can(principal, "roles.custom", tenant_id)):
+        raise NotAllowed("Only the Super Admin and admins can add roles.")
+    name = " ".join(str(name or "").split())[:40]
+    if not name:
+        raise ValueError("Give the role a name, e.g. Nurse.")
+    offered = dict(tenancy.available_roles(tenant_id))
+    if base_key not in offered or base_key == tenancy.ADMIN:
+        raise ValueError("Choose which role it works like.")
+    if name.lower() in {n.lower() for n in offered.values()} | {"organisation super admin"}:
+        raise ValueError(f"There's already a role called {name}.")
+    base_perms = rbac.role_permissions(rbac.role_by_key(base_key, tenant_id)["id"])
+    perms = set(permission_keys) if permission_keys else set(base_perms)
+    if perms != base_perms and not tenancy.plan_allows(tenant_id, "custom_roles"):
+        raise NotAllowed("Changing what a role can do is part of the Pro plan. You can still add it with the same permissions.")
+    if not staff and any(not rbac.can(principal, p, tenant_id) for p in perms):
+        raise NotAllowed("You can only make roles with permissions you have yourself.")
+    key = "custom_" + (_re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "role")[:30]
+    existing = rbac.role_by_key(key, tenant_id)
+    if existing and existing["tenant_id"] == tenant_id:
+        raise ValueError(f"There's already a role called {name}.")
+    role_id = insert_id(
+        "INSERT INTO roles (tenant_id, key, name, scope, is_system, created_by, created_at) VALUES (?, ?, ?, 'tenant', 0, ?, ?)",
+        (tenant_id, key, name, principal, int(time.time())),
+    )
+    for permission in sorted(perms):
+        execute("INSERT INTO role_permissions (role_id, permission) VALUES (?, ?)", (role_id, permission))
+    rbac.clear_cache()
+    audit("role.create", tenant_id, ("role", role_id), {"key": key, "name": name, "like": base_key,
+                                                         "same_permissions": perms == base_perms}, actor=principal)
+    return role_id
+
+
+def delete_role(principal, tenant_id, role_id):
+    from pb.db import execute, fetch_one
+    if not (rbac.can(principal, "tenant.admins.manage", tenant_id) or rbac.can(principal, "roles.custom", tenant_id)
+            or rbac.can(principal, "platform.tenants.manage")):
+        raise NotAllowed("Only the Super Admin and admins can remove roles.")
+    role = fetch_one("SELECT id, key, name FROM roles WHERE id = ? AND tenant_id = ? AND is_system = 0", (role_id, tenant_id))
+    if not role:
+        raise ValueError("Only roles your organisation added can be removed.")
+    if any(a["key"] == role["key"] for a in rbac.tenant_assignments(tenant_id)):
+        raise ValueError(f"Some people still have the {role['name']} role. Give them another role first.")
+    execute("DELETE FROM role_permissions WHERE role_id = ?", (role_id,))
+    execute("DELETE FROM roles WHERE id = ? AND tenant_id = ?", (role_id, tenant_id))
+    rbac.clear_cache()
+    audit("role.delete", tenant_id, ("role", role_id), {"name": role["name"]}, actor=principal)
 
 
 def former_members(tenant_id):

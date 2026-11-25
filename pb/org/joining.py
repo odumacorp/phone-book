@@ -94,6 +94,8 @@ def approve(principal, tenant_id, membership_id, role_key="member", notify=True)
         raise ValueError("That request has already been answered.")
     if role_key == tenancy.SUPER_ADMIN:
         raise ValueError("Approve them first; then hand over the Super Admin role with Edit.")
+    if not tenancy.role_offered(tenant_id, role_key or "member"):
+        raise ValueError("That role isn't used in this organisation.")
     principal_new = rbac.user_principal(member["user_phone"])
     if role_key == tenancy.ADMIN:
         tenancy.check_admin_room(tenant_id, principal_new)

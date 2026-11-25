@@ -343,3 +343,58 @@ def appoint_owner(actor, tenant_id, raw_phone, display_name=None, as_platform=Tr
         audit("tenant.super_admin_change", tenant_id, ("principal", new),
               {"from": previous, "to": new, "previous_now": fallback}, actor=actor)
     return assignment
+
+
+# ---------------------------------------------------------------- roles and titles offered in this organisation
+
+_STAFF = ["content_publisher", "department_supervisor", "org_admin", "auditor"]
+EDITION_ROLES = {  # roles that make sense for each kind of organisation (custom roles are always offered too)
+    "schools": ["member", "guardian", "teacher", *_STAFF],
+    "insurance": ["member", "client", *_STAFF],
+    "legal": ["member", "client", *_STAFF],
+    "company": ["member", "client", *_STAFF],
+    "sacco": ["member", *_STAFF],
+    "chama": ["member", *_STAFF],
+    "church": ["member", *_STAFF],
+    "health": ["member", "client", *_STAFF],
+    "estate": ["member", *_STAFF],
+    "county": ["member", *_STAFF],
+}
+DEFAULT_ROLES = ["member", "client", "guardian", "teacher", *_STAFF]
+
+
+def available_roles(tenant_id):
+    """[(key, name)] of the roles people can be given here: the ones for this kind of organisation, then its own."""
+    t = tenant(tenant_id)
+    wanted = EDITION_ROLES.get(t["edition"] if t else None, DEFAULT_ROLES)
+    roles = rbac.roles_for_tenant(tenant_id)
+    system = {r["key"]: r["name"] for r in roles if r["is_system"]}
+    own = [(r["key"], r["name"]) for r in roles if not r["is_system"] and r["tenant_id"] == tenant_id]
+    return [(k, system[k]) for k in wanted if k in system] + own
+
+
+def role_offered(tenant_id, role_key):
+    return role_key == SUPER_ADMIN or role_key in dict(available_roles(tenant_id))
+
+
+def org_titles(tenant_id):
+    """The organisation's own list of job titles (added by its admins)."""
+    row = TenantRepo(tenant_id).one("tenant_settings", "key = ?", ("titles",))
+    try:
+        return json.loads(row["value"]) if row else []
+    except ValueError:
+        return []
+
+
+def set_org_titles(actor, tenant_id, titles):
+    clean = []
+    for t in titles:
+        t = " ".join(str(t or "").split())[:60]
+        if t and t.lower() not in {c.lower() for c in clean}:
+            clean.append(t)
+    old = org_titles(tenant_id)
+    TenantRepo(tenant_id).upsert("tenant_settings", ["key"], key="titles", value=json.dumps(clean))
+    if old != clean:
+        audit("tenant.titles", tenant_id, ("setting", "titles"), {"added": [t for t in clean if t not in old],
+                                                                    "removed": [t for t in old if t not in clean]}, actor=actor)
+    return clean

@@ -28,9 +28,9 @@ AREAS = {  # area: (permission, module)
     "reminders": ("announcements.publish", "announcements"),
     "preview": (content.MANAGE_PERMISSIONS, None),
     "history": (("announcements.publish", "contacts.manage", "emergency.manage"), None),
+    "lists": (("roles.custom", "tenant.admins.manage"), None),
     "settings": ("tenant.settings.manage", None),
 }
-AUDIENCE_ROLES = ["member", "guardian", "client", "teacher", "content_publisher", "department_supervisor", "org_admin", "auditor"]
 
 
 def workspaces():
@@ -69,9 +69,18 @@ def page(template, **values):
 
 
 def audience_choices(tenant_id):
-    roles = {r["key"]: r["name"] for r in rbac.roles_for_tenant(tenant_id)}
-    keys = [k for k in AUDIENCE_ROLES if k in roles] + [k for k in roles if k not in AUDIENCE_ROLES and k not in ("org_owner",)]
-    return [(k, roles[k]) for k in keys]
+    """Roles to choose from here: the ones for this kind of organisation, then the organisation's own."""
+    return tenancy.available_roles(tenant_id)
+
+
+def title_lists_for(tenant_id, used=()):
+    """Job-title choices: the organisation's own list, titles already in use, then suggestions for its kind."""
+    own = tenancy.org_titles(tenant_id)
+    seen = {t.lower() for t in own}
+    used = [t for t in sorted({u for u in used if u}, key=str.lower) if t.lower() not in seen]
+    seen |= {t.lower() for t in used}
+    suggested = [t for t in suggestions.title_options(g.org["edition"]) if t.lower() not in seen]
+    return [("Your titles", own), ("Used in your organisation", used), ("Suggested for you", suggested)]
 
 
 def audience_text(stored, choices):
@@ -177,9 +186,7 @@ def _contacts_page(tenant_id, emergency):
     every_group = set(defined) | set(used_groups)
     group_lists = [("Your departments and groups", defined), ("Used on contacts", used_groups),
                    ("Suggested for you", [x for x in suggestions.group_options(edition, []) if x not in every_group])]
-    used_titles = sorted({c["title"] for c in content.contacts(tenant_id) if c["title"]}, key=str.lower)
-    title_lists = [("Used on contacts", used_titles),
-                   ("Suggested for you", [t for t in suggestions.title_options(edition) if t.lower() not in {u.lower() for u in used_titles}])]
+    title_lists = title_lists_for(tenant_id, [c["title"] for c in content.contacts(tenant_id)])
     name_lists = [("Suggested", suggestions.emergency_options(edition, [c["name"] for c in rows]))] if emergency else []
     return page("platform/org/contacts.html", rows=rows, choices=choices, editing=editing, emergency=emergency,
                 group_lists=group_lists, title_lists=title_lists, name_lists=name_lists,
@@ -311,9 +318,7 @@ def org_members(tenant_id):
     if editing:
         _key, editing_scope = content.member_role(tenant_id, editing["user_phone"])
         editing_placements = structure.placements_of(tenant_id, editing["id"])
-    used_titles = sorted({m["title"] for m in rows if m["title"]}, key=str.lower)
-    title_lists = [("Used in your organisation", used_titles),
-                   ("Suggested for you", [t for t in suggestions.title_options(g.org["edition"]) if t not in used_titles])]
+    title_lists = title_lists_for(tenant_id, [m["title"] for m in rows])
     return page("platform/org/members.html", rows=rows, choices=choices,
                 departments=structure.departments(tenant_id), groups=structure.groups(tenant_id),
                 can_structure="structure" in g.org_areas, editing=editing, editing_scope=editing_scope,
@@ -655,6 +660,77 @@ def org_contact_restore(tenant_id, contact_id):
 @bp.route("/org/<int:tenant_id>/history/<any(notices, org_contacts):table>/<int:item_id>/purge", methods=["POST"])
 def org_history_purge(tenant_id, table, item_id):
     return _history_action(tenant_id, lambda: content.purge(g.principal, tenant_id, table, item_id), "Deleted for good.")
+
+
+# ---------------------------------------------------------------- roles and titles (the organisation's own lists)
+
+def _role_summary(role_id):
+    from pb.rbac.catalogue import TENANT_PERMISSIONS
+    perms = sorted(rbac.role_permissions(role_id))
+    readable = [TENANT_PERMISSIONS[p].split(" (")[0] for p in perms if p in TENANT_PERMISSIONS]
+    return readable
+
+
+@bp.route("/org/<int:tenant_id>/lists", methods=["GET"])
+def org_lists(tenant_id):
+    open_workspace(tenant_id)
+    require_area("lists")
+    counts = {}
+    for a in rbac.tenant_assignments(tenant_id):
+        counts[a["key"]] = counts.get(a["key"], 0) + 1
+    roles = []
+    for key, name in tenancy.available_roles(tenant_id):
+        role = rbac.role_by_key(key, tenant_id)
+        roles.append({"id": role["id"], "key": key, "name": name, "own": not role["is_system"], "people": counts.get(key, 0),
+                      "can": _role_summary(role["id"])})
+    from pb.rbac.catalogue import TENANT_PERMISSIONS
+    own_titles = tenancy.org_titles(tenant_id)
+    members = content.member_rows(tenant_id)
+    return page("platform/org/lists.html", roles=roles, own_titles=own_titles,
+                title_suggestions=[t for t in suggestions.title_options(g.org["edition"]) if t.lower() not in {o.lower() for o in own_titles}][:24],
+                used_titles=sorted({m["title"] for m in members if m["title"] and m["title"].lower() not in {o.lower() for o in own_titles}}),
+                base_roles=[(k, n) for k, n in tenancy.available_roles(tenant_id) if k != tenancy.ADMIN],
+                can_customise=tenancy.plan_allows(tenant_id, "custom_roles"),
+                permissions=[(k, v) for k, v in TENANT_PERMISSIONS.items() if rbac.can(g.principal, k, tenant_id) or g.org_staff_help])
+
+
+def _lists_action(tenant_id, fn, message):
+    open_workspace(tenant_id)
+    require_area("lists")
+    try:
+        fn()
+    except (ValueError, content.NotAllowed, rbac.PermissionDenied) as e:
+        return failed(str(e), "platform.org_lists", tenant_id=tenant_id)
+    return done(message, "platform.org_lists", tenant_id=tenant_id)
+
+
+@bp.route("/org/<int:tenant_id>/lists/roles", methods=["POST"])
+def org_role_add(tenant_id):
+    f = request.form
+    perms = f.getlist("permissions") if f.get("customise") else None
+    return _lists_action(tenant_id, lambda: content.add_role(g.principal, tenant_id, f.get("name"), f.get("like"), perms),
+                         f"Role {' '.join((f.get('name') or '').split())} added. You can now give it to people on the Members page.")
+
+
+@bp.route("/org/<int:tenant_id>/lists/roles/<int:role_id>/delete", methods=["POST"])
+def org_role_delete(tenant_id, role_id):
+    return _lists_action(tenant_id, lambda: content.delete_role(g.principal, tenant_id, role_id), "Role removed.")
+
+
+@bp.route("/org/<int:tenant_id>/lists/titles", methods=["POST"])
+def org_titles_save(tenant_id):
+    f = request.form
+    current = tenancy.org_titles(tenant_id)
+    if f.get("remove"):
+        new = [t for t in current if t != f.get("remove")]
+        message = f"Removed {f.get('remove')} from your titles."
+    else:
+        added = [t.strip() for t in (f.get("add") or "").split(",") if t.strip()]
+        if not added:
+            return failed("Type a title to add.", "platform.org_lists", tenant_id=tenant_id)
+        new = current + added
+        message = "Added to your titles: " + ", ".join(added) + "."
+    return _lists_action(tenant_id, lambda: tenancy.set_org_titles(g.principal, tenant_id, new), message)
 
 
 # ---------------------------------------------------------------- settings

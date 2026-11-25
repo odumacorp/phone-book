@@ -1,0 +1,82 @@
+{% extends "platform/base.html" %}
+{% set section = 'lists' %}
+{% block title %}Roles and titles · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Roles and titles</h1>
+  <p>The choices you see when adding members and contacts. Roles decide what people can see and do; titles are just their job
+    names. Departments and groups are on the <a href="/platform/org/{{ org.id }}/groups">Groups and departments</a> page.</p></div>
+
+<div class="card">
+  <h2>Roles in {{ org.name }}</h2>
+  <p class="help">Only the roles that fit a {{ edition_name(org.edition)|lower }} organisation are offered, plus any you add.</p>
+  <table>
+    <tr><th>Role</th><th>Can</th><th class="num">People</th><th></th></tr>
+    <tr><td><b>Organisation Super Admin</b></td><td class="muted">Everything, including billing and appointing admins. Only one.</td><td class="num">1</td><td></td></tr>
+    {% for r in roles %}
+    <tr><td><b>{{ r.name }}</b>{% if r.own %} <span class="pill on">yours</span>{% endif %}</td>
+      <td class="muted" style="max-width:520px">{{ r.can[:5]|join('; ') }}{{ '; and more' if r.can|length > 5 }}</td>
+      <td class="num">{{ r.people }}</td>
+      <td style="text-align:right">{% if r.own %}<form method="post" action="/platform/org/{{ org.id }}/lists/roles/{{ r.id }}/delete" class="inline"
+        onsubmit="return confirm('Remove the {{ r.name }} role?')"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="danger small" type="submit">Remove</button></form>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card" id="add-role">
+  <h2>Add a role</h2>
+  <p class="help">Give it a name your people know (e.g. Nurse, Driver, Agent, Elder) and choose which role it works like.</p>
+  <form method="post" action="/platform/org/{{ org.id }}/lists/roles">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="grid2" style="max-width:640px">
+      <label class="field">Name<input name="name" maxlength="40" required placeholder="e.g. Nurse"></label>
+      <label class="field">Works like
+        <select name="like">{% for key, name in base_roles %}<option value="{{ key }}">{{ name }}</option>{% endfor %}</select></label>
+    </div>
+    {% if can_customise %}
+    <div class="checks"><label><input type="checkbox" name="customise" value="1" id="customise"> Choose exactly what it can do</label></div>
+    <div class="checks" id="perm-list" hidden style="flex-direction:column;gap:6px;margin-left:24px">
+      {% for key, desc in permissions %}<label><input type="checkbox" name="permissions" value="{{ key }}"> {{ desc }}</label>{% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">It gets the same permissions as the role it works like. Choosing exactly what a role can do is part of the Pro plan.</p>
+    {% endif %}
+    <button type="submit">Add role</button>
+  </form>
+</div>
+
+<div class="card" id="titles">
+  <h2>Job titles</h2>
+  <p class="help">Your list comes first wherever a title is chosen (members and contacts). People can still type another one.</p>
+  <div class="row" style="margin-bottom:12px">
+    {% for t in own_titles %}
+      <form method="post" action="/platform/org/{{ org.id }}/lists/titles" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="remove" value="{{ t }}">
+        <button class="secondary small" type="submit" title="Remove {{ t }}">{{ t }} ✕</button></form>
+    {% else %}<span class="muted">No titles of your own yet.</span>{% endfor %}
+  </div>
+  <form method="post" action="/platform/org/{{ org.id }}/lists/titles" class="row" style="max-width:640px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="add" placeholder="e.g. Claims officer, Branch manager" maxlength="300">
+    <button type="submit">Add</button>
+  </form>
+  {% if used_titles %}
+  <p class="muted" style="margin:16px 0 6px">Already used by your members (add them to your list):</p>
+  <div class="row">{% for t in used_titles %}
+    <form method="post" action="/platform/org/{{ org.id }}/lists/titles" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="add" value="{{ t }}"><button class="secondary small" type="submit">+ {{ t }}</button></form>{% endfor %}</div>
+  {% endif %}
+  {% if title_suggestions %}
+  <p class="muted" style="margin:16px 0 6px">Suggested for a {{ edition_name(org.edition)|lower }} organisation:</p>
+  <div class="row">{% for t in title_suggestions %}
+    <form method="post" action="/platform/org/{{ org.id }}/lists/titles" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="add" value="{{ t }}"><button class="secondary small" type="submit">+ {{ t }}</button></form>{% endfor %}</div>
+  {% endif %}
+</div>
+<script>
+(() => {
+  const c = document.getElementById('customise'), list = document.getElementById('perm-list');
+  if (c && list) c.addEventListener('change', () => { list.hidden = !c.checked; });
+})();
+</script>
+{% endblock %}
