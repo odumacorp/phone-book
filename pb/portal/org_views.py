@@ -254,6 +254,20 @@ def org_emergency_save(tenant_id):
     return _contact_save(tenant_id, emergency=True)
 
 
+@bp.route("/org/<int:tenant_id>/<any(contacts, emergency):kind>/order", methods=["POST"])
+def org_contacts_order(tenant_id, kind):
+    """Save the order the admin arranged (Arrange on the Contacts / Emergency contacts page)."""
+    emergency = kind == "emergency"
+    open_workspace(tenant_id)
+    require_area("emergency" if emergency else "contacts")
+    endpoint = "platform.org_emergency" if emergency else "platform.org_contacts"
+    try:
+        content.set_contact_order(g.principal, tenant_id, emergency, request.form.get("order", "").split(","))
+    except (ValueError, content.NotAllowed) as e:
+        return failed(str(e), endpoint, tenant_id=tenant_id)
+    return done("Order saved. Members see the contacts in this order in the app and on USSD.", endpoint, tenant_id=tenant_id)
+
+
 @bp.route("/org/<int:tenant_id>/<any(contacts, emergency):kind>/from-members", methods=["POST"])
 def org_contacts_from_members(tenant_id, kind):
     emergency = kind == "emergency"
@@ -973,7 +987,7 @@ def org_profile_save(tenant_id):
             message = "Logo removed."
         else:
             org_profile.save(g.principal, tenant_id, f)
-            upload = data_url_from_upload(request.files.get("logo"))
+            upload = data_url_from_upload(request.files.get("logo"), org_profile.LOGO_MAX_BYTES)
             if upload:
                 org_profile.set_logo(g.principal, tenant_id, upload)
             message = "Profile saved. Your members see it in the app under My organisations." + (" Logo updated." if upload else "")

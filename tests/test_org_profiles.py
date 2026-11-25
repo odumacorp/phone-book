@@ -58,3 +58,18 @@ def test_members_cant_change_it_and_staff_see_it(client, register, staff_client)
     sc, _ = staff_client()
     assert "Advocates since 1998." in sc.get(f"/platform/tenants/{t}").get_data(as_text=True)
     assert "Hacked" not in sc.get(f"/platform/tenants/{t}").get_data(as_text=True)
+
+
+def test_logos_up_to_5_mb(client, register):
+    t = setup_org(register)
+    _r, csrf = portal_login(client, ADMIN)
+    big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (4 * 1024 * 1024)  # 4 MB: fine, and stored whole
+    client.post(f"/platform/org/{t}/profile", data={"csrf": csrf, "logo": (io.BytesIO(big), "logo.png", "image/png")},
+                content_type="multipart/form-data")
+    url = client.get(f"/api/orgs/{t}", headers=auth(member_token(client))).get_json()["org"]["logo_url"]
+    assert url and client.get(url).data == big
+    too_big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (5 * 1024 * 1024)  # just over 5 MB
+    resp = client.post(f"/platform/org/{t}/profile", data={"csrf": csrf, "logo": (io.BytesIO(too_big), "logo.png", "image/png")},
+                       content_type="multipart/form-data", follow_redirects=True)
+    assert "too big (the limit is 5 MB)" in resp.get_data(as_text=True)
+    assert client.get(url).data == big  # the old logo stays

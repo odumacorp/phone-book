@@ -211,6 +211,10 @@ export const getLogins = (token: string) => request<{ logins: UssdLogin[]; keep_
 
 export const getContacts = (token: string) => request<ContactList>('/api/contacts', {}, token);
 
+/** Save the order the person arranged their own contacts in (USSD "My contacts" follows it too). */
+export const setContactOrder = (token: string, ids: number[]) =>
+  request<{ ok: boolean; saved: number }>('/api/contacts/order', { method: 'POST', body: JSON.stringify({ ids }) }, token);
+
 export const setPriority = (token: string, id: number, priority: boolean) =>
   request<{ priority: boolean }>(`/api/contacts/${id}/priority`, { method: 'POST', body: JSON.stringify({ priority }) }, token);
 

@@ -38,6 +38,13 @@
   .person-chip { display: inline-block; margin: 3px 6px 3px 0; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px;
     background: var(--card); text-decoration: none; font-size: 14px; }
   .person-chip:hover { border-color: var(--primary); }
+  .arrange-list { list-style: none; margin: 0 0 14px; padding: 0; border: 1px solid var(--line); border-radius: 12px; }
+  .arrange-list li { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-top: 1px solid var(--line); background: var(--card); }
+  .arrange-list li:first-child { border-top: 0; border-radius: 12px 12px 0 0; }
+  .arrange-list li:last-child { border-radius: 0 0 12px 12px; }
+  .arrange-list li.dragging { opacity: .45; }
+  .arrange-list .grip { color: var(--muted); cursor: grab; user-select: none; letter-spacing: -2px; }
+  .arrange-list .arrange-name { flex: 1; min-width: 0; }
   .org-head { display: flex; align-items: center; gap: 10px; margin: 18px 10px 6px; }
   .org-head h6 { margin: 0; }
   .org-logo { width: 36px; height: 36px; border-radius: 8px; object-fit: contain; background: #fff; border: 1px solid var(--line); flex: none; }
@@ -147,7 +154,8 @@
     .content { padding: 16px 16px 48px; max-width: none; }
     .page-head h1 { font-size: 23px; }
     .card { padding: 16px; border-radius: 12px; }
-    .two { grid-template-columns: 1fr; }
+    .two { grid-template-columns: 1fr !important; margin-bottom: 18px; }  /* even where a page sets its own columns */
+    .phone { width: 100%; max-width: 320px; }
     /* Wide tables scroll sideways inside their card instead of stretching the page */
     table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch;
       /* a soft shadow at an edge while there's more to swipe to */

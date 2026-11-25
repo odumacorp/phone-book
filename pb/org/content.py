@@ -145,6 +145,19 @@ def contacts(tenant_id, emergency=None):
     return TenantRepo(tenant_id).all("org_contacts", where, params, order="is_emergency DESC, sort, group_name, name")
 
 
+def set_contact_order(principal, tenant_id, emergency, contact_ids):
+    """The admin arranged the list: members see the contacts in this order (app, website and USSD)."""
+    _require(principal, tenant_id, "emergency.manage" if emergency else "contacts.manage")
+    repo = TenantRepo(tenant_id)
+    ids = {c["id"] for c in contacts(tenant_id, emergency=emergency)}
+    wanted = [i for i in dict.fromkeys(int(x) for x in contact_ids if str(x).isdigit()) if i in ids]
+    wanted += [c["id"] for c in contacts(tenant_id, emergency=emergency) if c["id"] not in wanted]  # any left out: at the end
+    for position, contact_id in enumerate(wanted, 1):
+        repo.update("org_contacts", "id = ?", (contact_id,), sort=position)
+    audit("org_contact.order", tenant_id, ("org_contacts", "emergency" if emergency else "contacts"), {"order": wanted}, actor=principal)
+    return len(wanted)
+
+
 def contact(tenant_id, contact_id):
     return TenantRepo(tenant_id).one("org_contacts", f"id = ? AND {LIVE}", (contact_id,))
 
@@ -183,7 +196,10 @@ def save_contact(principal, tenant_id, form, emergency, contact_id=None):
             raise ValueError("That contact no longer exists.")
         audit("org_contact.update", tenant_id, ("org_contact", contact_id), {"name": values["name"]}, actor=principal)
         return contact_id
-    new_id = repo.insert("org_contacts", is_emergency=1 if emergency else 0, created_by=principal, created_at=now, updated_at=now, **values)
+    last = repo.one("org_contacts", "is_emergency = ?", (1 if emergency else 0,), columns="MAX(sort) AS n")
+    position = (last["n"] or 0) + 1 if last and last["n"] else 0  # arranged list: new ones go at the end
+    new_id = repo.insert("org_contacts", is_emergency=1 if emergency else 0, created_by=principal, created_at=now, updated_at=now,
+                         sort=position, **values)
     audit("org_contact.add", tenant_id, ("org_contact", new_id), {"name": values["name"], "emergency": bool(emergency)}, actor=principal)
     return new_id
 

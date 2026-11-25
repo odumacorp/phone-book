@@ -56,6 +56,17 @@ def api_add_contact():
     return jsonify({"id": row["id"], "name": row["name"], "phone": row["phone"], "priority": False}), 201
 
 
+@app.route("/api/contacts/order", methods=["POST"])
+@require_auth
+def api_contacts_order():
+    """Save the order the person arranged their contacts in: {"ids": [...]} (organisation contacts are skipped)."""
+    from pb.contacts import set_order
+    ids = body_json().get("ids")
+    if not isinstance(ids, list):
+        return api_error("Send the contacts in the order you want them.", 400)
+    return jsonify({"ok": True, "saved": set_order(g.phone, ids)})
+
+
 @app.route("/api/contacts/<int:contact_id>", methods=["DELETE"])
 @require_auth
 def api_delete_contact(contact_id):

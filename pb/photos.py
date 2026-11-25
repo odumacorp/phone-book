@@ -23,7 +23,8 @@ def clean(data_url, max_bytes=MAX_BYTES):
     except (binascii.Error, ValueError):
         raise ValueError("That picture couldn't be read. Try another one.") from None
     if not image or len(image) > max_bytes:
-        raise ValueError("That picture is too big. Choose a smaller one.")
+        limit = f"{max_bytes // (1024 * 1024)} MB" if max_bytes >= 1024 * 1024 else f"{max_bytes // 1024} KB"
+        raise ValueError(f"That picture is too big (the limit is {limit}). Choose a smaller one.")
     if not image.startswith(SIGNATURES[mime]) or (mime == "image/webp" and image[8:12] != b"WEBP"):
         raise ValueError("That file isn't a picture. Choose a JPEG, PNG or WebP photo.")
     return mime, base64.b64encode(image).decode()
@@ -49,11 +50,12 @@ def photo_url(phone):
     return f"data:{row['mime']};base64,{row['data']}" if row else None
 
 
-def data_url_from_upload(file_storage):
-    """A file from a form (<input type=file>) -> data URL for clean(), or None when no file was chosen."""
+def data_url_from_upload(file_storage, max_bytes=MAX_BYTES):
+    """A file from a form (<input type=file>) -> data URL for clean(), or None when no file was chosen.
+    Reads one byte past max_bytes, so clean() can say "too big" instead of keeping a cut-off picture."""
     if not file_storage or not file_storage.filename:
         return None
-    raw = file_storage.read(MAX_BYTES * 2 + 1)
+    raw = file_storage.read(max_bytes + 1)
     mime = (file_storage.mimetype or "").lower()
     if mime == "image/jpg":
         mime = "image/jpeg"

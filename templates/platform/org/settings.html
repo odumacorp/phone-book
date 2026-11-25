@@ -13,7 +13,7 @@
     <div>
       <b>Logo</b>
       <div class="muted">{{ 'Shown to your members and on the platform.' if profile.logo_url else 'No logo yet: a building icon shows instead.' }}
-        Square works best; JPEG, PNG or WebP up to 400 KB.</div>
+        Square works best; JPEG, PNG or WebP up to 5 MB.</div>
       {% if profile.logo_url %}
       <form method="post" action="/platform/org/{{ org.id }}/profile" class="inline" onsubmit="return confirm('Remove the logo?')">
         <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="remove_logo">

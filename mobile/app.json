@@ -18,7 +18,9 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.odumacorp.phonebook",
       "permissions": [
-        "android.permission.READ_CONTACTS"
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.RECORD_AUDIO"
       ],
       "blockedPermissions": [
         "android.permission.WRITE_CONTACTS"
@@ -50,6 +52,12 @@
           "cameraPermission": "Remote Phonebook lets you take a profile photo."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "351efd9c-410d-49c6-bc73-7740123bde60"
+      }
+    },
+    "owner": "odumacorp"
   }
 }

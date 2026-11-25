@@ -7,11 +7,28 @@ from pb.db import execute, fetch_all, fetch_one, get_db, sql
 from pb.users import get_user
 
 
+def contact_order(r):
+    """In the order the person arranged them; the ones they haven't arranged after those, priority first then A-Z."""
+    arranged = r.get("sort")
+    return (arranged is None, arranged or 0, -r["priority"], r["name"].lower(), r["id"])
+
+
 def list_contacts(owner, priority_only=False):
-    """Decrypted contacts, priority ones first, then by name (sorted here: the database only holds ciphertext)."""
+    """Decrypted contacts in the person's order (sorted here: the database only holds ciphertext)."""
     only = " AND priority = 1" if priority_only else ""
-    rows = open_contacts(fetch_all(f"SELECT id, name, phone, priority, enc FROM contacts WHERE owner = ?{only}", (owner,)))
-    return sorted(rows, key=lambda r: (-r["priority"], r["name"].lower(), r["id"]))
+    rows = open_contacts(fetch_all(f"SELECT id, name, phone, priority, enc, sort FROM contacts WHERE owner = ?{only}", (owner,)))
+    return sorted(rows, key=contact_order)
+
+
+def set_order(owner, contact_ids):
+    """Save the order the person arranged (their own contacts only; anything else is ignored). Returns how many."""
+    mine = {r["id"] for r in fetch_all("SELECT id FROM contacts WHERE owner = ?", (owner,))}
+    wanted = [int(i) for i in contact_ids if str(i).lstrip("-").isdigit() and int(i) in mine]
+    db = get_db()
+    for position, contact_id in enumerate(dict.fromkeys(wanted), 1):
+        db.execute(sql("UPDATE contacts SET sort = ? WHERE id = ? AND owner = ?"), (position, contact_id, owner))
+    db.commit()
+    return len(wanted)
 
 
 def search_contacts(owner, query, priority_only=False):

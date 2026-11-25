@@ -13,7 +13,7 @@ from pb.tenancy.repo import TenantRepo
 from pb.text import EMAIL_RE
 
 ABOUT_MAX, LINE_MAX = 600, 120
-LOGO_MAX_BYTES = 400 * 1024
+LOGO_MAX_BYTES = 5 * 1024 * 1024  # 5 MB: served from /logos/ with long caching, so pages load it once
 EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 FIELDS = ("about", "phone", "email", "website", "address")
 

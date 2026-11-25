@@ -26,6 +26,7 @@ def with_sales(register):
 
 def contact_id(client, t, name):
     page = client.get(f"/platform/org/{t}/contacts").get_data(as_text=True)
+    page = page[page.index('id="contacts-table"'):]  # the table, not the Arrange list above it
     row = page[page.index(f"<b>{name}</b>"):]
     return re.search(r"/contacts/(\d+)/delete", row).group(1)
 

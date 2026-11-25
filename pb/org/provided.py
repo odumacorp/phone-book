@@ -41,4 +41,5 @@ def with_provided(owner, own_rows):
     own_phones = {r["phone"] for r in own_rows}
     extra = [r for r in provided_contacts(owner) if r["phone"] not in own_phones]
     merged = [dict(r) for r in own_rows] + extra
-    return sorted(merged, key=lambda r: (-r["priority"], r["name"].lower(), r["id"]))
+    from pb.contacts import contact_order
+    return sorted(merged, key=contact_order)  # the person's arranged order; organisation contacts with the rest

@@ -22,6 +22,7 @@ import {
   API_URL,
   ApiError,
   removePhoto,
+  setContactOrder,
   setPhoto,
   AppNotification,
   Complaint,
@@ -2300,6 +2301,36 @@ function SyncScreen({
     setChosen(new Set());
   };
 
+  // Arrange: move your own contacts up or down, then save (organisation contacts stay where they are)
+  const [arranging, setArranging] = useState<Contact[] | null>(null);
+  const startArranging = () => {
+    setQuery('');
+    setArranging((contacts ?? []).filter((c) => !c.org));
+  };
+  const move = (index: number, by: number) =>
+    setArranging((list) => {
+      if (!list) return list;
+      const to = index + by;
+      if (to < 0 || to >= list.length) return list;
+      const next = [...list];
+      [next[index], next[to]] = [next[to], next[index]];
+      return next;
+    });
+  const saveArrangement = async () => {
+    if (!arranging) return;
+    setBusy(true);
+    try {
+      await setContactOrder(token, arranging.map((c) => c.id));
+      setArranging(null);
+      setStatus('Order saved. USSD "My contacts" shows them in this order too.');
+      await loadContacts();
+    } catch (e) {
+      failed(e, 'Could not save the order.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const toggleChosen = (id: number) =>
     setChosen((prev) => {
       const next = new Set(prev);
@@ -2358,9 +2389,7 @@ function SyncScreen({
   };
 
   const visible = useMemo(() => {
-    const sorted = [...(contacts ?? [])].sort(
-      (a, b) => Number(b.priority) - Number(a.priority) || a.name.localeCompare(b.name),
-    );
+    const sorted = contacts ?? []; // already in the person's order (arranged ones first, then priority and A-Z)
     const q = query.trim().toLowerCase();
     return q ? sorted.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)) : sorted;
   }, [contacts, query]);
@@ -2542,6 +2571,8 @@ function SyncScreen({
       <Text style={styles.hint}>
         {managedBy
           ? `Your contacts are provided by ${managedBy}. Ask ${managedBy} to add the numbers you need. Tap ☆ to pick up to ${maxPriority} priority contacts.`
+          : arranging
+            ? 'Use ↑ and ↓ to put your contacts in the order you want, then tap Save order.'
           : selecting
             ? 'Tick the contacts to delete.'
             : `Tap ☆ to pick up to ${maxPriority} priority contacts. Tap a contact to edit or remove it. To add several at once, use Choose contacts from phone.`}
@@ -2555,7 +2586,12 @@ function SyncScreen({
       />
       {contacts?.length && !managedBy ? (
         <View style={styles.linkRow}>
-          {selecting ? (
+          {arranging ? (
+            <>
+              <Link title="Save order" onPress={saveArrangement} disabled={busy} />
+              <Link title="Cancel" onPress={() => setArranging(null)} disabled={busy} />
+            </>
+          ) : selecting ? (
             <>
               <Link
                 title={`Select all${query ? ' shown' : ''} (${visible.length})`}
@@ -2567,6 +2603,9 @@ function SyncScreen({
           ) : (
             <>
               <Link title="Select to delete" onPress={() => setSelecting(true)} disabled={busy} />
+              {(contacts ?? []).filter((c) => !c.org).length > 1 ? (
+                <Link title="↕ Arrange" onPress={startArranging} disabled={busy} />
+              ) : null}
               <Link title="Add from phone" onPress={onPickContacts} disabled={busy} />
             </>
           )}
@@ -2579,7 +2618,7 @@ function SyncScreen({
     <View style={styles.list}>
       <FlatList
         style={styles.list}
-        data={visible}
+        data={arranging ?? visible}
         keyExtractor={(c) => String(c.id)}
         ListHeaderComponent={header}
         keyboardShouldPersistTaps="handled"
@@ -2592,7 +2631,42 @@ function SyncScreen({
             </Text>
           )
         }
-        renderItem={({ item }) => {
+        renderItem={({ item, index }) => {
+          if (arranging) {
+            const last = index === arranging.length - 1;
+            return (
+              <View style={styles.row}>
+                <Text style={styles.arrangeNumber}>{index + 1}</Text>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {item.priority ? '★ ' : ''}
+                    {item.name}
+                  </Text>
+                  <Text style={styles.rowPhone}>{item.phone}</Text>
+                </View>
+                <Pressable
+                  onPress={() => move(index, -1)}
+                  disabled={index === 0 || busy}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Move ${item.name} up`}
+                  style={[styles.moveButton, index === 0 && styles.buttonOff]}
+                >
+                  <Text style={styles.moveButtonText}>↑</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => move(index, 1)}
+                  disabled={last || busy}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Move ${item.name} down`}
+                  style={[styles.moveButton, last && styles.buttonOff]}
+                >
+                  <Text style={styles.moveButtonText}>↓</Text>
+                </Pressable>
+              </View>
+            );
+          }
           if (selecting && !item.org) {
             const on = chosen.has(item.id);
             return (
@@ -3012,6 +3086,9 @@ const styles = StyleSheet.create({
   navChipMainText: { color: '#fff' },
   profileTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 4 },
   avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  arrangeNumber: { width: 22, textAlign: 'center', color: COLORS.muted, fontWeight: '700' },
+  moveButton: { width: 40, height: 40, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  moveButtonText: { fontSize: 18, fontWeight: '700', color: COLORS.primary },
   orgLogo: { backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border },
   orgLogoEmpty: { backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' },
   orgHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
