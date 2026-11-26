@@ -33,12 +33,16 @@ def api_org(tenant_id):
     if not any(o["tenant_id"] == tenant_id for o in content.my_organisations(g.phone)):
         return api_error("You're not a member of this organisation.", 404)
     t = tenancy.tenant(tenant_id)
+    from pb.dashboard import track
+    notices = content.visible_notices(tenant_id, g.phone)
+    track.lookup(g.phone, track.api_channel(), "org_contacts", tenant_id)
+    track.viewed(tenant_id, "notice", [n["id"] for n in notices], g.phone)  # the app shows them all on this screen
     return jsonify({
         "org": {"id": tenant_id, "name": t["name"], **profile.public(tenant_id)},
         "notices": [
             {"id": n["id"], "title": n["title"], "body": n["body"], "urgent": bool(n["is_emergency"]), "pinned": bool(n["pinned"]),
              "at": n["publish_at"]}
-            for n in content.visible_notices(tenant_id, g.phone)
+            for n in notices
         ],
         "contacts": [_contact_json(c) for c in content.visible_contacts(tenant_id, g.phone, emergency=False)],
         "emergency": [_contact_json(c) for c in content.visible_contacts(tenant_id, g.phone, emergency=True)],

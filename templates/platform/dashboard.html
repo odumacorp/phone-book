@@ -1,7 +1,10 @@
 {% extends "platform/base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Overview</h1><p>A quick look at the organisations on Remote Phonebook and the platform's setup.</p></div>
+<div class="page-head row" style="justify-content:space-between;align-items:flex-start">
+  <div><h1>Overview</h1><p>A quick look at the organisations on Remote Phonebook and the platform's setup.</p></div>
+  {% if allowed('platform.tenants.view') or allowed('platform.tenants.manage') %}<a class="btn" href="/platform/panel">🛠️ Admin panel</a>{% endif %}
+</div>
 {% if no_staff %}
   <div class="tip">You're logged in with the admin password. <a href="/platform/staff">Create staff accounts</a> (with roles) so each
     person logs in as themselves and their actions are audited by name.</div>

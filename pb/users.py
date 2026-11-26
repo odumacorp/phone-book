@@ -29,7 +29,7 @@ def set_pin(phone, pin):
     """A PIN can be set only once; returns False if this number already has one."""
     if get_user(phone, fresh=True):
         return False
-    execute("INSERT INTO users (phone, pin_hash) VALUES (?, ?)", (phone, generate_password_hash(pin)))
+    execute("INSERT INTO users (phone, pin_hash, created_at) VALUES (?, ?, ?)", (phone, generate_password_hash(pin), int(time.time())))
     get_user(phone, fresh=True)
     return True
 

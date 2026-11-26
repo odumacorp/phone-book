@@ -5,6 +5,7 @@ from pb.text import EMERGENCY_NUMBERS, con, end, format_contacts, is_service_num
 from pb.users import get_user
 from pb.org.managed_contacts import blocked_message
 from pb.org.provided import with_provided
+from pb.dashboard import track
 from pb.ussd.orgs import has_organisations, organisations_menu
 from pb.ussd.screens import INVALID, MAIN_MENU, MEMBER_ACTIONS, MEMBER_MENU, MENU_ACTIONS, NO_PRIORITY, screen
 
@@ -49,7 +50,7 @@ def menu(owner, caller, parts):
         phone = normalize_contact_phone(rest[1])
         if not phone:
             return screen("Invalid phone number.")
-        add_contact(owner, name, phone)
+        add_contact(owner, name, phone, channel="ussd")
         return screen(f"Saved {name} - {phone}")
 
     # 4. Search: 4 -> query -> pick contact -> action
@@ -62,6 +63,7 @@ def menu(owner, caller, parts):
         if not rows:
             return screen(f"No contacts match '{query}'.")
         if len(rest) == 1:
+            track.lookup(owner, "ussd", "search")
             return screen(format_contacts(rows, numbered=True, short=True, extra="\n" + PICK_HINT) + "\n" + PICK_HINT)
         return pick_and_act(owner, caller, rows, rest[1], rest[2:])
 
@@ -76,6 +78,8 @@ def menu(owner, caller, parts):
         chunk = rows[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
         first = page * PAGE_SIZE + 1
         if i == len(rest):
+            if page == 0:
+                track.lookup(owner, "ussd", "contacts")
             more = f"\n{MORE}. More" if (page + 1) * PAGE_SIZE < len(rows) else ""
             body = format_contacts(chunk, numbered=True, short=True, first=first, extra=more + "\n" + PICK_HINT)
             return screen(body + more + "\n" + PICK_HINT)
@@ -112,6 +116,8 @@ def menu(owner, caller, parts):
         if not rows:
             return screen("You have no contacts yet." if send_all else NO_PRIORITY)
         messages = contact_sms(rows, "Your contacts" if send_all else "Your priority contacts")
+        from pb.analytics import track_user
+        track_user("sms_my_contacts", owner, channel="ussd", contacts=len(rows), messages=len(messages), own_phone=caller == owner)
         for text in messages:
             send_sms_async(caller, text)
         what = f"your {len(rows)} contacts" if send_all else f"your {len(rows)} priority contacts"
@@ -136,7 +142,7 @@ def menu(owner, caller, parts):
             existing = find_contact_by_phone(owner, number)
             if existing:
                 return screen(f"{number} is already in your contacts as {existing['name']}.")
-            add_contact(owner, label, number)
+            add_contact(owner, label, number, channel="ussd")
             return screen(f"Saved {label} - {number}")
         return screen(INVALID)
 

@@ -418,6 +418,47 @@ def staff_update(staff_id):
     return done("Saved.", "platform.staff_page")
 
 
+# ---------------------------------------------------------------- statistics (the whole platform)
+
+@bp.route("/stats", methods=["GET"])
+def stats_redirect():
+    return redirect(url_for("platform.stats_page", **request.args))
+
+
+@bp.route("/panel", methods=["GET"])
+@needs("platform.tenants.view", "platform.tenants.manage")
+def stats_page():
+    """The platform dashboard: every organisation's figures, an organisation filter, and super-admin actions."""
+    from pb import stats
+    from pb.dashboard import service
+    admin = rbac.can(g.principal, "platform.tenants.manage")
+    finance = rbac.can(g.principal, "platform.finance.view") or rbac.can(g.principal, "platform.finance.manage")
+    return render_template(
+        "platform/dashboard_platform.html", page="stats", is_admin=admin, cards=service.cards_for(admin, "platform", finance),
+        ranges=stats.RANGES, default_range=service.DEFAULT_RANGE, channels=service.CHANNELS, places=[],
+        orgs=[(o["id"], o["name"]) for o in stats.organisations()], panel=stats.platform_panel(), statuses=tenancy.STATUSES,
+        can_manage_users=rbac.can(g.principal, "platform.users.manage"))
+
+
+@bp.route("/panel/card/<key>", methods=["GET"])
+@needs("platform.tenants.view", "platform.tenants.manage")
+def platform_dashboard_card(key):
+    """One platform dashboard card as JSON. ?tenant=<id> narrows it to one organisation."""
+    from flask import jsonify
+    from pb.dashboard import service
+    a = request.args
+    tenant = int(a["tenant"]) if str(a.get("tenant", "")).isdigit() and tenancy.tenant(int(a["tenant"])) else None
+    try:
+        data = service.card(key, tenant, a.get("range"), a.get("from"), a.get("to"), a.get("group") if tenant else None,
+                            a.get("channel"), is_admin=rbac.can(g.principal, "platform.tenants.manage"), scope="platform",
+                            can_finance=rbac.can(g.principal, "platform.finance.view") or rbac.can(g.principal, "platform.finance.manage"))
+    except KeyError:
+        return jsonify({"error": "There's no such card."}), 404
+    except PermissionError:
+        return jsonify({"error": "Only super admins and finance staff can see this card."}), 403
+    return jsonify(data)
+
+
 # ---------------------------------------------------------------- people (everyone's accounts)
 
 def _phone_from_url(digits):
@@ -548,7 +589,12 @@ def test_accounts_update():
 @bp.route("/settings", methods=["GET"])
 @needs("platform.flags.manage")
 def settings_page():
-    return render_template("platform/settings.html", page="settings", otp=feature_on("otp", fresh=True),
+    from pb.dashboard.track import delivery_report_token
+    base = request.host_url.rstrip("/")
+    if request.headers.get("X-Forwarded-Proto") == "https" or request.host.endswith("odumacorp.com"):
+        base = "https://" + request.host  # behind Render's proxy the request arrives as http
+    delivery_url = base + "/sms/delivery/" + delivery_report_token()
+    return render_template("platform/settings.html", page="settings", delivery_url=delivery_url, otp=feature_on("otp", fresh=True),
                            sms_ready=sms is not None, editions=tenancy.editions(),
                            support=support.support_details(), support_fields=support.SUPPORT_FIELDS, ai=support.ai_enabled())
 

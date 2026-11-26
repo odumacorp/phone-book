@@ -28,6 +28,8 @@ def set_order(owner, contact_ids):
     for position, contact_id in enumerate(dict.fromkeys(wanted), 1):
         db.execute(sql("UPDATE contacts SET sort = ? WHERE id = ? AND owner = ?"), (position, contact_id, owner))
     db.commit()
+    from pb.analytics import track_user
+    track_user("contacts_arranged", owner, count=len(wanted))
     return len(wanted)
 
 
@@ -46,7 +48,9 @@ def sms_all(user):
     return bool(user["show_others"] if user["sms_all"] is None else user["sms_all"])
 
 
-def add_contact(owner, name, phone):
+def add_contact(owner, name, phone, channel=None):
+    from pb.analytics import track_user
+    track_user("contact_added", owner, channel=channel)
     g.action_done = True
     execute("INSERT INTO contacts (owner, name, phone, enc) VALUES (?, ?, ?, ?)", (owner, *stored_contact(name, phone)))
 

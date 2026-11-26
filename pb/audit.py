@@ -25,6 +25,11 @@ def _ip():
 def audit(action, tenant_id=None, target=None, details=None, actor=None, channel=None):
     """Record one action. target: (type, id). details: anything JSON-serialisable (never PINs or passwords)."""
     target_type, target_id = target if target else (None, None)
+    from pb import analytics
+    if analytics.enabled():
+        who = actor or current_actor()
+        analytics.track(action, analytics.actor_id(who), tenant_id, kind="admin_action",
+                        channel=channel or (getattr(g, "channel", None) if has_request_context() else None))
     return insert_id(
         "INSERT INTO audit_log (tenant_id, actor, action, target_type, target_id, details, ip, channel, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

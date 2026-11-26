@@ -1,0 +1,65 @@
+{# The dashboard's controls, cards, "New dashboard" dialog and script (organisation and platform). #}
+<div class="dash-bar" id="dash-bar">
+  <div class="dash-tabs" id="dash-tabs" role="tablist" aria-label="Dashboards"></div>
+  <div class="dash-controls">
+    <label class="sr-only" for="range">Date range</label>
+    <select id="range" class="ctl">
+      {% for k, label in ranges.items() %}<option value="{{ k }}" {{ 'selected' if k == default_range }}>{{ label }}</option>{% endfor %}
+      <option value="custom">Custom dates…</option>
+    </select>
+    <span id="custom-dates" hidden>
+      <label class="sr-only" for="from">From</label><input type="date" id="from" class="ctl">
+      <label class="sr-only" for="to">To</label><input type="date" id="to" class="ctl">
+    </span>
+    <div class="menu-wrap">
+      <button type="button" class="secondary small" data-menu="filter-menu" aria-haspopup="true" aria-expanded="false">+ Add filter</button>
+      <div class="menu" id="filter-menu" hidden>
+        {% if dash.orgs %}<label class="field" style="margin:0 0 8px">Organisation
+          <select id="f-org"><option value="">All organisations</option>{% for id, name in dash.orgs %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>{% endif %}
+        <label class="field" style="margin:0 0 8px" {{ 'hidden' if not places }}>Group or department
+          <select id="f-group"><option value="">All</option>{% for k, name in places %}<option value="{{ k }}">{{ name }}</option>{% endfor %}</select></label>
+        <label class="field" style="margin:0">Channel
+          <select id="f-channel"><option value="">All</option>{% for k, name in channels.items() %}<option value="{{ k }}">{{ name }}</option>{% endfor %}</select></label>
+        <p class="muted" style="margin:8px 0 0;font-size:12px">Region isn't recorded for members yet.</p>
+      </div>
+    </div>
+    <div id="filter-chips" class="chips"></div>
+    {% if is_admin %}
+    <div class="menu-wrap">
+      <button type="button" class="icon-btn" data-menu="page-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Dashboard options">⋮</button>
+      <div class="menu right" id="page-menu" role="menu" hidden>
+        <button role="menuitem" type="button" data-page="rename">Rename this dashboard</button>
+        <button role="menuitem" type="button" data-page="reset">Reset to the default cards</button>
+        <button role="menuitem" type="button" data-page="delete">Delete this dashboard</button>
+      </div>
+    </div>
+    <button type="button" id="new-dash">+ New dashboard</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="dash-grid" id="dash-grid" aria-live="polite"></div>
+
+{% if is_admin %}
+<dialog id="dash-dialog" aria-labelledby="dash-dialog-title">
+  <form method="dialog" id="dash-form">
+    <h2 id="dash-dialog-title">New dashboard</h2>
+    <label class="field">Name<input id="dash-name" maxlength="40" required placeholder="e.g. Notices this term"></label>
+    <fieldset class="dash-pick"><legend class="muted">Cards</legend>
+      {% for key, title in cards %}<label><input type="checkbox" name="cards" value="{{ key }}" checked> {{ title }}</label>{% endfor %}
+    </fieldset>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="secondary" id="dash-cancel">Cancel</button>
+      <button type="submit" value="save">Create dashboard</button></div>
+  </form>
+</dialog>
+{% endif %}
+
+<script>
+window.DASHBOARD = {
+  storage: {{ dash.storage|tojson }}, isAdmin: {{ 'true' if is_admin else 'false' }},
+  cards: {{ cards|tojson }}, defaultRange: {{ default_range|tojson }},
+  cardUrl: {{ dash.card_url|tojson }}, orgLink: {{ dash.org_link|tojson }},
+  groups: {{ places|tojson }}, channels: {{ channels|tojson }},
+};
+</script>
+<script>{% include "platform/org/_dashboard.js" %}</script>

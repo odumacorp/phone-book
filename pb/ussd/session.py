@@ -177,6 +177,11 @@ def log_login(owner, caller, network, session_id, error, resumed=False):
         return  # already logged this session (only happens without SECRET_KEY, when every screen re-checks)
     if success and not resumed and caller != owner:
         notify_event(owner, "ussd_other_phone", caller=masked(caller))
+    from pb.analytics import track_user
+    if success and not resumed:
+        track_user("logged_in", owner, channel="ussd", own_phone=caller == owner, network=NETWORKS.get(network or "", "other"))
+    elif not success:
+        track_user("login_failed", owner, channel="ussd", locked=error.startswith("Too many"))
     if resumed:
         reason = "resumed"  # own phone, within the inactivity window: no PIN asked
     elif success:
@@ -274,6 +279,7 @@ def run_menu(owner, caller, path, session_id, state, mac, login_id):
         end_ussd_login(login_id, "logged out on USSD")
         return end("You are logged out of Remote Phone-Book. Dial again to log in.")
     g.action_done = False
+    g.ussd_login_id = login_id  # the dashboard marks the session when the member reaches a contact
     body = menu(owner, caller, path)
     if body.startswith("CON "):
         save_resume(caller, owner, [] if g.action_done else path, session_id, state, mac, login_id)

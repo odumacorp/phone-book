@@ -88,7 +88,19 @@ def portal_helpers():
         "is_staff": is_staff() if getattr(g, "principal", None) else False,
         "fmt_time": lambda t: time.strftime("%d %b %Y, %H:%M", time.gmtime(t + 3 * 3600)) if t else "-",
         "fmt_date": lambda t: time.strftime("%d %b %Y", time.gmtime(t + 3 * 3600)) if t else "-",
+        "analytics": _analytics(),
     }
+
+
+def _analytics():
+    """PostHog page views on platform pages: anonymous ID and a page address without phone numbers (None when off)."""
+    from pb import analytics
+    if not analytics.enabled() or not getattr(g, "principal", None):
+        return None
+    org = getattr(g, "org", None)
+    return {"key": analytics.POSTHOG_KEY, "host": analytics.POSTHOG_HOST, "id": analytics.actor_id(g.principal),
+            "path": analytics.clean_path(request.path), "kind": "staff" if is_staff() else "organisation_admin",
+            "org": org["id"] if org else None}
 
 
 def needs(*permissions):
@@ -103,14 +115,22 @@ def needs(*permissions):
     return wrap
 
 
+def _back_to():
+    """A form can ask to come back to the page it was on (the Admin panel's quick actions): only a /platform/ page."""
+    target = str(request.form.get("next") or "") if request.method == "POST" else ""
+    if target.startswith("/platform/") and "//" not in target and "\\" not in target and "\n" not in target:
+        return target
+    return None
+
+
 def done(message, endpoint, **values):
     flash(message, "ok")
-    return redirect(url_for(endpoint, **values))
+    return redirect(_back_to() or url_for(endpoint, **values))
 
 
 def failed(message, endpoint, **values):
     flash(message, "error")
-    return redirect(url_for(endpoint, **values))
+    return redirect(_back_to() or url_for(endpoint, **values))
 
 
 @bp.route("/login", methods=["GET"])

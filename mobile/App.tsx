@@ -98,6 +98,7 @@ import {
 } from './src/deviceContacts';
 import { DialogProvider, useDialog } from './src/dialog';
 import { pickPhoto } from './src/photo';
+import { identify, resetAnalytics, screen as trackScreen, track } from './src/analytics';
 import { isWeb, showAndroidAppButton } from './src/platform';
 
 const BATCH_SIZE = 1000;
@@ -168,6 +169,7 @@ function Main() {
   };
 
   const logout = async () => {
+    resetAnalytics();
     await clearToken(); // local only: used when the server already rejected the token
     setToken(null);
     setMe(null);
@@ -176,6 +178,14 @@ function Main() {
   };
 
   const back = () => setView(token ? 'sync' : 'login');
+
+  // Analytics (anonymous; only when the server turns it on): which screens are used, and who after login
+  useEffect(() => {
+    if (!booting) trackScreen(view === 'sync' ? 'my_contacts' : view);
+  }, [view, booting]);
+  useEffect(() => {
+    if (me?.analytics_id) identify(me.analytics_id);
+  }, [me?.analytics_id]);
   // The header's Back button (top left). A screen with its own inner pages (My organisations) can take it first:
   // innerBack returns true when it went back inside the screen.
   const innerBack = useRef<(() => boolean) | null>(null);
@@ -374,7 +384,14 @@ function Main() {
               <Text style={styles.navChipText}>🚨 Emergency</Text>
             </Pressable>
             {showAndroidAppButton ? (
-              <Pressable style={styles.navChip} onPress={() => openSite('/android')} accessibilityRole="link">
+              <Pressable
+                style={styles.navChip}
+                onPress={() => {
+                  track('android_app_download_clicked', { from: 'shortcuts' });
+                  openSite('/android');
+                }}
+                accessibilityRole="link"
+              >
                 <Text style={styles.navChipText}>📲 Android app</Text>
               </Pressable>
             ) : null}
@@ -482,7 +499,13 @@ function AndroidAppButton() {
   if (!showAndroidAppButton) return null;
   return (
     <View style={styles.androidBox}>
-      <SecondaryButton title="📲 Install the Android app" onPress={() => openSite('/android')} />
+      <SecondaryButton
+        title="📲 Install the Android app"
+        onPress={() => {
+          track('android_app_download_clicked', { from: 'login' });
+          openSite('/android');
+        }}
+      />
       <Text style={styles.androidHint}>
         On an Android phone: download it, open the file and allow installing from your browser. On a computer, open
         phone-book.odumacorp.com/android on your phone instead.

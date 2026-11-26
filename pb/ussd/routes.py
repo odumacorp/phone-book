@@ -1,3 +1,4 @@
+import time
 from flask import Response, request
 from xml.sax.saxutils import quoteattr
 
@@ -39,10 +40,28 @@ def ussd():
     if not caller:
         body = end("Could not identify your phone number.")
     else:
+        from pb.dashboard import track
+        started = time.monotonic()
         try:
             body = handle(caller, text, session_id, request.values.get("networkCode", ""))
         except Exception:
             log.exception("Error handling USSD request")
+            track.ussd_failure(caller, "error")
             body = end("Remote Phone-Book is busy right now. Please dial again.")
+        else:
+            if time.monotonic() - started > track.USSD_TIMEOUT_SECONDS:
+                track.ussd_failure(caller, "timeout")  # too slow: the network will have given up
 
     return Response(body, mimetype="text/plain")
+
+
+@app.route("/sms/delivery/<token>", methods=["POST"])
+def sms_delivery_report(token):
+    """Africa's Talking SMS delivery reports (set this URL in the Africa's Talking dashboard: SMS > Delivery reports).
+    The token in the address keeps anyone else from posting fake reports."""
+    import hmac as _hmac
+    from pb.dashboard import track
+    if not _hmac.compare_digest(token, track.delivery_report_token()):
+        return Response("", status=404)
+    track.delivery_report(request.values.get("id"), request.values.get("status"))
+    return Response("OK", mimetype="text/plain")

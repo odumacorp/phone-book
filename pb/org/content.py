@@ -478,6 +478,10 @@ def save_notice(principal, tenant_id, form, notice_id=None):
         return notice_id
     new_id = repo.insert("notices", publish_at=now, created_by=principal, created_at=now, updated_at=now, **values)
     audit("notice.add", tenant_id, ("notice", new_id), {"title": title, "emergency": bool(values["is_emergency"])}, actor=principal)
+    from pb.dashboard import track
+    from pb.org.reminders import recipients
+    # on every allowed member's notice board (USSD and app) at once: delivered as soon as it's posted
+    track.sent(tenant_id, "notice", new_id, recipients(tenant_id, values["audience"]), "board", delivered=True)
     return new_id
 
 

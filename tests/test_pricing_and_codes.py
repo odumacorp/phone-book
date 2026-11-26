@@ -120,4 +120,4 @@ def test_starter_plan_gets_edition_modules_as_addons(ctx):
 
 
 def test_public_config_has_main_code(client):
-    assert client.get("/api/config").get_json() == {"ussd_code": "*384*88041#"}
+    assert client.get("/api/config").get_json() == {"ussd_code": "*384*88041#", "analytics": None}  # analytics off by default

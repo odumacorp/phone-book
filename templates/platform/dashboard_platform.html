@@ -1,0 +1,60 @@
+{% extends "platform/base.html" %}
+{% set back_href = '/platform/' %}{% set back_label = 'Overview' %}
+{% block title %}Dashboard · Oduma Corp{% endblock %}
+{% block content %}
+<div class="dash-top">
+  <a class="icon-btn" href="/help" aria-label="Help" title="Help">?</a>
+  <div class="menu-wrap">
+    <button type="button" class="avatar-btn" data-menu="me-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Your account">
+      {{ (staff_user.name or '?')[:1]|upper }}</button>
+    <div class="menu right" id="me-menu" role="menu" hidden>
+      <div class="menu-head">{{ staff_user.name }}<br><span class="muted">{{ 'Super admin' if is_admin else 'View only' }}</span></div>
+      <a role="menuitem" href="/platform/">Overview</a>
+      <form method="post" action="/platform/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button role="menuitem" type="submit" class="menu-btn-link">Log out</button></form>
+    </div>
+  </div>
+</div>
+
+<div class="page-head"><h1>Dashboard</h1>
+  <p>Remote Phonebook across every organisation and individual. Filter to one organisation to see it as its admins do, or
+    open its own dashboard from Top organisations.{% if not is_admin %} You can view this dashboard; only super admins change it.{% endif %}</p></div>
+
+<nav class="panel-tabs" aria-label="Areas">
+  <a class="ptab on" href="/platform/panel" aria-current="page">Dashboard</a>
+  {% for label, href, n in panel.tabs %}<a class="ptab" href="{{ href }}">{{ label }}{% if n is not none %} <span class="ptab-n">{{ '{:,}'.format(n) }}</span>{% endif %}</a>{% endfor %}
+</nav>
+
+{% set dash = {"storage": "rp-dashboards-platform", "card_url": "/platform/panel/card/", "orgs": orgs, "org_link": "/platform/org/{id}/panel"} %}
+{% include "platform/_dashboard_core.html" %}
+
+{% if is_admin or can_manage_users %}
+<h2 style="margin:26px 0 12px">Needs your attention</h2>
+<div class="grid2" style="gap:18px;align-items:start">
+  <div class="card">
+    <h2>Organisations to check <span class="pill {{ 'warn' if panel.orgs_to_check else 'off' }}">{{ panel.orgs_to_check|length }}</span></h2>
+    <p class="muted" style="margin:0 0 6px">On trial, in their grace period or suspended.</p>
+    {% for t in panel.orgs_to_check %}
+    <div class="list-item"><div><a href="/platform/tenants/{{ t.id }}"><b>{{ t.name }}</b></a><div class="muted">since {{ fmt_date(t.created_at) }}</div></div>
+      {% if is_admin %}<form method="post" action="/platform/tenants/{{ t.id }}/update" class="row" style="flex-wrap:nowrap">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="/platform/panel">
+        <label class="sr-only" for="st-{{ t.id }}">Status of {{ t.name }}</label>
+        <select id="st-{{ t.id }}" name="status" style="width:auto">{% for k, v in statuses.items() %}<option value="{{ k }}" {{ 'selected' if t.status == k }}>{{ v.split(' (')[0] }}</option>{% endfor %}</select>
+        <button class="small" type="submit">Save</button></form>
+      {% else %}<span class="pill warn">{{ statuses[t.status].split(' (')[0] }}</span>{% endif %}</div>
+    {% else %}<p class="muted" style="margin:0">Every organisation is active.</p>{% endfor %}
+  </div>
+  <div class="card">
+    <h2>Newest accounts</h2>
+    {% for u in panel.newest_accounts %}
+    <div class="list-item"><div><a href="/platform/people/{{ u.phone.lstrip('+') }}"><b>{{ u.name or '(no name)' }}</b></a>
+      <div class="muted">{{ local(u.phone) }}{{ ' · ' ~ fmt_date(u.created_at) if u.created_at }}{% if u.is_test %} · test{% endif %}</div></div>
+      {% if can_manage_users %}<form method="post" action="/platform/people/{{ u.phone.lstrip('+') }}" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="/platform/panel">
+        {% if u.disabled %}<button class="small" type="submit" name="action" value="on">Turn on</button>
+        {% else %}<button class="danger small" type="submit" name="action" value="off" onclick="return confirm('Turn this account off?')">Turn off</button>{% endif %}</form>
+      {% else %}<span class="pill {{ 'off' if u.disabled else 'on' }}">{{ 'Off' if u.disabled else 'On' }}</span>{% endif %}</div>
+    {% else %}<p class="muted" style="margin:0">No accounts yet.</p>{% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

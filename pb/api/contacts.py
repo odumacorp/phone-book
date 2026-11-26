@@ -16,6 +16,8 @@ from pb.web import app
 @require_auth
 def api_contacts():
     rows = with_provided(g.phone, list_contacts(g.phone))  # plus contacts the user's organisations show them
+    from pb.dashboard import track
+    track.lookup(g.phone, track.api_channel(), "contacts")
     return jsonify({
         "contacts": [
             {"id": r["id"], "name": r["name"], "phone": r["phone"], "priority": bool(r["priority"]),
@@ -51,7 +53,8 @@ def api_add_contact():
     existing = find_contact_by_phone(g.phone, phone)
     if existing:
         return api_error(f"{phone} is already saved as {existing['name']}.", 409)
-    add_contact(g.phone, name, phone)
+    from pb.api.auth import request_channel
+    add_contact(g.phone, name, phone, channel=request_channel())
     row = find_contact_by_phone(g.phone, phone)
     return jsonify({"id": row["id"], "name": row["name"], "phone": row["phone"], "priority": False}), 201
 
@@ -199,4 +202,7 @@ def api_sync():
         cur.executemany(sql("INSERT INTO contacts (owner, name, phone, enc) VALUES (?, ?, ?, ?)"), new_rows)
         db.commit()
 
+    from pb.analytics import track_user
+    from pb.api.auth import request_channel
+    track_user("contacts_synced", g.phone, channel=request_channel(), added=len(new_rows), skipped=skipped)
     return jsonify({"added": len(new_rows), "skipped": skipped, "total": len(seen)})

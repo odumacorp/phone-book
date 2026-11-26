@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+import { initAnalytics } from './analytics';
 import { defaultApiUrl, deviceName, tokenStore } from './platform';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? defaultApiUrl;
@@ -26,6 +28,7 @@ export type Me = {
   last_login?: { at: number; how: 'app' | 'USSD'; where: string } | null; // the login before this one
   contacts_managed_by?: string | null; // an organisation provides this person's contacts: no adding or syncing
   photo?: string | null; // profile photo as a data URL; null: show the person icon
+  analytics_id?: string | null; // anonymous ID for product analytics (never the phone number)
 };
 /** The user's place in one organisation, for the profile card. */
 export type Membership = {
@@ -65,6 +68,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string |
       headers: {
         'Content-Type': 'application/json',
         'X-Device-Name': DEVICE_NAME,
+        'X-Platform': Platform.OS, // android | ios | web: the dashboard's channel mix
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
@@ -115,8 +119,9 @@ export const ussdCode = () => ussdCodeValue;
 /** Public settings from the server. Offline or older servers: keep the defaults. */
 export async function loadConfig() {
   try {
-    const config = await request<{ ussd_code?: string }>('/api/config');
+    const config = await request<{ ussd_code?: string; analytics?: { key: string; host: string } | null }>('/api/config');
     if (config.ussd_code) ussdCodeValue = config.ussd_code;
+    initAnalytics(config.analytics);
   } catch {
     // keep the default
   }

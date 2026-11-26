@@ -15,6 +15,7 @@ from pb.features import feature_on
 from pb.messaging import send_sms_async, sms
 from pb.notify import email_configured, notify_event, unread_count
 from pb.photos import photo_url, remove_photo, set_photo
+from pb.analytics import person_id
 from pb.text import LOGIN_PHONE_FORMAT, clean_name, local_number, login_phone
 from pb.users import MAX_EMAILS, clean_email, email_owner, emails_json, get_user, set_pin, update_pin
 from pb.ussd.session import LOGIN_LOG_DAYS, NETWORKS, close_idle_ussd_logins, masked
@@ -324,6 +325,10 @@ def api_register_confirm():
     if email:
         execute("INSERT INTO user_emails (owner, email, created_at) VALUES (?, ?, ?)", (phone, email, int(time.time())))
     response = logged_in(get_user(phone, fresh=True))
+    from pb.analytics import track_user
+    from pb.api.auth import request_channel
+    track_user("signed_up", phone, org["id"] if org else None, channel=request_channel(), with_email=bool(email),
+               joined_organisation=bool(org))
     if org:
         status, org_name = joining.request_join(org["id"], phone, name)
         data = response.get_json()
@@ -369,7 +374,8 @@ def api_reset_confirm():
 @app.route("/api/config", methods=["GET"])
 def api_config():
     """Public settings the app needs before logging in."""
-    return jsonify({"ussd_code": main_code()})
+    from pb.analytics import public_config
+    return jsonify({"ussd_code": main_code(), "analytics": public_config()})
 
 
 @app.route("/api/me", methods=["GET"])
@@ -396,6 +402,7 @@ def api_me():
         "last_login": previous_login(g.phone, getattr(g, "jti", None)),
         "contacts_managed_by": (managed_by(g.phone) or {}).get("name"),  # their organisation provides their contacts
         "photo": photo_url(g.phone),  # data URL, or None: the app shows a person icon
+        "analytics_id": person_id(g.phone),  # anonymous ID for product analytics (never the phone number)
     })
 
 
@@ -406,6 +413,8 @@ def api_set_photo():
         url = set_photo(g.phone, body_json().get("image"))
     except ValueError as e:
         return api_error(str(e), 400)
+    from pb.analytics import track_user
+    track_user("profile_photo_set", g.phone)
     return jsonify({"ok": True, "photo": url})
 
 

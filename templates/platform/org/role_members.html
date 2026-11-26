@@ -1,0 +1,42 @@
+{% extends "platform/base.html" %}
+{% set back_href = '/platform/org/' ~ org.id ~ '/lists' %}{% set back_label = 'Roles and titles' %}
+{% block title %}{{ current.name }} · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>{{ current.name }}</h1>
+  <p>Everyone in {{ org.name }} with this role. Switch roles with the tabs.{% if can_manage_members %} To change someone's role,
+    open them with <b>Manage</b>.{% endif %}</p></div>
+
+<nav class="role-tabs" aria-label="Roles">
+  {% for r in tabs %}<a class="rtab {{ 'on' if r.key == current.key }}" href="/platform/org/{{ org.id }}/roles/{{ r.key }}"
+    {{ 'aria-current=page' if r.key == current.key }}>{{ r.name }} <span class="rtab-n">{{ r.people }}</span></a>{% endfor %}
+</nav>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+    <div><h2 style="margin:0">{{ rows|length }} {{ 'person' if rows|length == 1 else 'people' }}{% if current.own %} <span class="pill on">your role</span>{% endif %}</h2>
+      <p class="muted" style="margin:4px 0 0;max-width:760px">Can: {{ current.can|join('; ') if current.can else '-' }}</p></div>
+    {% if rows|length > 5 %}<label class="sr-only" for="role-search">Search</label>
+    <input id="role-search" placeholder="Search name, phone, title…" style="max-width:260px">{% endif %}
+  </div>
+  {% if rows %}
+  <table>
+    <thead><tr><th>Name</th><th>Phone</th><th>Job title</th><th>Departments and groups</th><th>Last login</th>{% if can_manage_members %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for m in rows %}
+    <tr class="role-row"><td><b>{{ m.display_name or '(no name)' }}</b></td><td>{{ local(m.user_phone) }}</td>
+      <td>{{ m.title or '-' }}</td><td class="muted">{{ m.placed|join(', ') if m.placed else '-' }}</td>
+      <td class="muted">{% if m.last_seen %}{{ fmt_date(m.last_seen[0]) }} · {{ m.last_seen[1] }}{% else %}never{% endif %}</td>
+      {% if can_manage_members %}<td style="text-align:right"><a class="btn secondary small" href="/platform/org/{{ org.id }}/members?edit={{ m.id }}#form">Manage</a></td>{% endif %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><b>Nobody has this role yet</b>{% if can_manage_members %}Give it to someone on the <a href="/platform/org/{{ org.id }}/members">Members</a> page.{% endif %}</div>
+  {% endif %}
+</div>
+<script>
+(() => { const q = document.getElementById('role-search'); if (!q) return;
+  q.addEventListener('input', () => { const t = q.value.toLowerCase();
+    document.querySelectorAll('.role-row').forEach((r) => { r.hidden = t && !r.innerText.toLowerCase().includes(t); }); }); })();
+</script>
+{% endblock %}

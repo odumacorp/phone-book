@@ -20,19 +20,32 @@
     <div class="side-menu" id="side-menu">
     <nav>
     {% if org is defined and org %}
-      <div class="org-head">{% if org_logo %}<img src="{{ org_logo }}" alt="" class="org-logo">{% endif %}<h6>{{ org.name }}</h6></div>
-      <a class="item {{ 'active' if section == 'overview' }}" href="/platform/org/{{ org.id }}"><span class="icon">🏠</span>Home</a>
-      {% if 'notices' in areas %}<a class="item {{ 'active' if section == 'notices' }}" href="/platform/org/{{ org.id }}/notices"><span class="icon">📢</span>Notices</a>{% endif %}
-      {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contacts' }}" href="/platform/org/{{ org.id }}/contacts"><span class="icon">📇</span>Contacts</a>{% endif %}
-      {% if 'emergency' in areas %}<a class="item {{ 'active' if section == 'emergency' }}" href="/platform/org/{{ org.id }}/emergency"><span class="icon">🚨</span>Emergency contacts</a>{% endif %}
-      {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contact_groups' }}" href="/platform/org/{{ org.id }}/contact-groups"><span class="icon">🗂</span>Contact groups</a>{% endif %}
-      {% if 'lists' in areas %}<a class="item {{ 'active' if section == 'lists' }}" href="/platform/org/{{ org.id }}/lists"><span class="icon">🏷️</span>Roles and titles</a>{% endif %}
-      {% if 'reminders' in areas %}<a class="item {{ 'active' if section == 'reminders' }}" href="/platform/org/{{ org.id }}/reminders"><span class="icon">⏰</span>Reminders</a>{% endif %}
-      {% if 'members' in areas %}<a class="item {{ 'active' if section == 'members' }}" href="/platform/org/{{ org.id }}/members"><span class="icon">👥</span>Members</a>{% endif %}
-      {% if 'structure' in areas %}<a class="item {{ 'active' if section == 'structure' }}" href="/platform/org/{{ org.id }}/groups"><span class="icon">🗂️</span>Groups and departments</a>{% endif %}
-      {% if 'preview' in areas %}<a class="item {{ 'active' if section == 'preview' }}" href="/platform/org/{{ org.id }}/preview"><span class="icon">📱</span>Preview</a>{% endif %}
-      {% if 'history' in areas %}<a class="item {{ 'active' if section == 'history' }}" href="/platform/org/{{ org.id }}/history"><span class="icon">🗃️</span>History</a>{% endif %}
-      {% if 'settings' in areas %}<a class="item {{ 'active' if section == 'settings' }}" href="/platform/org/{{ org.id }}/settings"><span class="icon">⚙️</span>Settings</a>{% endif %}
+      <a class="org-head" href="/platform/org/{{ org.id }}" title="{{ org.name }}">
+        {% if org_logo %}<img src="{{ org_logo }}" alt="{{ org.name }} logo" class="org-head-logo">
+        {% else %}{% set words = org.name.replace('&', ' ').replace(',', ' ').split() %}<span class="org-head-logo org-initials" aria-hidden="true">{{ (words[0][:1] ~ (words[1][:1] if words|length > 1 else ''))|upper }}</span>{% endif %}
+        <span class="org-head-name">{{ org.name }}</span>
+      </a>
+      {% set o = '/platform/org/' ~ org.id %}
+      <a class="item {{ 'active' if section == 'overview' }}" href="{{ o }}"><span class="icon">🏠</span>Home</a>
+      {% if 'stats' in areas %}<a class="item {{ 'active' if section == 'stats' }}" href="{{ o }}/panel"><span class="icon">🛠️</span>Admin panel</a>{% endif %}
+      <a class="item soon" aria-disabled="true"><span class="icon">🔔</span>Alerts</a>
+      <div class="nav-sep" role="separator"></div>
+      {% if 'members' in areas %}<a class="item {{ 'active' if section == 'members' }}" href="{{ o }}/members"><span class="icon">👥</span>Members</a>{% endif %}
+      {% if 'structure' in areas %}<a class="item {{ 'active' if section == 'structure' }}" href="{{ o }}/groups"><span class="icon">🗂️</span>Groups and departments</a>{% endif %}
+      {% if 'lists' in areas %}<a class="item {{ 'active' if section == 'lists' }}" href="{{ o }}/lists"><span class="icon">🏷️</span>Roles and titles</a>{% endif %}
+      {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contacts' }}" href="{{ o }}/contacts"><span class="icon">📇</span>Contact directory</a>{% endif %}
+      {% if 'emergency' in areas %}<a class="item {{ 'active' if section == 'emergency' }}" href="{{ o }}/emergency"><span class="icon">🚨</span>Emergency contacts</a>{% endif %}
+      {% if 'contacts' in areas %}<a class="item {{ 'active' if section == 'contact_groups' }}" href="{{ o }}/contact-groups"><span class="icon">🗂</span>Contact groups</a>{% endif %}
+      {% if 'notices' in areas %}<a class="item {{ 'active' if section == 'notices' }}" href="{{ o }}/notices"><span class="icon">📢</span>Notices</a>{% endif %}
+      {% if 'reminders' in areas %}<a class="item {{ 'active' if section == 'reminders' }}" href="{{ o }}/reminders"><span class="icon">⏰</span>Reminders</a>{% endif %}
+      {% if 'stats' in areas %}<a class="item" href="{{ o }}/panel#card-ussd_sessions"><span class="icon">#️⃣</span>USSD sessions</a>
+      <a class="item" href="{{ o }}/panel#card-delivery"><span class="icon">📬</span>Delivery reports</a>{% endif %}
+      {% if 'preview' in areas %}<a class="item {{ 'active' if section == 'preview' }}" href="{{ o }}/preview"><span class="icon">📱</span>Preview</a>{% endif %}
+      <div class="nav-sep" role="separator"></div>
+      {% if 'settings' in areas %}<a class="item" href="{{ o }}/panel#card-billing"><span class="icon">💳</span>Billing (M-Pesa)</a>{% endif %}
+      <a class="item soon" aria-disabled="true"><span class="icon">🔌</span>Integrations</a>
+      {% if 'history' in areas %}<a class="item {{ 'active' if section == 'history' }}" href="{{ o }}/history"><span class="icon">🗃️</span>History</a>{% endif %}
+      {% if 'settings' in areas %}<a class="item {{ 'active' if section == 'settings' }}" href="{{ o }}/settings"><span class="icon">⚙️</span>Settings</a>{% endif %}
       {% if not is_staff %}<a class="item" href="/platform/org"><span class="icon">↔️</span>Switch organisation</a>{% endif %}
     {% endif %}
     {% if is_staff %}
@@ -40,6 +53,7 @@
       <a class="item {{ 'active' if page == 'dashboard' }}" href="/platform/"><span class="icon">📊</span>Overview</a>
       {% if allowed('platform.tenants.view') or allowed('platform.tenants.manage') or allowed('platform.tenants.view_own') %}
         <a class="item {{ 'active' if page == 'tenants' }}" href="/platform/tenants"><span class="icon">🏢</span>Organisations</a>{% endif %}
+      {% if allowed('platform.tenants.view') or allowed('platform.tenants.manage') %}<a class="item {{ 'active' if page == 'stats' }}" href="/platform/panel"><span class="icon">🛠️</span>Admin panel</a>{% endif %}
       {% if allowed('platform.users.view') or allowed('platform.users.manage') %}<a class="item {{ 'active' if page == 'people' }}" href="/platform/people"><span class="icon">👤</span>People</a>{% endif %}
       {% if allowed('platform.pricing.view') %}<a class="item {{ 'active' if page == 'pricing' }}" href="/platform/pricing"><span class="icon">💰</span>Prices</a>{% endif %}
       {% if allowed('platform.ussd_codes.manage') or allowed('platform.tenants.view') %}
@@ -73,5 +87,18 @@
     {% block content %}{% endblock %}
   </main>
 </div>
+{% if analytics %}
+<script>
+/* PostHog page view (anonymous: no names, phone numbers or emails; phone numbers are removed from the address) */
+(() => {
+  const a = {{ analytics|tojson }};
+  const props = { $current_url: location.origin + a.path, $pathname: a.path, $host: location.host, $geoip_disable: true,
+                  user_kind: a.kind, source: 'platform', $referrer: document.referrer.replace(/\+?\d{9,15}/g, ':phone') };
+  if (a.org) { props.$groups = { organisation: String(a.org) }; props.organisation_id = a.org; }
+  fetch(a.host + '/i/v0/e/', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: a.key, event: '$pageview', distinct_id: a.id, properties: props }) }).catch(() => {});
+})();
+</script>
+{% endif %}
 </body>
 </html>

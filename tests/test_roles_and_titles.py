@@ -92,7 +92,11 @@ def test_click_a_role_to_see_who_has_it(client, register):
     t = setup_org(register)
     _r, _csrf = portal_login(client, ADMIN)
     page = client.get(f"/platform/org/{t}/lists").get_data(as_text=True)
-    assert 'class="role-toggle" data-role="client"' in page and 'id="role-client"' in page
-    people = page[page.index('id="role-client"'):]
-    people = people[:people.index("</tr>")]
-    assert "/members?edit=" in people  # each person links to their member page
+    assert f'href="/platform/org/{t}/roles/client"' in page and f'href="/platform/org/{t}/roles/owner"' in page
+    role = client.get(f"/platform/org/{t}/roles/client").get_data(as_text=True)
+    assert "<h1>Client</h1>" in role and "0713000003" in role and "/members?edit=" in role  # the client, with Manage
+    assert f'href="/platform/org/{t}/roles/member"' in role and f'href="/platform/org/{t}/roles/org_admin"' in role  # tabs
+    assert 'class="rtab on"' in role
+    owner = client.get(f"/platform/org/{t}/roles/owner").get_data(as_text=True)
+    assert "Organisation Super Admin" in owner
+    assert client.get(f"/platform/org/{t}/roles/no_such_role").status_code == 404

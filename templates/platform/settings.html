@@ -3,6 +3,13 @@
 {% block content %}
 <div class="page-head"><h1>Settings</h1><p>Switches that apply to the whole platform.</p></div>
 <div class="card">
+  <h2>SMS delivery reports (Africa's Talking)</h2>
+  <p class="help">Organisation dashboards show which reminder SMS actually reached members' phones. In the Africa's Talking
+    dashboard, open <b>SMS → SMS Callback URLs → Delivery Reports</b> and paste this address (it contains a secret, so keep it
+    to yourself):</p>
+  <code style="display:block;padding:10px;user-select:all">{{ delivery_url }}</code>
+</div>
+<div class="card">
   <h2>Security</h2>
   <div class="feature">
     <div><b>OTP by SMS (second factor)</b> {% if otp %}<span class="pill on">On</span>{% else %}<span class="pill off">Off</span>{% endif %}

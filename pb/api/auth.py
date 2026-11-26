@@ -218,9 +218,16 @@ def api_login():
     return finish_login(user)
 
 
+def request_channel():
+    """"web" for the website, "app" for the phone app (the website names itself "... (website)")."""
+    return "web" if "(website)" in request.headers.get("X-Device-Name", "") else "app"
+
+
 def finish_login(user):
+    from pb.analytics import track_user
     device = " ".join(request.headers.get("X-Device-Name", "").split())[:60] or "an unknown device"
     notify_event(user["phone"], "new_login", device=device)
+    track_user("logged_in", user["phone"], channel=request_channel())
     return logged_in(user)
 
 

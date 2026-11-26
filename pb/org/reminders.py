@@ -158,6 +158,9 @@ def send(tenant_id, reminder_id):
     app_sent = sms_sent = parts = 0
     if row["channels"] in ("app", "both"):
         app_sent = app_notify(phones, f"{org['name']}: {row['title']}", row["body"], now)
+        from pb.dashboard import track
+        track.sent(tenant_id, "reminder", reminder_id, [p for p in phones if (u := get_user(p)) and u["notify_inapp"]],
+                   "app", delivered=True)
         if app_sent < len(phones):
             notes.append(f"{len(phones) - app_sent} without the app (or with notifications off)")
     if row["channels"] in ("sms", "both"):
@@ -167,7 +170,7 @@ def send(tenant_id, reminder_id):
             text = sms_text(org["name"], row["title"], row["body"])
             parts = sms_parts(text) * len(phones)
             sms_sent = len(phones)
-            send_bulk_sms(phones, text)
+            send_bulk_sms(phones, text, tenant_id, reminder_id)
     repo.update("reminders", "id = ?", (reminder_id,), status="sent", sent_at=now, recipients=len(phones),
                 app_sent=app_sent, sms_sent=sms_sent, sms_parts=parts, note="; ".join(notes) or None)
     audit("reminder.sent", tenant_id, ("reminder", reminder_id),
@@ -191,18 +194,25 @@ def app_notify(phones, title, body, now=None):
     return len(rows)
 
 
-def send_bulk_sms(phones, text):
-    """Africa's Talking takes many recipients per request: send in batches from a background thread."""
+def send_bulk_sms(phones, text, tenant_id=None, reminder_id=None):
+    """Africa's Talking takes many recipients per request: send in batches from a background thread.
+    With a reminder, each message is recorded for the dashboard (delivered when Africa's Talking reports it)."""
     client = messaging.sms
     phones = messaging.without_test_accounts(phones)
+    from pb.web import app
 
     def _send():
+        from pb.dashboard import track
         for i in range(0, len(phones), SMS_BATCH):
             batch = phones[i:i + SMS_BATCH]
             try:
-                client.send(text, batch, AT_SENDER_ID)
+                response = client.send(text, batch, AT_SENDER_ID)
             except Exception:
                 log.exception("reminder SMS batch of %d failed", len(batch))
+                continue
+            if reminder_id:
+                with app.app_context():
+                    track.sent(tenant_id, "reminder", reminder_id, batch, "sms", provider_ids=track.sms_ids(response))
 
     threading.Thread(target=_send, daemon=True).start()
 

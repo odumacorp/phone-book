@@ -1,0 +1,69 @@
+{% extends "platform/base.html" %}
+{% set section = 'stats' %}
+{% set back_href = '/platform/org/' ~ org.id %}{% set back_label = 'Home' %}
+{% block title %}Dashboard · {{ org.name }}{% endblock %}
+{% block content %}
+<div class="dash-top">
+  {% if workspaces and workspaces|length > 1 %}
+  <div class="menu-wrap">
+    <button type="button" class="secondary small" data-menu="org-switch" aria-haspopup="menu" aria-expanded="false">{{ org.name }} ▾</button>
+    <div class="menu" id="org-switch" role="menu" hidden>
+      {% for w in workspaces %}<a role="menuitem" href="/platform/org/{{ w.tenant_id }}/panel" {{ 'aria-current=page' if w.tenant_id == org.id }}>{{ w.name }}</a>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <a class="icon-btn" href="/help" aria-label="Help" title="Help">?</a>
+  <div class="menu-wrap">
+    <button type="button" class="avatar-btn" data-menu="me-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Your account">
+      {{ (staff_user.name or '?')[:1]|upper }}</button>
+    <div class="menu right" id="me-menu" role="menu" hidden>
+      <div class="menu-head">{{ staff_user.name }}<br><span class="muted">{{ 'Admin' if is_admin else 'Viewer' }}</span></div>
+      <a role="menuitem" href="/platform/org/{{ org.id }}">Home</a>
+      {% if not is_staff %}<a role="menuitem" href="/platform/org">Switch organisation</a>{% endif %}
+      <form method="post" action="/platform/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button role="menuitem" type="submit" class="menu-btn-link">Log out</button></form>
+    </div>
+  </div>
+</div>
+
+<div class="page-head"><h1>Dashboard</h1>
+  <p>How {{ org.name }}'s members use Remote Phonebook, and whether your notices arrive.{% if not is_admin %} You can view this
+    dashboard; ask an admin to change it.{% endif %}</p></div>
+
+{% set dash = {"storage": "rp-dashboards-" ~ org.id, "card_url": "/platform/org/" ~ org.id ~ "/panel/card/", "orgs": None, "org_link": None} %}
+{% include "platform/_dashboard_core.html" %}
+
+{% if is_admin and ('members' in areas or 'notices' in areas) %}
+<h2 style="margin:26px 0 12px">Needs your attention</h2>
+<div class="grid2" style="gap:18px;align-items:start">
+  {% if 'members' in areas %}
+  <div class="card">
+    <h2>Requests to join <span class="pill {{ 'warn' if panel.requests else 'off' }}">{{ panel.requests|length }}</span></h2>
+    {% for r in panel.requests %}
+    <div class="list-item"><div><b>{{ r.display_name or local(r.user_phone) }}</b><div class="muted">{{ local(r.user_phone) }} · asked {{ fmt_date(r.joined_at) }}</div></div>
+      <div class="row" style="flex-wrap:nowrap">
+        <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/approve" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="next" value="{{ here }}"><input type="hidden" name="notify" value="1"><button class="small" type="submit">Approve</button></form>
+        <form method="post" action="/platform/org/{{ org.id }}/members/{{ r.id }}/decline" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="next" value="{{ here }}"><input type="hidden" name="notify" value="1"><button class="danger small" type="submit">Decline</button></form>
+      </div></div>
+    {% else %}<p class="muted" style="margin:0">No one is waiting.</p>{% endfor %}
+  </div>
+  {% endif %}
+  {% if 'notices' in areas %}
+  <div class="card">
+    <h2>Post a quick notice</h2>
+    <form method="post" action="/platform/org/{{ org.id }}/notices">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ here }}">
+      <label class="field">Title<input name="title" maxlength="80" required placeholder="e.g. Office closed on Friday"></label>
+      <label class="field">Message<textarea name="body" required style="min-height:80px"></textarea></label>
+      <div class="checks"><label><input type="checkbox" name="pinned" value="1"> Pin it</label>
+        <label><input type="checkbox" name="is_emergency" value="1"> Urgent</label>
+        <label><input type="checkbox" name="notify" value="1" checked> Tell members in the app</label></div>
+      <button type="submit">Post to everyone</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

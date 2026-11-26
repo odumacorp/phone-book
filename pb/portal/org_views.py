@@ -33,6 +33,9 @@ AREAS = {  # area: (permission, module)
     "history": (("announcements.publish", "contacts.manage", "emergency.manage"), None),
     "lists": (("roles.custom", "tenant.admins.manage"), None),
     "settings": ("tenant.settings.manage", None),
+    # the Admin panel (dashboard): admins run it; read-only roles (Auditor) see the charts as viewers
+    "stats": (("members.manage", "tenant.settings.manage", "announcements.publish", "contacts.manage", "members.view",
+               "audit.view"), None),
 }
 
 
@@ -822,6 +825,7 @@ def org_preview(tenant_id):
 @bp.route("/org/<int:tenant_id>/preview/ussd", methods=["POST"])
 def org_preview_ussd(tenant_id):
     t, _areas = open_workspace(tenant_id)
+    g.ussd_simulate = True  # the dashboard never counts an admin's preview
     require_area("preview")
     body = request.get_json(silent=True) or {}
     inputs = [str(x).strip()[:160] for x in (body.get("inputs") or [])][:30]
@@ -893,13 +897,11 @@ def _role_summary(role_id):
     return readable
 
 
-@bp.route("/org/<int:tenant_id>/lists", methods=["GET"])
-def org_lists(tenant_id):
-    open_workspace(tenant_id)
-    require_area("lists")
+def _roles_with_people(tenant_id):
+    """(roles, owner, members): every role offered here with the members who have it, and the Super Admin's member row."""
     members = content.member_rows(tenant_id)
     by_principal = {rbac.user_principal(m["user_phone"]): m for m in members}
-    people = {}  # role key -> the members who have it (click a role to see them)
+    people = {}  # role key -> the members who have it
     for a in rbac.tenant_assignments(tenant_id):
         m = by_principal.get(a["principal"])
         if m:
@@ -911,6 +913,14 @@ def org_lists(tenant_id):
         who = sorted(people.get(key, []), key=lambda m: (m["display_name"] or m["user_phone"]).lower())
         roles.append({"id": role["id"], "key": key, "name": name, "own": not role["is_system"], "people": len(who),
                       "members": who, "can": _role_summary(role["id"])})
+    return roles, owner, members
+
+
+@bp.route("/org/<int:tenant_id>/lists", methods=["GET"])
+def org_lists(tenant_id):
+    open_workspace(tenant_id)
+    require_area("lists")
+    roles, owner, members = _roles_with_people(tenant_id)
     from pb.rbac.catalogue import TENANT_PERMISSIONS
     own_titles = tenancy.org_titles(tenant_id)
     return page("platform/org/lists.html", roles=roles, own_titles=own_titles, owner=owner,
@@ -919,6 +929,24 @@ def org_lists(tenant_id):
                 base_roles=[(k, n) for k, n in tenancy.available_roles(tenant_id) if k != tenancy.ADMIN],
                 can_customise=tenancy.plan_allows(tenant_id, "custom_roles"),
                 permissions=[(k, v) for k, v in TENANT_PERMISSIONS.items() if rbac.can(g.principal, k, tenant_id) or g.org_staff_help])
+
+
+@bp.route("/org/<int:tenant_id>/roles/<role_key>", methods=["GET"])
+def org_role_members(tenant_id, role_key):
+    """Everyone with one role, with tabs for the other roles (Roles and titles: click a role)."""
+    open_workspace(tenant_id)
+    require_area("lists")
+    roles, owner, _members = _roles_with_people(tenant_id)
+    tabs = [{"key": "owner", "name": "Organisation Super Admin", "people": 1 if owner else 0, "members": [owner] if owner else [],
+             "can": ["Everything, including billing and appointing admins. Only one."], "own": False}] + roles
+    current = next((r for r in tabs if r["key"] == role_key), None)
+    if not current:
+        abort(404)
+    placed = structure.placements_by_member(tenant_id)
+    seen = content.last_logins(m["user_phone"] for m in current["members"])
+    rows = [dict(m, placed=placed.get(m["id"], []), last_seen=seen.get(m["user_phone"])) for m in current["members"]]
+    return page("platform/org/role_members.html", section="lists", tabs=tabs, current=current, rows=rows,
+                can_manage_members="members" in g.org_areas)
 
 
 def _lists_action(tenant_id, fn, message):
@@ -958,6 +986,52 @@ def org_titles_save(tenant_id):
         new = current + added
         message = "Added to your titles: " + ", ".join(added) + "."
     return _lists_action(tenant_id, lambda: tenancy.set_org_titles(g.principal, tenant_id, new), message)
+
+
+# ---------------------------------------------------------------- statistics (this organisation only)
+
+@bp.route("/org/<int:tenant_id>/stats", methods=["GET"])
+def org_stats_redirect(tenant_id):
+    return redirect(url_for("platform.org_stats", tenant_id=tenant_id, **request.args))
+
+
+def _dashboard_admin(tenant_id):
+    """Admins (can change things) see everything incl. Billing and edit the layout; viewers (e.g. Auditor) see charts only."""
+    return g.org_staff_help or any(_holds(p, tenant_id) for p in
+                                   ("members.manage", "tenant.settings.manage", "announcements.publish", "contacts.manage"))
+
+
+@bp.route("/org/<int:tenant_id>/panel", methods=["GET"])
+def org_stats(tenant_id):
+    """The organisation's Admin panel: the dashboard (cards load from org_dashboard_card) and quick actions."""
+    from pb import stats
+    from pb.dashboard import service
+    open_workspace(tenant_id)
+    require_area("stats")
+    admin = _dashboard_admin(tenant_id)
+    places = [(f"d:{d['id']}", d["name"]) for d in structure.departments(tenant_id)] + \
+             [(f"g:{x['id']}", x["name"]) for x in structure.groups(tenant_id)]
+    return page("platform/org/dashboard.html", section="stats", is_admin=admin, cards=service.cards_for(admin),
+                ranges=stats.RANGES, default_range=service.DEFAULT_RANGE, channels=service.CHANNELS, places=places,
+                panel=stats.org_panel(tenant_id, g.org_areas), here=f"/platform/org/{tenant_id}/panel",
+                workspaces=workspaces())
+
+
+@bp.route("/org/<int:tenant_id>/panel/card/<key>", methods=["GET"])
+def org_dashboard_card(tenant_id, key):
+    """One dashboard card as JSON (the page fetches each card, so each shows its own loading and error state)."""
+    from pb.dashboard import service
+    open_workspace(tenant_id)
+    require_area("stats")
+    a = request.args
+    try:
+        data = service.card(key, tenant_id, a.get("range"), a.get("from"), a.get("to"), a.get("group"), a.get("channel"),
+                            is_admin=_dashboard_admin(tenant_id))
+    except KeyError:
+        return jsonify({"error": "There's no such card."}), 404
+    except PermissionError:
+        return jsonify({"error": "Only admins can see this card."}), 403
+    return jsonify(data)
 
 
 # ---------------------------------------------------------------- settings

@@ -8,6 +8,7 @@ contacts open the usual contact menu (call, SMS, copy number). Every read is fil
 from pb.config import MORE, PAGE_SIZE, SMS_CHUNK
 from pb.messaging import send_sms_async
 from pb import messaging
+from pb.dashboard import track
 from pb.org import content
 from pb.tenancy import tenants as tenancy
 from pb.text import format_contacts, plain_text, position_of
@@ -93,14 +94,14 @@ def org_menu(org, owner, caller, rest, contact_menu, roles=None, simulate=False)
         return screen(INVALID)
     kind, sub = options[int(rest[0]) - 1][1], rest[1:]
     if kind == "notices":
-        return notices_screen(org, notices, caller, sub, simulate)
+        return notices_screen(org, notices, caller, sub, simulate, owner=owner)
     if kind == "emergency":
         rows = content.visible_contacts(tenant_id, owner, emergency=True, roles=roles)
         return contact_list(rows, sub, owner, caller, contact_menu, "No emergency contacts yet.", "Emergency:")
     return contacts_screen(tenant_id, owner, caller, sub, contact_menu, roles)
 
 
-def notices_screen(org, rows, caller, sub, simulate=False):
+def notices_screen(org, rows, caller, sub, simulate=False, owner=None):
     if not rows:
         return screen("No notices right now.")
     page, i = page_and_rest(len(rows), sub)
@@ -116,6 +117,8 @@ def notices_screen(org, rows, caller, sub, simulate=False):
     if index is None:
         return screen(INVALID)
     notice, rest = chunk[index], sub[i + 1:]
+    if not simulate and not rest:
+        track.viewed(org["tenant_id"], "notice", [notice["id"]], owner or caller)
     pages = text_pages(f"{notice['title']}\n{notice['body']}")
     shown, j = 0, 0
     while j < len(rest) and rest[j] == MORE and shown + 1 < len(pages):
@@ -137,6 +140,8 @@ def contacts_screen(tenant_id, owner, caller, sub, contact_menu, roles=None):
     rows = content.visible_contacts(tenant_id, owner, emergency=False, roles=roles)
     if not rows:
         return screen("No contacts yet.")
+    if not sub:
+        track.lookup(owner, "ussd", "org_contacts", tenant_id)
     groups = sorted({r["group_name"] or "Other" for r in rows}, key=lambda g: (g == "Other", g.lower()))
     if len(groups) > 1:
         page, i = page_and_rest(len(groups), sub)
