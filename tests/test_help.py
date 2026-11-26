@@ -143,3 +143,8 @@ def test_website_hands_its_login_to_platform(client, register):
     assert client.post("/platform/app-login", headers=auth(token)).status_code == 200
     page = client.get("/platform/", follow_redirects=True).get_data(as_text=True)
     assert "Org" in page and "Post a notice" in page
+
+
+def test_android_download_link(client):
+    resp = client.get("/android")
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/releases/latest/download/remote-phonebook.apk")

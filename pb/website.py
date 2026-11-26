@@ -68,3 +68,14 @@ def org_logo(tenant_id, ext):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Content-Security-Policy"] = "default-src 'none'"
     return response
+
+
+ANDROID_APK_URL = "https://github.com/odumacorp/phone-book/releases/latest/download/remote-phonebook.apk"
+
+
+@app.route("/android", methods=["GET"])
+@app.route("/download/android", methods=["GET"])
+def android_download():
+    """phone-book.odumacorp.com/android: the newest Android app (APK, published as a GitHub release)."""
+    from flask import redirect
+    return redirect(ANDROID_APK_URL, code=302)
