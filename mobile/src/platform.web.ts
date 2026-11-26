@@ -59,3 +59,11 @@ export function deviceName() {
 export const defaultApiUrl = '';
 
 export const isWeb = true;
+
+/** The website offers the Android app (phone-book.odumacorp.com/android), except on iPhones and iPads, which can't install it. */
+export const showAndroidAppButton = (() => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const ipad = /Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1; // iPadOS reports itself as a Mac
+  return !/iPhone|iPad|iPod/.test(ua) && !ipad;
+})();

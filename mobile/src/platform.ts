@@ -15,3 +15,6 @@ export const deviceName = () => Device.modelName ?? Device.osName ?? 'Unknown de
 export const defaultApiUrl = 'https://phone-book.odumacorp.com';
 
 export const isWeb = false;
+
+/** The phone app is already installed: no "Get the Android app" button. */
+export const showAndroidAppButton = false;

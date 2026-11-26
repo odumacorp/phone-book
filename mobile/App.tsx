@@ -98,7 +98,7 @@ import {
 } from './src/deviceContacts';
 import { DialogProvider, useDialog } from './src/dialog';
 import { pickPhoto } from './src/photo';
-import { isWeb } from './src/platform';
+import { isWeb, showAndroidAppButton } from './src/platform';
 
 const BATCH_SIZE = 1000;
 
@@ -373,6 +373,11 @@ function Main() {
             <Pressable style={styles.navChip} onPress={() => setView('emergency')} accessibilityRole="button">
               <Text style={styles.navChipText}>🚨 Emergency</Text>
             </Pressable>
+            {showAndroidAppButton ? (
+              <Pressable style={styles.navChip} onPress={() => openSite('/android')} accessibilityRole="link">
+                <Text style={styles.navChipText}>📲 Android app</Text>
+              </Pressable>
+            ) : null}
           </ScrollView>
         ) : null}
         {content}
@@ -467,7 +472,22 @@ function LoginScreen({
       <Link title="New here? Create an account" onPress={onRegister} disabled={busy} />
       <Link title="Report a problem" onPress={onReport} disabled={busy} />
       <Link title="Help and support" onPress={() => openSite('/help')} disabled={busy} />
+      <AndroidAppButton />
     </Form>
+  );
+}
+
+/** On the website (not iPhones): download and install the Android app. */
+function AndroidAppButton() {
+  if (!showAndroidAppButton) return null;
+  return (
+    <View style={styles.androidBox}>
+      <SecondaryButton title="📲 Install the Android app" onPress={() => openSite('/android')} />
+      <Text style={styles.androidHint}>
+        On an Android phone: download it, open the file and allow installing from your browser. On a computer, open
+        phone-book.odumacorp.com/android on your phone instead.
+      </Text>
+    </View>
   );
 }
 
@@ -3089,6 +3109,8 @@ const styles = StyleSheet.create({
   arrangeNumber: { width: 22, textAlign: 'center', color: COLORS.muted, fontWeight: '700' },
   moveButton: { width: 40, height: 40, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   moveButtonText: { fontSize: 18, fontWeight: '700', color: COLORS.primary },
+  androidBox: { marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: COLORS.border, gap: 8 },
+  androidHint: { color: COLORS.muted, fontSize: 13, lineHeight: 18, textAlign: 'center' },
   orgLogo: { backgroundColor: '#fff', borderWidth: 1, borderColor: COLORS.border },
   orgLogoEmpty: { backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' },
   orgHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
