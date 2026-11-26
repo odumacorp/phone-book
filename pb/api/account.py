@@ -287,7 +287,10 @@ def api_register_request():
     error = send_code(phone, "verification")
     if error:
         return api_error(error, 429)
-    return jsonify({"sent": True, "phone": phone})
+    reply = {"sent": True, "phone": phone}
+    if TEST_OTP_CODE:  # testing: nothing is texted, so tell the person the fixed code
+        reply["test_code"] = TEST_OTP_CODE
+    return jsonify(reply)
 
 
 @app.route("/api/register/confirm", methods=["POST"])

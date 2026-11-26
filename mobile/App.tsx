@@ -525,6 +525,7 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string, message?
   const [email, setEmail] = useState('');
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState('');
+  const [testCode, setTestCode] = useState(''); // set while the server uses a fixed testing code
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pin, setPin] = useState('');
@@ -536,7 +537,8 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string, message?
     if (!isValidPhone(phone)) return setError(`Enter your phone number as ${PHONE_FORMAT}.`);
     if (email.trim() && !isEmail(email)) return setError('Enter a valid email address, or leave it empty.');
     run(async () => {
-      await requestRegistration(phone, email.trim());
+      const sent = await requestRegistration(phone, email.trim());
+      setTestCode(sent.test_code || '');
       setCodeSent(true);
     });
   };
@@ -653,7 +655,9 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string, message?
         </>
       ) : (
         <>
-          <Text style={styles.hint}>Enter the code sent to {phone}.</Text>
+          <Text style={styles.hint}>
+            {testCode ? `Testing: no SMS is sent. Use ${testCode} as the code.` : `Enter the code sent to ${phone}.`}
+          </Text>
           <CodeField value={code} onChange={setCode} />
           <PasswordField label={`Password (at least ${PASSWORD_MIN} characters)`} value={password} onChange={setPassword} isNew />
           <PasswordField label="Confirm password" value={confirmPassword} onChange={setConfirmPassword} isNew />

@@ -13,7 +13,8 @@ def test_signup_with_fixed_code_and_no_sms(client, fake_sms, monkeypatch):
     monkeypatch.setattr(account, "TEST_OTP_CODE", "123456")
     monkeypatch.setattr(otp, "TEST_OTP_CODE", "123456")
     before = len(fake_sms.sent)
-    assert client.post("/api/register/request", json={"phone": "0705502140"}).status_code == 200
+    sent = client.post("/api/register/request", json={"phone": "0705502140"})
+    assert sent.status_code == 200 and sent.get_json()["test_code"] == "123456"  # the signup page shows it
     resp = client.post("/api/register/confirm", json={"phone": "0705502140", "code": "123456", "name": "Tester",
                                                        "password": "secret-pass-1", "pin": "1234"})
     assert resp.status_code == 200 and "token" in resp.get_json()
@@ -27,7 +28,7 @@ def test_works_without_sms_configured(client, monkeypatch):
 
 
 def test_off_by_default_codes_are_random(client, fake_sms):
-    client.post("/api/register/request", json={"phone": "0705502142"})
+    assert "test_code" not in client.post("/api/register/request", json={"phone": "0705502142"}).get_json()
     resp = client.post("/api/register/confirm", json={"phone": "0705502142", "code": "123456", "name": "X",
                                                        "password": "secret-pass-1", "pin": "1234"})
     assert resp.status_code in (400, 401)

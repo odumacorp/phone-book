@@ -147,7 +147,7 @@ export const getPublicOrgs = () => request<{ orgs: PublicOrg[] }>('/api/orgs/pub
 
 /** Register, step 1: checks the phone (and email, if given) and texts a 6-digit code to the phone. */
 export const requestRegistration = (phone: string, email: string) =>
-  request<{ sent: boolean }>('/api/register/request', { method: 'POST', body: JSON.stringify({ phone, email }) });
+  request<{ sent: boolean; test_code?: string }>('/api/register/request', { method: 'POST', body: JSON.stringify({ phone, email }) });
 
 /** Register, step 2: the code plus name, optional email, app password and USSD PIN. */
 export async function register(r: Registration): Promise<{ token: string; organisation?: JoinResult }> {
