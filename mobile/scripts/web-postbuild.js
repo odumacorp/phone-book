@@ -13,5 +13,14 @@ const links = [
 ].join('');
 let html = fs.readFileSync(file, 'utf8');
 if (!html.includes('apple-touch-icon')) html = html.replace('</head>', `${links}</head>`);
+// DM Sans (served by the website from /site/fonts), so the web app matches phone-book.odumacorp.com
+const font = [
+  '<link rel="preload" href="/site/fonts/dm-sans-latin.woff2" as="font" type="font/woff2" crossorigin />',
+  '<style id="brand-font">@font-face{font-family:"DM Sans";src:url(/site/fonts/dm-sans-latin.woff2) format("woff2");font-weight:400 700;font-display:swap}',
+  'body,#root div,#root input,#root textarea{font-family:"DM Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
+  '#root div[data-mono]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}</style>',
+].join('');
+if (!html.includes('brand-font')) html = html.replace('</head>', `${font}</head>`);
+html = html.replace('content="#0B6E4F"', 'content="#1F6FEB"');
 fs.writeFileSync(file, html);
-console.log('web-postbuild: icon links added');
+console.log('web-postbuild: icon links and brand font added');

@@ -4,37 +4,102 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">
 <title>Log in · Remote Phonebook</title>
 <link rel="icon" href="/favicon.png">
+<link rel="preload" href="/site/fonts/dm-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
 {% include "platform/_style.html" %}
+<style>
+/* Same look as the website's log-in pages: blue page, graphics beside a floating card */
+@font-face{font-family:"DM Sans";src:url(/site/fonts/dm-sans-latin.woff2) format("woff2");font-weight:400 700;font-display:swap}
+body.auth{margin:0;min-height:100vh;font-family:"DM Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#4A5568;
+  background:linear-gradient(150deg,#1F6FEB 0%,#1A63D8 45%,#1658C4 100%);display:flex;flex-direction:column}
+.auth *{font-family:inherit}
+.a-top{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;max-width:1120px;margin:0 auto;padding:14px 20px}
+.a-brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none;min-height:44px}
+.a-brand img{width:36px;height:36px;border-radius:50%}
+.a-brand b{display:block;font-size:17px;letter-spacing:-.02em;line-height:1.15}
+.a-brand small{display:block;font-size:12px;color:#DCE7FF}
+.a-link{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid rgba(255,255,255,.45);
+  background:rgba(255,255,255,.08);color:#fff;font-weight:600;font-size:15px;text-decoration:none}
+.a-link:hover{background:rgba(255,255,255,.16)}
+.a-main{flex:1;display:flex;align-items:center;justify-content:center;gap:72px;width:100%;max-width:1120px;margin:0 auto;padding:24px 20px 32px}
+.a-art{flex:1;max-width:500px;color:#fff}
+.a-art h1{font-size:46px;line-height:1.08;letter-spacing:-.03em;color:#fff;margin:0 0 14px}
+.a-art p{font-size:18px;line-height:1.55;color:#DCE7FF;margin:0 0 20px}
+.a-ticks{list-style:none;margin:0 0 26px;padding:0;display:grid;gap:12px}
+.a-ticks li{display:flex;align-items:center;gap:12px;font-size:17px;font-weight:600}
+.a-ticks i{width:26px;height:26px;border-radius:50%;background:#F29D38;color:#0F1B33;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-weight:700;font-size:14px}
+.a-mini{background:#fff;border-radius:16px;padding:14px 16px;max-width:360px;box-shadow:0 24px 50px rgba(10,30,80,.35);color:#0F1B33}
+.a-mini small{display:block;color:#5B6475;font-size:12px;margin-bottom:6px}
+.a-mini .row2{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:15px}
+.a-mini code{font:600 14px ui-monospace,SFMono-Regular,Menlo,monospace;color:#1658C4}
+.a-mini .ok{font-size:12px;font-weight:700;color:#17804A;background:#E3F4EA;border-radius:999px;padding:3px 9px}
+.a-side{width:460px;flex-shrink:0}
+.a-card{background:#fff;border-radius:20px;padding:32px;border:1px solid rgba(15,27,51,.08);
+  box-shadow:0 1px 2px rgba(10,25,60,.10),0 8px 16px -4px rgba(10,25,60,.14),0 32px 48px -16px rgba(10,25,60,.38)}
+@media (prefers-reduced-motion:no-preference){.a-card{animation:float 6.4s ease-in-out infinite}}
+@keyframes float{50%{transform:translateY(-4px)}}
+.a-card h2{font-size:30px;line-height:1.2;letter-spacing:-.025em;color:#0F1B33;text-align:center;margin:0 0 6px}
+.a-card .help{text-align:center;font-size:15.5px;line-height:1.5;margin:0 0 20px;color:#4A5568}
+.a-card .field{font-weight:600;color:#0F1B33;font-size:14px}
+.a-card input{border-radius:12px;min-height:48px;font-size:16px}
+.a-card button[type=submit]{min-height:48px;border-radius:12px;font-size:16px;font-weight:700}
+.a-card .muted{font-size:14px}
+.a-foot{text-align:center;color:#C9D8F7;font-size:13px;padding:0 20px 22px}
+.a-foot a{color:#fff}
+@media (max-width:980px){.a-art{display:none}.a-main{gap:0}.a-side{width:100%;max-width:460px}}
+@media (max-width:480px){.a-card{padding:26px 20px;border-radius:18px}.a-card h2{font-size:26px}.a-brand small{display:none}}
+</style>
 </head>
-<body>
-<div class="login">
-  <div class="brand" style="justify-content:center;padding-bottom:22px;font-size:20px"><img src="/favicon.png" alt="">Remote Phonebook</div>
-  <div class="card">
-    {% if code_step %}
-      <h2>Enter your code</h2>
-      <p class="help">We texted a 6-digit code to {{ phone_hint }}.</p>
-      {% if error %}<div class="error">{{ error }}</div>{% endif %}
-      <form method="post" action="/platform/login/code">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <label class="field">Code<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label>
-        <button type="submit" style="width:100%">Log in</button>
-      </form>
-      <form method="post" action="/platform/login/code" style="margin-top:10px;text-align:center"><input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="secondary small" name="cancel" value="1" type="submit">Start again</button></form>
-    {% else %}
-      <h2>Log in</h2>
-      <p class="help">Organisation admins: use the phone number or email and password of your Remote Phonebook account.
-        Oduma Corp staff: use your work email.</p>
-      {% if error %}<div class="error">{{ error }}</div>{% endif %}
-      <form method="post" action="/platform/login">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <label class="field">Phone number or email<input name="login" autocomplete="username" required autofocus placeholder="0712 345 678 or name@example.com"></label>
-        <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
-        <button type="submit" style="width:100%">Log in</button>
-      </form>
-      <p class="muted" style="text-align:center;margin-bottom:0">Forgot your password? Reset it in the Remote Phonebook app or website.<br><a href="/help">Need help? Contact support</a></p>
-    {% endif %}
+<body class="auth">
+<header class="a-top">
+  <a class="a-brand" href="/" aria-label="Remote Phonebook website"><img src="/favicon.png" alt=""><span><b>Remote Phonebook</b><small>by Oduma Corp</small></span></a>
+  <a class="a-link" href="/">‹ Website</a>
+</header>
+<main class="a-main">
+  <section class="a-art" aria-label="About the organisation platform">
+    <h1>Your organisation, in every member's phone book.</h1>
+    <p>Post notices, keep the right contacts in each member's phone book and send reminders. Members see it all in the app and on *384*88041#.</p>
+    <ul class="a-ticks">
+      <li><i>✓</i>Edit a number once, everyone is updated</li>
+      <li><i>✓</i>Notices on USSD and in the app</li>
+      <li><i>✓</i>Each organisation sees only its own data</li>
+      <li><i>✓</i>Full audit log</li>
+    </ul>
+    <div class="a-mini" aria-hidden="true">
+      <small>Contact directory · Admin</small>
+      <div class="row2"><b>Bursar's Office</b><span class="ok">Saved</span></div>
+      <code>0700 301 020</code>
+    </div>
+  </section>
+  <div class="a-side">
+    <div class="card a-card">
+      {% if code_step %}
+        <h2>Enter your code</h2>
+        <p class="help">We texted a 6-digit code to {{ phone_hint }}.</p>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="post" action="/platform/login/code">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label class="field">Code<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label>
+          <button type="submit" style="width:100%">Log in</button>
+        </form>
+        <form method="post" action="/platform/login/code" style="margin-top:10px;text-align:center"><input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="secondary small" name="cancel" value="1" type="submit">Start again</button></form>
+      {% else %}
+        <h2>Organisation log in</h2>
+        <p class="help">Organisation admins: use the phone number or email and password of your Remote Phonebook account.
+          Oduma Corp staff: use your work email.</p>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="post" action="/platform/login">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label class="field">Phone number or email<input name="login" autocomplete="username" required autofocus placeholder="0712 345 678 or name@example.com"></label>
+          <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+          <button type="submit" style="width:100%">Log in</button>
+        </form>
+        <p class="muted" style="text-align:center;margin-bottom:0">Forgot your password? <a href="/app">Reset it in the Remote Phonebook app</a>.<br>
+          No account yet? <a href="/app?start=register">Create one</a> · <a href="/help">Need help?</a></p>
+      {% endif %}
+    </div>
   </div>
-</div>
+</main>
+<p class="a-foot">© Oduma Corp · <a href="mailto:odumacorp@gmail.com">odumacorp@gmail.com</a></p>
 </body>
 </html>

@@ -1,5 +1,8 @@
+import datetime
+import gzip
 import os
-from flask import send_from_directory
+
+from flask import render_template, request, send_from_directory
 
 from pb.config import ROOT
 from pb.web import app
@@ -11,13 +14,40 @@ def health():
 
 
 # ---------------------------------------------------------------- website
-# The Remote Phonebook website: the mobile app built for the web (npm run build:web in mobile/),
-# served from the same address as the API.
+# phone-book.odumacorp.com/ is the public landing page (templates/site/index.html, files in site/).
+# The web app (the mobile app built for the web: npm run build:web in mobile/) lives at /app; /app?start=register
+# opens the sign-up screen.
 
 WEB_DIR = os.path.join(ROOT, "web")
+SITE_DIR = os.path.join(ROOT, "site")
+PHOTOS_DIR = os.path.join(SITE_DIR, "img", "photos")
 
 
 @app.route("/", methods=["GET"])
+def landing():
+    """The public website. Photos appear once their files are in site/img/photos/ (<name>.webp); until then a styled
+    placeholder describes the shot."""
+    photos = {f[:-5] for f in os.listdir(PHOTOS_DIR) if f.endswith(".webp")} if os.path.isdir(PHOTOS_DIR) else set()
+    body = render_template("site/index.html", year=datetime.date.today().year, photos=photos).encode()
+    response = app.response_class(body, mimetype="text/html")
+    if "gzip" in request.headers.get("Accept-Encoding", ""):  # ~90 KB of HTML becomes ~20 KB on slow mobile data
+        response.set_data(gzip.compress(body, 6))
+        response.headers["Content-Encoding"] = "gzip"
+    response.headers["Vary"] = "Accept-Encoding"
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+@app.route("/site/<path:filename>", methods=["GET"])
+def site_files(filename):
+    """The landing page's font and images."""
+    response = send_from_directory(SITE_DIR, filename)
+    response.headers["Cache-Control"] = "public, max-age=604800"
+    return response
+
+
+@app.route("/app", methods=["GET"])
+@app.route("/app/", methods=["GET"])
 def website():
     if not os.path.exists(os.path.join(WEB_DIR, "index.html")):
         return health()

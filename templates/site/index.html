@@ -1,0 +1,1155 @@
+{#- The public website at phone-book.odumacorp.com/ (route: pb/website.py landing()).
+    Facts only: every price, number and feature here is from the product facts. Never add statistics, customers,
+    testimonials or anything about fundraising. Log in → /app, Get started → /app?start=register, organisations → /platform. -#}
+{%- set LOGIN = '/app' -%}
+{%- set REGISTER = '/app?start=register' -%}
+{%- set PLATFORM = '/platform/' -%}
+{%- set DIAL = 'tel:*384*88041%23' -%}
+{%- macro icon(name, cls='i') -%}<svg class="{{ cls }}" aria-hidden="true" focusable="false"><use href="#i-{{ name }}"/></svg>{%- endmacro -%}
+{%- macro photo(name, alt, shot) -%}
+  {%- if name in photos -%}
+  <img class="photo" src="/site/img/photos/{{ name }}.webp" srcset="/site/img/photos/{{ name }}-640.webp 640w, /site/img/photos/{{ name }}.webp 1200w" sizes="(max-width:860px) 92vw, 540px" alt="{{ alt }}" width="1200" height="800" loading="lazy" decoding="async">
+  {%- else -%}
+  <div class="photo ph" role="img" aria-label="{{ alt }}">{{ icon('camera') }}<span>Photo to come</span><small>{{ shot }}</small></div>
+  {%- endif -%}
+{%- endmacro -%}
+<!doctype html>
+<html lang="en-KE">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote Phonebook: your contacts on any phone | Oduma Corp</title>
+<meta name="description" content="Reach your contacts from any phone, even a basic phone with no internet: dial *384*88041#. Organisations put the right contacts, notices and reminders in every member's phone book.">
+<link rel="canonical" href="https://phone-book.odumacorp.com/">
+<meta name="theme-color" content="#1F6FEB">
+<link rel="icon" type="image/png" sizes="256x256" href="/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="preload" href="/site/fonts/dm-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Remote Phonebook">
+<meta property="og:title" content="Remote Phonebook: your contacts, on any phone">
+<meta property="og:description" content="Dial *384*88041# from any phone to reach your contacts, no internet needed. For individuals, families and organisations in Kenya.">
+<meta property="og:url" content="https://phone-book.odumacorp.com/">
+<meta property="og:image" content="https://phone-book.odumacorp.com/site/img/og.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_KE">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Remote Phonebook: your contacts, on any phone">
+<meta name="twitter:description" content="Dial *384*88041# from any phone to reach your contacts, no internet needed.">
+<meta name="twitter:image" content="https://phone-book.odumacorp.com/site/img/og.jpg">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Organization","name":"Oduma Corp","url":"https://phone-book.odumacorp.com/",
+ "logo":"https://phone-book.odumacorp.com/favicon.png","email":"odumacorp@gmail.com","telephone":"+254182759166",
+ "areaServed":"KE","brand":{"@type":"Brand","name":"Remote Phonebook"}}
+</script>
+<script>document.documentElement.classList.add('js')</script>
+<style>
+@font-face{font-family:"DM Sans";src:url(/site/fonts/dm-sans-latin.woff2) format("woff2");font-weight:400 700;font-style:normal;font-display:swap}
+:root{
+  --blue:#1F6FEB;--deep:#1658C4;--tint:#E3ECFD;--mist:#EEF3FC;--warm:#F29D38;--warm-tint:#FCEBD5;
+  --ink:#0F1B33;--body:#4A5568;--paper:#FBFAF7;--card:#FFFFFE;--line:#E2E6EE;--muted:#5B6475;
+  --ok:#17804A;--r:20px;--r-sm:14px;
+  --shadow:0 1px 2px rgba(15,27,51,.05),0 6px 20px rgba(15,27,51,.06);
+  --shadow-up:0 2px 4px rgba(15,27,51,.06),0 16px 36px rgba(15,27,51,.12);
+  --wrap:1160px;--gutter:20px
+}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;scroll-padding-top:80px}
+html,body{overflow-x:hidden;overflow-x:clip}
+body{margin:0;background:var(--paper);color:var(--body);font:400 17px/1.6 "DM Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button{font-family:inherit}
+h1,h2,h3,h4{color:var(--ink);line-height:1.14;margin:0 0 .5em;letter-spacing:-.015em;font-weight:700}
+h1{font-size:clamp(2.35rem,5.4vw + 1rem,4.1rem);letter-spacing:-.03em;line-height:1.06}
+h2{font-size:clamp(1.85rem,2.6vw + 1rem,2.75rem);letter-spacing:-.025em}
+h3{font-size:1.18rem}
+p{margin:0 0 1em}
+a{color:var(--deep)}
+img{max-width:100%;height:auto;display:block}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 var(--gutter)}
+.i{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:3px solid var(--blue);outline-offset:3px;border-radius:8px}
+.skip{position:absolute;left:12px;top:-60px;background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;z-index:100}
+.skip:focus{top:12px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 22px;border-radius:999px;font-size:16px;font-weight:600;line-height:1;text-decoration:none;border:1.5px solid transparent;cursor:pointer;transition:transform .2s,box-shadow .2s,background-color .2s;white-space:nowrap}
+.btn-solid{background:var(--blue);color:#fff;box-shadow:0 6px 16px rgba(31,111,235,.28)}
+.btn-solid:hover{background:var(--deep);transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--ink);border-color:#CBD3E1}
+.btn-ghost:hover{background:var(--card);border-color:var(--blue)}
+.btn-light{background:#fff;color:var(--deep)}
+.btn-light:hover{transform:translateY(-1px)}
+.btn-outline-light{border-color:rgba(255,255,255,.6);color:#fff}
+.btn-outline-light:hover{background:rgba(255,255,255,.1)}
+.btn-sm{min-height:44px;padding:0 18px;font-size:15px}
+
+/* header */
+.hdr{position:sticky;top:0;z-index:40;background:var(--paper);border-bottom:1px solid transparent;transition:border-color .2s}
+.hdr.scrolled{border-bottom-color:var(--line)}
+.hdr .wrap{display:flex;align-items:center;gap:16px;height:68px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);margin-right:auto;min-height:44px}
+.brand img{width:34px;height:34px;border-radius:50%}
+.brand b{font-size:17px;letter-spacing:-.02em;display:block;line-height:1.1}
+.brand small{display:block;font-size:12px;color:var(--muted);line-height:1.2}
+.nav{display:flex;align-items:center;gap:4px}
+.nav a{color:var(--ink);text-decoration:none;font-weight:500;font-size:15px;padding:10px 12px;border-radius:10px}
+.nav a:hover{background:var(--mist)}
+.hdr-cta{display:flex;gap:8px}
+.menu-btn{display:none;width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);align-items:center;justify-content:center;cursor:pointer}
+.drawer-cta{display:none}
+.nav .btn{padding:0 22px}.nav .btn-solid{color:#fff}
+.scrim{display:none}
+@media (max-width:980px){
+  .menu-btn{display:inline-flex}
+  .hdr-cta .btn-ghost{display:none}
+  .js .nav{position:fixed;top:0;right:0;bottom:0;width:min(86vw,340px);background:var(--paper);flex-direction:column;align-items:stretch;gap:2px;padding:84px 20px 24px;transform:translateX(100%);transition:transform .28s ease;z-index:45;box-shadow:-10px 0 40px rgba(15,27,51,.14);visibility:hidden}
+  .js .nav a{font-size:18px;padding:14px 12px}
+  .js .drawer-cta{display:grid;gap:10px;margin-top:auto}
+  .menu-open .nav{transform:none;visibility:visible}
+  .js .scrim{display:block;position:fixed;inset:0;background:rgba(15,27,51,.32);opacity:0;pointer-events:none;transition:opacity .28s;z-index:35}
+  .menu-open .scrim{opacity:1;pointer-events:auto}
+  .menu-btn{position:relative;z-index:50}
+  html:not(.js) .hdr .wrap{flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:10px}
+  html:not(.js) .nav{order:3;width:100%;flex-wrap:wrap}
+  html:not(.js) .menu-btn{display:none}
+}
+@media (max-width:420px){.brand small{display:none}.hdr-cta .btn{padding:0 14px}}
+@media (max-width:374px){.hdr .wrap{gap:8px}.brand b{font-size:15px}.hdr-cta .btn{padding:0 12px;font-size:14px}}
+@media (max-width:339px){.brand > span{display:none}}
+
+/* sections */
+section{padding:88px 0}
+.alt{background:var(--mist)}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--deep);margin-bottom:14px}
+.lead{font-size:clamp(1.05rem,.5vw + 1rem,1.22rem);max-width:640px}
+.sec-head{max-width:720px;margin-bottom:40px}
+.center{text-align:center;margin-left:auto;margin-right:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:24px;box-shadow:var(--shadow);transition:transform .25s ease,box-shadow .25s ease}
+.card.lift:hover{transform:translateY(-4px);box-shadow:var(--shadow-up)}
+.card h3{margin-bottom:.35em}
+.card p{margin:0;font-size:16px}
+.ico{width:46px;height:46px;border-radius:14px;background:var(--tint);color:var(--deep);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.ico.warm{background:var(--warm-tint);color:#9A5410}
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+.soon{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:999px;background:var(--warm-tint);color:#8A4A0C;vertical-align:middle}
+
+/* hero */
+.hero{padding:56px 0 72px;background:linear-gradient(160deg,var(--mist) 0%,#F5F2EC 55%,var(--warm-tint) 100%)}
+.hero .wrap{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+.hero .lead{margin-bottom:28px;color:#3D475A}
+.hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:22px}
+.dial-chip{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:6px 16px 6px 6px;border-radius:999px;background:var(--card);border:1px solid var(--line);text-decoration:none;color:var(--ink);font-weight:600;box-shadow:var(--shadow)}
+.dial-chip .dot{width:34px;height:34px;border-radius:50%;background:var(--warm);color:var(--ink);display:flex;align-items:center;justify-content:center}
+.dial-chip code{font:700 16px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--deep);letter-spacing:.02em}
+.hero-art{position:relative;height:520px;max-width:440px;width:100%;justify-self:center}
+.app-frame{position:absolute;right:0;top:0;width:250px;border-radius:34px;background:var(--ink);padding:9px;box-shadow:0 30px 60px rgba(15,27,51,.22)}
+.app-frame img{border-radius:26px;width:100%;aspect-ratio:1/2;object-fit:cover;object-position:top;background:#F5F7FB}
+.fp{position:absolute;left:0;bottom:0;width:190px;border-radius:30px 30px 40px 40px;background:linear-gradient(170deg,#2A3A5C,#0F1B33);padding:18px 14px 16px;box-shadow:0 26px 50px rgba(15,27,51,.3)}
+.fp-top{width:42px;height:5px;border-radius:5px;background:#3D4E72;margin:0 auto 12px}
+.fp-screen{position:relative;height:148px;border-radius:10px;background:#DDE8D5;color:#1C2A17;font:600 11.5px/1.38 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;box-shadow:inset 0 0 0 2px #B9C8AF}
+.fr{position:absolute;inset:0;padding:9px 10px;white-space:pre;opacity:0}
+.fr .lbl{display:block;font-size:10px;opacity:.7;margin-bottom:4px}
+.fr .typed{font-size:17px;letter-spacing:.02em}
+.fr .typed span{opacity:0}
+.fp-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:14px}
+.fp-keys span{height:24px;border-radius:9px;background:#2F4266;color:#C8D4EC;font:600 12px/24px "DM Sans",sans-serif;text-align:center}
+.fp-ctrl{display:flex;justify-content:space-between;margin-top:12px}
+.fp-ctrl i{width:46px;height:16px;border-radius:9px;background:#3C8E5A}
+.fp-ctrl i+i{background:#B8433C}
+.hero-art .badge{position:absolute;right:6px;bottom:44px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 14px;font-size:14px;color:var(--ink);font-weight:600;display:flex;gap:8px;align-items:center;box-shadow:var(--shadow-up)}
+.hero-art .badge .i{color:var(--ok)}
+@media (prefers-reduced-motion:no-preference){
+  .fr.f1{animation:fA 8s infinite}.fr.f2{animation:fB 8s infinite}.fr.f3{animation:fC 8s infinite}.fr.f4{animation:fD 8s infinite}
+  .fr .typed span{animation:ch 8s infinite both}
+  .caret{animation:blink 1s steps(1) infinite}
+}
+@media (prefers-reduced-motion:reduce){.fr.f4{opacity:1}.fr .typed span{opacity:1}html{scroll-behavior:auto}}
+@keyframes fA{0%,31%{opacity:1}33%,100%{opacity:0}}
+@keyframes fB{0%,32%{opacity:0}34%,51%{opacity:1}53%,100%{opacity:0}}
+@keyframes fC{0%,52%{opacity:0}54%,69%{opacity:1}71%,100%{opacity:0}}
+@keyframes fD{0%,70%{opacity:0}72%,97%{opacity:1}100%{opacity:0}}
+@keyframes ch{0%{opacity:0}1%,100%{opacity:1}}
+@keyframes blink{50%{opacity:0}}
+@media (max-width:860px){
+  .hero{padding-top:36px}
+  .hero .wrap{grid-template-columns:1fr;gap:36px}
+  .hero-art{height:450px;max-width:340px}
+  .app-frame{width:210px}
+  .fp{width:168px}
+  .fp-screen{height:136px;font-size:10.5px}
+}
+@media (max-width:380px){.hero-art{height:410px}.app-frame{width:190px}.fp{width:156px}}
+
+/* trust strip */
+.trust{padding:28px 0;background:var(--card);border-bottom:1px solid var(--line)}
+.trust ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.trust li{display:flex;align-items:center;gap:12px;font-weight:600;color:var(--ink);font-size:16px}
+.trust .ico{margin:0;width:42px;height:42px}
+@media (max-width:860px){.trust ul{grid-template-columns:1fr 1fr}}
+@media (max-width:400px){.trust li{font-size:15px}}
+
+/* tabs */
+.tablist{position:relative;display:flex;gap:4px;margin-bottom:28px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.tablist::-webkit-scrollbar{display:none}
+.tablist [role=tab]{flex:none;min-height:48px;padding:0 18px;border:0;background:none;font-size:16px;font-weight:600;line-height:1;color:var(--muted);cursor:pointer;border-radius:10px 10px 0 0}
+.tablist [role=tab][aria-selected=true]{color:var(--ink)}
+.tablist [role=tab]:hover{color:var(--ink)}
+.tab-ind{position:absolute;left:0;bottom:0;width:100px;height:3px;border-radius:3px;background:var(--blue);transform-origin:0 0;transform:scaleX(0)}
+.tabs-ready .tab-ind{transition:transform .3s cubic-bezier(.3,.7,.2,1)}
+html:not(.js) .tablist{display:none}
+.panel-title{margin-top:8px}
+.js .panel-title{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+html:not(.js) .tabpanel+.tabpanel{margin-top:48px}
+.tabpanel{animation:fade .2s ease}
+.js [data-tabs] .tabpanel:not(.on){display:none}
+.tabpanel:focus-visible{outline-offset:8px}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.seg{display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px;margin:0 auto 32px;overflow:visible;box-shadow:var(--shadow)}
+.seg [role=tab]{position:relative;z-index:1;border-radius:999px;padding:0 20px;min-height:44px;transition:color .2s}
+.seg [role=tab][aria-selected=true]{color:#fff}
+.seg .tab-ind{top:5px;bottom:5px;left:0;height:auto;border-radius:999px;transform-origin:0 0;background:var(--blue)}
+.seg-wrap{text-align:center}
+@media (max-width:480px){.seg{display:grid;width:100%}.seg [role=tab]{padding:0 8px;font-size:14.5px}}
+.chips{border:0;gap:8px;flex-wrap:wrap;overflow:visible}
+.chips [role=tab]{border:1px solid var(--line);background:var(--card);border-radius:999px;display:inline-flex;align-items:center;gap:8px;min-height:44px;color:var(--ink)}
+.chips [role=tab][aria-selected=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* services / channels panels */
+.split{display:grid;grid-template-columns:1.35fr .65fr;gap:32px;align-items:start}
+.split.wide-media{grid-template-columns:.9fr 1.1fr;align-items:center}
+.shot{border-radius:var(--r);overflow:hidden;border:1px solid var(--line);background:var(--card);box-shadow:var(--shadow-up)}
+.shot.phone{max-width:280px;margin:0 auto;border:9px solid var(--ink);border-radius:34px}
+.shot.phone img{aspect-ratio:1/2;object-fit:cover;object-position:top}
+.shot.browser{padding-top:30px;position:relative;background:#F3F5F9}
+.shot.browser::before{content:"";position:absolute;top:11px;left:14px;width:9px;height:9px;border-radius:50%;background:#F29D38;box-shadow:15px 0 0 #E3ECFD,30px 0 0 #CBD3E1}
+.shot.browser img{aspect-ratio:1200/769;object-fit:cover;object-position:top left;width:100%}
+.shot.browser.web img{aspect-ratio:1200/700}
+.mini-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:14px}
+.mini-cards .card{padding:20px}
+.mini-cards .ico{width:40px;height:40px;margin-bottom:12px}
+.bullets{list-style:none;padding:0;margin:0 0 20px;display:grid;gap:12px}
+.bullets li{display:flex;gap:12px;align-items:flex-start}
+.bullets .i{color:var(--ok);margin-top:2px}
+@media (max-width:860px){.split,.split.wide-media{grid-template-columns:1fr}.shot.phone{max-width:230px}}
+
+/* sectors */
+.sector{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:center}
+.sector h3{font-size:1.6rem;letter-spacing:-.03em}
+.photo{border-radius:var(--r);width:100%;aspect-ratio:4/3;object-fit:cover}
+.ph{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:24px;background:repeating-linear-gradient(135deg,var(--mist) 0 14px,#E8EEF9 14px 28px);border:1.5px dashed #B7C6E4;color:var(--deep)}
+.ph .i{width:30px;height:30px}
+.ph span{font-weight:700;color:var(--ink)}
+.ph small{font-size:14px;color:var(--muted);max-width:300px}
+.soon-grid{margin-top:40px}
+.soon-grid h3{font-size:1rem;color:var(--muted);font-weight:600;margin-bottom:12px}
+.muted-card{background:transparent;box-shadow:none;border-style:dashed;display:flex;align-items:center;gap:12px;padding:16px 18px;color:var(--muted)}
+.muted-card .ico{margin:0;width:38px;height:38px;background:#F1F2F4;color:#6B7385}
+.muted-card b{color:#3D475A;font-weight:600;display:block}
+@media (max-width:860px){.sector{grid-template-columns:1fr}}
+
+/* how it works (blue) */
+.blue{background:linear-gradient(160deg,var(--blue),var(--deep));color:#E8F0FF}
+.blue h2,.blue h3{color:#fff}
+.blue .eyebrow{color:#FCEBD5}
+.steps{list-style:none;margin:0 0 40px;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:s}
+.step{position:relative;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:var(--r);padding:24px}
+.step .num{width:40px;height:40px;border-radius:50%;background:var(--warm);color:var(--ink);font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.step p{margin:0;color:#DCE7FF}
+.step code{font:700 1.05em ui-monospace,SFMono-Regular,Menlo,monospace;color:#fff}
+.step-vis{margin-top:16px;height:44px;border-radius:12px;background:rgba(15,27,51,.25);display:flex;align-items:center;padding:0 14px;font:600 15px ui-monospace,SFMono-Regular,Menlo,monospace;color:#fff;gap:6px;overflow:hidden}
+.step-vis .pin i{display:inline-block;width:10px;height:10px;border-radius:50%;background:#fff;margin-right:6px}
+.how-bottom{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+.emerg{background:var(--card);color:var(--body);border-radius:var(--r);padding:26px;box-shadow:var(--shadow-up)}
+.emerg h3{color:var(--ink);display:flex;align-items:center;gap:10px}
+.emerg h3 .i{color:#B8433C}
+.emerg ul{list-style:none;margin:16px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.emerg a{display:flex;flex-direction:column;justify-content:center;min-height:56px;text-decoration:none;border:1px solid var(--line);border-radius:14px;padding:8px 14px;color:var(--body);font-size:14px;line-height:1.3}
+.emerg a b{font-size:20px;color:var(--ink);letter-spacing:-.01em}
+.emerg a:hover{border-color:#B8433C}
+
+.how-bottom .photo{aspect-ratio:1/1}
+.how-bottom .ph{background:repeating-linear-gradient(135deg,rgba(255,255,255,.08) 0 14px,rgba(255,255,255,.03) 14px 28px);border-color:rgba(255,255,255,.4);color:#fff}
+.how-bottom .ph span{color:#fff}.how-bottom .ph small{color:#DCE7FF}
+@media (prefers-reduced-motion:no-preference){
+  .reveal-on .step.in .num{animation:pop .5s ease both;animation-delay:var(--d,0ms)}
+  .reveal-on .step.in .step-vis>*{animation:slide .6s ease both;animation-delay:calc(var(--d,0ms) + 250ms)}
+}
+@keyframes pop{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.1);opacity:1}100%{transform:scale(1)}}
+@keyframes slide{from{transform:translateX(-12px);opacity:0}to{transform:none;opacity:1}}
+@media (max-width:860px){.steps{grid-template-columns:1fr}.how-bottom{grid-template-columns:1fr}}
+
+/* ussd mock (channels) */
+.ussd-mock{max-width:300px;margin:0 auto;background:linear-gradient(170deg,#2A3A5C,#0F1B33);border-radius:30px 30px 40px 40px;padding:20px 16px 22px;box-shadow:var(--shadow-up)}
+.ussd-mock .fp-screen{height:auto;padding:12px 14px;font-size:13px;white-space:pre-line;line-height:1.45}
+
+/* edit once */
+.deep-intro{display:grid;grid-template-columns:.9fr 1.1fr;gap:40px;align-items:center;margin-bottom:56px}
+.flow{position:relative;padding:22px;border-radius:24px;background:linear-gradient(160deg,var(--mist),var(--card));border:1px solid var(--line)}
+.admin{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow);max-width:340px;margin:0 auto}
+.admin .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.admin small{color:var(--muted);font-size:13px;display:block}
+.admin b{color:var(--ink)}
+.num-swap{position:relative;display:inline-block;font:600 15px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);min-width:128px;height:22px}
+.num-swap span{position:absolute;left:0;top:0}
+.num-swap .new{opacity:0;color:var(--deep)}
+.saved{font-size:12px;font-weight:700;color:#0E5C34;background:#E3F4EA;border-radius:999px;padding:3px 9px;opacity:0}
+.wires{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;height:62px;margin:0 auto;max-width:420px}
+.wire{position:relative;container-type:size;width:2px;height:100%;margin:0 auto;background:repeating-linear-gradient(to bottom,#B7C6E4 0 4px,transparent 4px 8px)}
+.pulse{position:absolute;left:-5px;top:0;width:12px;height:12px;border-radius:50%;background:var(--warm);box-shadow:0 0 0 4px rgba(242,157,56,.25);opacity:0}
+.members{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:420px;margin:0 auto}
+.mphone{background:var(--ink);border-radius:18px;padding:6px}
+.mphone .scr{background:var(--card);border-radius:13px;padding:10px 8px;min-height:104px;font-size:12px;line-height:1.35;color:var(--ink);position:relative}
+.mphone .who{font-size:11px;color:var(--muted);display:block;margin-bottom:6px}
+.mphone .num-swap{font-size:11.5px;min-width:0;width:100%;height:18px;display:block}
+.tick{position:absolute;right:8px;bottom:8px;width:22px;height:22px;border-radius:50%;background:var(--ok);color:#fff;display:flex;align-items:center;justify-content:center;opacity:0}
+.tick .i{width:14px;height:14px;stroke-width:3}
+@media (prefers-reduced-motion:no-preference){
+  .flow .admin .old{animation:oldOut 7s infinite}
+  .flow .admin .new{animation:newIn 7s infinite}
+  .flow .saved{animation:saved 7s infinite}
+  .flow .pulse{animation:travel 7s infinite;animation-delay:var(--w,0s)}
+  .flow .mphone .old{animation:mOld 7s infinite;animation-delay:var(--w,0s)}
+  .flow .mphone .new{animation:mNew 7s infinite;animation-delay:var(--w,0s)}
+  .flow .tick{animation:tick 7s infinite;animation-delay:var(--w,0s)}
+}
+@media (prefers-reduced-motion:reduce){.flow .old{opacity:0}.flow .new,.flow .tick,.flow .saved{opacity:1}}
+@keyframes oldOut{0%,12%{opacity:1}15%,94%{opacity:0}100%{opacity:1}}
+@keyframes newIn{0%,12%{opacity:0}15%,94%{opacity:1}100%{opacity:0}}
+@keyframes saved{0%,16%{opacity:0;transform:scale(.8)}20%,90%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes travel{0%,22%{opacity:0;transform:translateY(0)}24%{opacity:1}44%{opacity:1;transform:translateY(calc(100cqh - 12px))}47%,100%{opacity:0;transform:translateY(calc(100cqh - 12px))}}
+@keyframes mOld{0%,45%{opacity:1}48%,94%{opacity:0}100%{opacity:1}}
+@keyframes mNew{0%,45%{opacity:0}48%,94%{opacity:1}100%{opacity:0}}
+@keyframes tick{0%,47%{opacity:0;transform:scale(.3)}51%{opacity:1;transform:scale(1.15)}54%,90%{opacity:1;transform:scale(1)}96%,100%{opacity:0}}
+@media (max-width:860px){.deep-intro{grid-template-columns:1fr}}
+@media (max-width:380px){.flow{padding:14px}.members,.wires{gap:8px}}
+
+/* security */
+.sec-grid .card{display:flex;gap:16px;align-items:flex-start}
+.sec-grid .ico{margin:0}
+.lock-motif{display:flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:20px;background:var(--tint);color:var(--deep);margin-bottom:18px}
+.lock-motif .i{width:32px;height:32px}
+
+/* pricing */
+.plans{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));align-items:stretch}
+.plan{display:flex;flex-direction:column}
+.plan .name{font-weight:700;color:var(--ink);font-size:18px;margin-bottom:6px}
+.plan .price{font-size:2.1rem;font-weight:700;color:var(--ink);letter-spacing:-.035em;line-height:1.1;margin:6px 0 2px}
+.plan .price small{font-size:15px;font-weight:500;color:var(--muted);letter-spacing:0}
+.plan .per{font-size:15px;color:var(--muted);margin-bottom:16px}
+.plan ul{list-style:none;padding:0;margin:0 0 22px;display:grid;gap:8px;font-size:15.5px}
+.plan li{display:flex;gap:10px}
+.plan li .i{width:18px;height:18px;color:var(--ok);margin-top:3px}
+.plan .btn{margin-top:auto}
+.plan.hl{border:2px solid var(--blue);background:linear-gradient(180deg,var(--tint),var(--card) 45%);box-shadow:0 14px 34px rgba(31,111,235,.16)}
+.price-note{margin:22px 0 0;text-align:center;font-size:15.5px}
+.addons{margin-top:36px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+.addons b{color:var(--ink);margin-right:6px}
+.addons span{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 14px;font-size:15px;color:var(--ink)}
+.talk{text-align:center;margin-top:22px}
+.reseller{margin-top:40px;display:flex;flex-wrap:wrap;gap:16px 24px;align-items:center;justify-content:space-between;border-radius:var(--r);padding:24px 28px;background:var(--warm-tint);border:1px solid #F3D3A8}
+.reseller h3{margin:0 0 4px}
+.reseller p{margin:0;color:#4D3B24}
+.reseller .btn{background:var(--ink);color:#fff}
+
+/* faq */
+.faq{max-width:780px;margin:0 auto}
+.faq-item{border-bottom:1px solid var(--line)}
+.faq-q{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;background:none;border:0;padding:20px 4px;min-height:56px;text-align:left;font-size:18px;font-weight:600;line-height:1.35;color:var(--ink);cursor:pointer}
+.faq-q .i{transition:transform .25s;color:var(--deep)}
+.faq-q[aria-expanded=true] .i{transform:rotate(180deg)}
+.faq-a{padding:0 4px 20px}
+.faq-a p:last-child{margin:0}
+.faq-a:not([hidden]){animation:fade .2s ease}
+
+/* final cta + footer */
+.cta-band{background:linear-gradient(140deg,var(--blue) 0%,var(--deep) 100%);color:#E8F0FF;text-align:center;padding:84px 0}
+.cta-band h2{color:#fff}
+.cta-band .hero-cta{justify-content:center;margin:26px 0 22px}
+.cta-band p a{color:#fff;font-weight:600}
+footer{background:var(--ink);color:#B9C3D6;padding:56px 0 28px;font-size:15.5px}
+footer a{color:#E8EEF9;text-decoration:none}
+footer p a{text-decoration:underline}
+footer a:hover{text-decoration:underline}
+.foot{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:32px}
+footer h3{color:#fff;font-size:15px;letter-spacing:.02em;margin-bottom:12px}
+footer ul{list-style:none;padding:0;margin:0;display:grid;gap:4px}
+footer li a,footer li span{display:inline-flex;align-items:center;gap:8px;min-height:36px}
+.foot-bottom{border-top:1px solid #26324D;margin-top:40px;padding-top:20px;display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;font-size:14px}
+@media (max-width:760px){.foot{grid-template-columns:1fr 1fr}.foot>div:first-child{grid-column:1/-1}}
+
+/* scroll reveal: only when JS runs and motion is allowed */
+.reveal-on .rv{opacity:0;transform:translateY(16px);transition:opacity .6s ease,transform .6s ease;transition-delay:var(--d,0ms)}
+.reveal-on .rv.in{opacity:1;transform:none}
+@media (max-width:560px){section{padding:64px 0}:root{--gutter:16px}.card{padding:20px}body{font-size:16.5px}
+  .mini-cards .card,.g3 .card.lift{display:grid;grid-template-columns:40px 1fr;column-gap:14px;align-items:start}
+  .mini-cards .card .ico,.g3 .card.lift .ico{width:40px;height:40px;margin:0;grid-row:span 2}
+  .mini-cards .card h3,.g3 .card.lift h3{margin-top:8px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></symbol>
+    <symbol id="i-mobile" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5.1A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.8M17.6 10.6a10 10 0 0 1 1.4 1.3M12 20h.01"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3.5" y="11" width="17" height="11" rx="2"/><path d="M7.5 11V7a4.5 4.5 0 0 1 9 0v4"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 3.1a4 4 0 0 1 0 7.8M21 21v-2a4 4 0 0 0-3-3.9"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/></symbol>
+    <symbol id="i-network" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><path d="M12 8v4M12 12l-5 4.5M12 12l5 4.5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2M12 12v9M8 16l4-4 4 4"/></symbol>
+    <symbol id="i-sms" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 5v2M4 11v2M4 17v2"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 2l10 5-10 5L2 7zM2 17l10 5 10-5M2 12l10 5 10-5"/></symbol>
+    <symbol id="i-id" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="8" cy="11" r="2"/><path d="M14 10h4M14 14h4M5 16a3 3 0 0 1 6 0"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l4 2"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+    <symbol id="i-cap" viewBox="0 0 24 24"><path d="M22 10L12 5 2 10l10 5 10-5zM6 12v5c3 2 9 2 12 0v-5"/></symbol>
+    <symbol id="i-coins" viewBox="0 0 24 24"><circle cx="8" cy="8" r="6"/><path d="M18.1 10.4A6 6 0 1 1 10.4 18.1M7 6h1v4"/></symbol>
+    <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 3v18M7 21h10M3 7h18M6 7l-3 7a3.5 3.5 0 0 0 6 0zM18 7l-3 7a3.5 3.5 0 0 0 6 0z"/></symbol>
+    <symbol id="i-umbrella" viewBox="0 0 24 24"><path d="M22 12a10 10 0 0 0-20 0zM12 12v7a2 2 0 0 0 4 0M12 2v1"/></symbol>
+    <symbol id="i-church" viewBox="0 0 24 24"><path d="M12 2v4M10 4h4M6 22V10l6-4 6 4v12M2 22h20M10 22v-4a2 2 0 0 1 4 0v4"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 22V12h6v10"/></symbol>
+    <symbol id="i-landmark" viewBox="0 0 24 24"><path d="M3 22h18M6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 2l8 5H4z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M11.5 11.5L21 2M15.5 7.5l3 3M18 5l3 3"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M3 21v-5h5"/></symbol>
+    <symbol id="i-user-plus" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M19 8v6M22 11h-6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+  </defs>
+</svg>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hdr">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Remote Phonebook by Oduma Corp, home">
+      <img src="/site/img/logo-96.webp" width="34" height="34" alt="">
+      <span><b>Remote Phonebook</b><small>by Oduma Corp</small></span>
+    </a>
+    <nav class="nav" id="drawer" aria-label="Main">
+      <a href="#services">Services</a>
+      <a href="#solutions">Solutions</a>
+      <a href="#how">How it works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#security">Security</a>
+      <a href="#faq">FAQ</a>
+      <div class="drawer-cta">
+        <a class="btn btn-ghost" href="{{ LOGIN }}" data-login>Log in</a>
+        <a class="btn btn-solid" href="{{ REGISTER }}">Get started</a>
+      </div>
+    </nav>
+    <div class="hdr-cta">
+      <a class="btn btn-ghost btn-sm" href="{{ LOGIN }}" data-login>Log in</a>
+      <a class="btn btn-solid btn-sm" href="{{ REGISTER }}">Get started</a>
+    </div>
+    <button class="menu-btn" id="menu-btn" type="button" aria-controls="drawer" aria-expanded="false" aria-label="Open menu">{{ icon('menu') }}</button>
+  </div>
+</header>
+<div class="scrim" id="scrim" aria-hidden="true"></div>
+
+<main id="main">
+<!-- 2. Hero -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow">{{ icon('mobile') }} Remote Phonebook</span>
+      <h1 id="hero-title">Your contacts, on any phone.</h1>
+      <p class="lead">Lost your phone, or the battery died? Dial <b>*384*88041#</b> from any phone, even a basic one with no internet, and your contacts are there. Organisations put the right numbers, notices and reminders in every member's phone book.</p>
+      <div class="hero-cta">
+        <a class="btn btn-solid" href="{{ REGISTER }}">Get started {{ icon('arrow') }}</a>
+        <a class="btn btn-ghost" href="{{ LOGIN }}" data-login>Log in</a>
+      </div>
+      <a class="dial-chip" href="{{ DIAL }}"><span class="dot">{{ icon('phone') }}</span><span>Tap to dial <code>*384*88041#</code></span></a>
+    </div>
+    <div class="hero-art" role="img" aria-label="A basic phone dials *384*88041#, enters a phone number and PIN, and opens the Remote Phone-Book menu. Behind it, the Remote Phonebook app on a smartphone.">
+      <div class="app-frame"><img src="/site/img/app-home-720.webp" srcset="/site/img/app-home-360.webp 360w, /site/img/app-home-720.webp 720w" sizes="250px" width="360" height="720" alt="" fetchpriority="high"></div>
+      <div class="fp" aria-hidden="true">
+        <div class="fp-top"></div>
+        <div class="fp-screen">
+          <div class="fr f1"><span class="lbl">Dialling</span><span class="typed">{% for c in '*384*88041#' %}<span style="animation-delay:{{ '%.2f'|format(0.25 + loop.index0 * 0.14) }}s">{{ c }}</span>{% endfor %}</span><span class="caret">|</span></div>
+          <div class="fr f2">Welcome to Remote
+Phone-Book
+Enter your phone
+number:
+0712 345 678</div>
+          <div class="fr f3">Enter your PIN:
+
+&#9679; &#9679; &#9679; &#9679;</div>
+          <div class="fr f4">Remote Phone-Book
+1. My contacts
+2. Emergency numbers
+3. My organisations
+4. Add contact
+5. Search contact
+6. Delete contact
+7. SMS me my contacts</div>
+        </div>
+        <div class="fp-ctrl"><i></i><i></i></div>
+        <div class="fp-keys">{% for k in ['1','2','3','4','5','6','7','8','9','*','0','#'] %}<span>{{ k }}</span>{% endfor %}</div>
+      </div>
+      <div class="badge">{{ icon('wifi-off') }} No internet needed</div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Trust strip -->
+<div class="trust">
+  <div class="wrap">
+    <ul data-stagger>
+      <li><span class="ico">{{ icon('mobile') }}</span>Works on any phone</li>
+      <li><span class="ico">{{ icon('wifi-off') }}</span>No internet needed</li>
+      <li><span class="ico">{{ icon('lock') }}</span>Encrypted at rest</li>
+      <li><span class="ico warm">{{ icon('pin') }}</span>Built for Kenya (+254)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- 4. Services -->
+<section id="services" aria-labelledby="services-title">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow">Services</span>
+      <h2 id="services-title">One phone book for you, your family and your organisation</h2>
+      <p class="lead">Pick who it's for. Everything works from the same code, *384*88041#, and the same account.</p>
+    </div>
+    <div data-tabs>
+      <div class="tablist" role="tablist" aria-label="Services by category">
+        <button role="tab" id="t-ind" aria-controls="p-ind" aria-selected="true">Individuals</button>
+        <button role="tab" id="t-fam" aria-controls="p-fam" aria-selected="false" tabindex="-1">Families</button>
+        <button role="tab" id="t-org" aria-controls="p-org" aria-selected="false" tabindex="-1">Organisations</button>
+        <button role="tab" id="t-res" aria-controls="p-res" aria-selected="false" tabindex="-1">Resellers</button>
+        <span class="tab-ind" aria-hidden="true"></span>
+      </div>
+
+      <div class="tabpanel on" role="tabpanel" id="p-ind" aria-labelledby="t-ind" tabindex="0">
+        <h3 class="panel-title">Individuals</h3>
+        <div class="split">
+          <div class="mini-cards">
+            <div class="card lift"><div class="ico">{{ icon('mobile') }}</div><h3>Any phone, any time</h3><p>Dial *384*88041#, enter your number and 4-digit PIN, and search, call or add contacts.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('upload') }}</div><h3>One-tap backup</h3><p>Back up from your phone in one tap, or upload a .vcf file.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('sms') }}</div><h3>SMS me my contacts</h3><p>Get your contacts by SMS on the phone you're holding, even a borrowed one.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('star') }}</div><h3>Five priority contacts</h3><p>Star up to 5 people you need first, and keep contacts in your own order.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('logout') }}</div><h3>You stay in control</h3><p>See your login history and active sessions, and log out everywhere at once.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('camera') }}</div><h3>Your profile</h3><p>Add a profile photo and get notifications from the organisations you belong to.</p></div>
+          </div>
+          <div class="media"><div class="shot phone"><img src="/site/img/app-home-720.webp" srcset="/site/img/app-home-360.webp 360w, /site/img/app-home-720.webp 720w" sizes="262px" width="360" height="720" loading="lazy" decoding="async" alt="The Remote Phonebook app home screen for a member, showing their organisation, role and shortcuts to emergency numbers."></div></div>
+        </div>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="p-fam" aria-labelledby="t-fam" tabindex="0">
+        <h3 class="panel-title">Families</h3>
+        <div class="split">
+          <div class="mini-cards">
+            <div class="card lift"><div class="ico">{{ icon('users') }}</div><h3>Up to 5 people</h3><p>The Family plan covers up to 5 people for KES 249 a month.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('key') }}</div><h3>Everyone logs in their own way</h3><p>Each person dials with their own phone number and PIN, so their phone book stays theirs.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('phone') }}</div><h3>Phone lost on the matatu?</h3><p>Borrow a relative's phone, dial *384*88041# and call the people you need.</p></div>
+            <div class="card lift"><div class="ico warm">{{ icon('alert') }}</div><h3>Emergency numbers</h3><p>999, 112, Red Cross, the GBV line and Childline, one step from the main menu.</p></div>
+          </div>
+          <div class="media"><div class="shot phone"><img src="/site/img/app-emergency-720.webp" srcset="/site/img/app-emergency-360.webp 360w, /site/img/app-emergency-720.webp 720w" sizes="262px" width="360" height="720" loading="lazy" decoding="async" alt="The Emergency numbers screen in the app, with Call buttons for 999, 112, 911, 1199, 1195 and 116."></div></div>
+        </div>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="p-org" aria-labelledby="t-org" tabindex="0">
+        <h3 class="panel-title">Organisations</h3>
+        <div class="split wide-media">
+          <div class="mini-cards">
+            <div class="card lift"><div class="ico">{{ icon('refresh') }}</div><h3>Edit once, everyone updated</h3><p>The right contacts go into each member's own phone book and stay up to date.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('megaphone') }}</div><h3>Notices</h3><p>Pinned, urgent or expiring notices, seen in the app and on USSD.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('clock') }}</div><h3>Reminders</h3><p>By SMS or in the app, now or scheduled, with the cost shown before you send.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('eye') }}</div><h3>Who can see this</h3><p>Show each contact by role, department or group.</p></div>
+          </div>
+          <div class="media"><div class="shot browser"><img src="/site/img/pf-contacts-1200.webp" srcset="/site/img/pf-contacts-640.webp 640w, /site/img/pf-contacts-1200.webp 1200w" sizes="(max-width:860px) 92vw, 600px" width="1200" height="769" loading="lazy" decoding="async" alt="The organisation platform's Contacts page: add a contact, choose a group and decide who can see it."></div></div>
+        </div>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="p-res" aria-labelledby="t-res" tabindex="0">
+        <h3 class="panel-title">Resellers</h3>
+        <div class="split wide-media">
+          <div class="mini-cards">
+            <div class="card lift"><div class="ico">{{ icon('network') }}</div><h3>Onboard organisations</h3><p>Bring schools, SACCOs, companies, law firms and insurers onto Remote Phonebook.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('phone') }}</div><h3>USSD from day one</h3><p>Every plan includes the shared code with the organisation's own code: *384*88041*&lt;org code&gt;#.</p></div>
+            <div class="card lift"><div class="ico">{{ icon('eye') }}</div><h3>Show it working</h3><p>The phone preview shows exactly what members will see on USSD.</p></div>
+            <div class="card lift"><div class="ico warm">{{ icon('mail') }}</div><h3>Talk to us</h3><p><a href="mailto:odumacorp@gmail.com?subject=Reselling%20Remote%20Phonebook">odumacorp@gmail.com</a> or <a href="tel:+254182759166">0182 759 166</a>.</p></div>
+          </div>
+          <div class="media"><div class="shot browser"><img src="/site/img/pf-preview-1200.webp" srcset="/site/img/pf-preview-640.webp 640w, /site/img/pf-preview-1200.webp 1200w" sizes="(max-width:860px) 92vw, 600px" width="1200" height="769" loading="lazy" decoding="async" alt="The Preview page: a working USSD phone showing a school's menu next to what members see in the app."></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. Solutions -->
+<section id="solutions" class="alt" aria-labelledby="solutions-title">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow">Solutions</span>
+      <h2 id="solutions-title">Set up for the way your sector works</h2>
+      <p class="lead">Each edition comes with the roles, groups and add-ons that sector needs.</p>
+    </div>
+    <div data-tabs>
+      <div class="tablist chips" role="tablist" aria-label="Solutions by sector">
+        <button role="tab" id="t-sch" aria-controls="p-sch" aria-selected="true">{{ icon('cap') }}Schools</button>
+        <button role="tab" id="t-sac" aria-controls="p-sac" aria-selected="false" tabindex="-1">{{ icon('coins') }}SACCOs</button>
+        <button role="tab" id="t-com" aria-controls="p-com" aria-selected="false" tabindex="-1">{{ icon('briefcase') }}Companies</button>
+        <button role="tab" id="t-law" aria-controls="p-law" aria-selected="false" tabindex="-1">{{ icon('scale') }}Law firms</button>
+        <button role="tab" id="t-ins" aria-controls="p-ins" aria-selected="false" tabindex="-1">{{ icon('umbrella') }}Insurance</button>
+      </div>
+
+      <div class="tabpanel on" role="tabpanel" id="p-sch" aria-labelledby="t-sch" tabindex="0">
+        <div class="sector">
+          <div>
+            <h3>Schools</h3>
+            <p>Parents, teachers and staff get the numbers they need for the term, on whatever phone they have.</p>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span><b>Teacher</b> and <b>Guardian</b> roles, so each person sees what's meant for them.</span></li>
+              <li>{{ icon('check') }}<span>Classes as groups, like Form 2 East, and departments for Sciences or Boarding.</span></li>
+              <li>{{ icon('check') }}<span>Half-term dates as pinned notices, and fee reminders by SMS to parents.</span></li>
+              <li>{{ icon('check') }}<span>Add-on: school results and assignments.</span></li>
+            </ul>
+          </div>
+          {{ photo('school', 'Smiling pupils in blue school uniforms gathered together.', 'Pupils at school.') }}
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="p-sac" aria-labelledby="t-sac" tabindex="0">
+        <div class="sector">
+          <div>
+            <h3>SACCOs</h3>
+            <p>Members reach the office, loans desk or branch from any phone, and never miss the AGM.</p>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>Departments and groups for branches, committees and member groups.</span></li>
+              <li>{{ icon('check') }}<span>AGM dates as pinned notices, and reminders by SMS or in the app.</span></li>
+              <li>{{ icon('check') }}<span><b>Member</b> and <b>Auditor</b> roles, plus "Only from your own phone" rules.</span></li>
+              <li>{{ icon('check') }}<span>Add-on: SACCO financial details.</span></li>
+            </ul>
+          </div>
+          {{ photo('sacco', 'Stacks of coins growing taller, each with a seedling, beside a jar full of coins.', 'Savings growing.') }}
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="p-com" aria-labelledby="t-com" tabindex="0">
+        <div class="sector">
+          <div>
+            <h3>Companies</h3>
+            <p>Staff always have the right numbers for IT, HR, security and their own team.</p>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>Nested departments, job titles and custom roles.</span></li>
+              <li>{{ icon('check') }}<span>Contact groups given to a department, in the order you set.</span></li>
+              <li>{{ icon('check') }}<span>Urgent notices that show first, in the app and on USSD.</span></li>
+              <li>{{ icon('check') }}<span>An activity log of every change.</span></li>
+            </ul>
+          </div>
+          {{ photo('company', 'Four colleagues bump fists over a desk with a laptop, tablet, phone and papers.', 'Colleagues at work.') }}
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="p-law" aria-labelledby="t-law" tabindex="0">
+        <div class="sector">
+          <div>
+            <h3>Law firms</h3>
+            <p>Clients reach the right advocate or desk, and staff keep the firm's numbers in one place.</p>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>A <b>Client</b> role and client segments as groups.</span></li>
+              <li>{{ icon('check') }}<span>"Who can see this" on every contact, by role, department or group.</span></li>
+              <li>{{ icon('check') }}<span>"Only from your own phone" rules for sensitive menus.</span></li>
+              <li>{{ icon('check') }}<span>Add-ons: law-firm matters and client contacts.</span></li>
+            </ul>
+          </div>
+          <div class="card" style="padding:28px">
+            <div class="ico">{{ icon('scale') }}</div>
+            <h3>Example</h3>
+            <p>A "Conveyancing clients" group sees the conveyancing desk and the advocate handling their file. Other clients don't.</p>
+          </div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="p-ins" aria-labelledby="t-ins" tabindex="0">
+        <div class="sector">
+          <div>
+            <h3>Insurance</h3>
+            <p>Policyholders find the claims line fast, and agents keep the numbers they share up to date.</p>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>A "Claims team" contact group, given to the clients who need it.</span></li>
+              <li>{{ icon('check') }}<span>Client segments as groups, each with its own contacts and notices.</span></li>
+              <li>{{ icon('check') }}<span>Change a number once, and every member's phone book has the new one.</span></li>
+              <li>{{ icon('check') }}<span>Add-on: client contacts.</span></li>
+            </ul>
+          </div>
+          <div class="card" style="padding:28px">
+            <div class="ico">{{ icon('umbrella') }}</div>
+            <h3>Example</h3>
+            <p>Motor clients get the "Claims team" group in their phone book. Dial *384*88041#, choose 3. My organisations, and call.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="soon-grid">
+      <h3>Coming soon</h3>
+      <div class="grid g4">
+        <div class="card muted-card"><span class="ico">{{ icon('church') }}</span><span><b>Churches</b><span class="soon">Coming soon</span></span></div>
+        <div class="card muted-card"><span class="ico">{{ icon('users') }}</span><span><b>Chamas</b><span class="soon">Coming soon</span></span></div>
+        <div class="card muted-card"><span class="ico">{{ icon('heart') }}</span><span><b>Hospitals &amp; clinics</b><span class="soon">Coming soon</span></span></div>
+        <div class="card muted-card"><span class="ico">{{ icon('home') }}</span><span><b>Estate associations</b><span class="soon">Coming soon</span></span></div>
+        <div class="card muted-card"><span class="ico">{{ icon('landmark') }}</span><span><b>County offices</b><span class="soon">Coming soon</span></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. How it works -->
+<section id="how" class="blue" aria-labelledby="how-title">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow">How it works</span>
+      <h2 id="how-title">Three steps, on any phone</h2>
+      <p class="lead">No app, no data bundle, no smartphone needed.</p>
+    </div>
+    <ol class="steps" data-stagger>
+      <li class="step"><div class="num">1</div><h3>Dial the code</h3><p>Dial <code>*384*88041#</code> from your phone or a borrowed one.</p><div class="step-vis" aria-hidden="true"><span>*384*88041#</span></div></li>
+      <li class="step"><div class="num">2</div><h3>Number and PIN</h3><p>Enter your phone number, then your 4-digit PIN.</p><div class="step-vis" aria-hidden="true"><span class="pin"><i></i><i></i><i></i><i></i></span></div></li>
+      <li class="step"><div class="num">3</div><h3>Reach your people</h3><p>Search, call or get your contacts by SMS. See your organisations under 3. My organisations.</p><div class="step-vis" aria-hidden="true"><span>3. My organisations</span></div></li>
+    </ol>
+    <div class="how-bottom">
+      <div class="emerg rv">
+        <h3>{{ icon('alert') }} Emergency numbers</h3>
+        <p style="margin:0">On USSD, choose 2 on the main menu. Free to call.</p>
+        <ul>
+          <li><a href="tel:999"><b>999</b>Police, fire, ambulance</a></li>
+          <li><a href="tel:112"><b>112</b>Emergency (any mobile)</a></li>
+          <li><a href="tel:911"><b>911</b>Emergency (any mobile)</a></li>
+          <li><a href="tel:1199"><b>1199</b>Kenya Red Cross</a></li>
+          <li><a href="tel:1195"><b>1195</b>Gender violence helpline</a></li>
+          <li><a href="tel:116"><b>116</b>Childline Kenya</a></li>
+        </ul>
+      </div>
+      <div class="rv">{{ photo('market-trader', 'A hand dialling on a basic feature phone with physical keys.', 'Dialling on a basic phone.') }}</div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. Channels -->
+<section id="channels" aria-labelledby="channels-title">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow">Channels</span>
+      <h2 id="channels-title">Wherever you are, on whatever you have</h2>
+    </div>
+    <div data-tabs>
+      <div class="tablist" role="tablist" aria-label="Channels">
+        <button role="tab" id="t-ussd" aria-controls="p-ussd" aria-selected="true">USSD</button>
+        <button role="tab" id="t-and" aria-controls="p-and" aria-selected="false" tabindex="-1">Android app</button>
+        <button role="tab" id="t-web" aria-controls="p-web" aria-selected="false" tabindex="-1">Website</button>
+        <button role="tab" id="t-plat" aria-controls="p-plat" aria-selected="false" tabindex="-1">Organisation platform</button>
+        <span class="tab-ind" aria-hidden="true"></span>
+      </div>
+      <div class="tabpanel on" role="tabpanel" id="p-ussd" aria-labelledby="t-ussd" tabindex="0">
+        <h3 class="panel-title">USSD</h3>
+        <div class="split wide-media">
+          <div>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>Works on every phone, with no internet: dial *384*88041#.</span></li>
+              <li>{{ icon('check') }}<span>Search by name, call, add or delete contacts, or choose "SMS me my contacts".</span></li>
+              <li>{{ icon('check') }}<span>Works from a borrowed phone too (organisations can restrict this).</span></li>
+            </ul>
+            <a class="btn btn-solid" href="{{ DIAL }}">{{ icon('phone') }} Dial *384*88041#</a>
+          </div>
+          <div class="media">
+            <div class="ussd-mock" role="img" aria-label="The Remote Phone-Book USSD main menu for an organisation member.">
+              <div class="fp-top"></div>
+              <div class="fp-screen" aria-hidden="true">Remote Phone-Book
+1. My contacts
+2. Emergency numbers
+3. My organisations
+4. Add contact
+5. Search contact
+6. Delete contact
+7. SMS me my contacts
+000. Log out</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="p-and" aria-labelledby="t-and" tabindex="0">
+        <h3 class="panel-title">Android app</h3>
+        <div class="split">
+          <div>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>Back up your phone's contacts in one tap, or from a .vcf file.</span></li>
+              <li>{{ icon('check') }}<span>Notices and contacts from your organisations, with notifications.</span></li>
+              <li>{{ icon('check') }}<span>Priority contacts, your own order, profile photo and active sessions.</span></li>
+            </ul>
+            <div class="hero-cta" style="margin:0">
+              <a class="btn btn-solid" href="/android">{{ icon('download') }} Download for Android</a>
+              <span class="btn btn-ghost" aria-disabled="true" style="cursor:default">{{ icon('mobile') }} iPhone <span class="soon">Coming soon</span></span>
+            </div>
+          </div>
+          <div class="media"><div class="shot phone"><img src="/site/img/app-notices-720.webp" srcset="/site/img/app-notices-360.webp 360w, /site/img/app-notices-720.webp 720w" sizes="262px" width="360" height="720" loading="lazy" decoding="async" alt="A school's page in the app, with its profile, contact details and a pinned half-term notice."></div></div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="p-web" aria-labelledby="t-web" tabindex="0">
+        <h3 class="panel-title">Website</h3>
+        <div class="split wide-media">
+          <div>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>Everything in the app, from any browser, on a phone or computer.</span></li>
+              <li>{{ icon('check') }}<span>Manage your contacts, PIN, emails and login history.</span></li>
+              <li>{{ icon('check') }}<span>Works on iPhone today, while the iPhone app is coming soon.</span></li>
+            </ul>
+            <a class="btn btn-solid" href="{{ LOGIN }}" data-login>Log in</a>
+          </div>
+          <div class="media"><div class="shot browser web"><img src="/site/img/web-desktop-1200.webp" srcset="/site/img/web-desktop-640.webp 640w, /site/img/web-desktop-1200.webp 1200w" sizes="(max-width:860px) 92vw, 600px" width="1200" height="700" loading="lazy" decoding="async" alt="The Remote Phonebook website after logging in, with My organisations, Notifications, Emergency and Android app buttons."></div></div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="p-plat" aria-labelledby="t-plat" tabindex="0">
+        <h3 class="panel-title">Organisation platform</h3>
+        <div class="split wide-media">
+          <div>
+            <ul class="bullets">
+              <li>{{ icon('check') }}<span>Post notices: pinned, urgent or with an end date.</span></li>
+              <li>{{ icon('check') }}<span>See a phone preview of exactly what members see on USSD.</span></li>
+              <li>{{ icon('check') }}<span>Members, roles, departments, groups and contacts in one place.</span></li>
+            </ul>
+            <a class="btn btn-solid" href="{{ PLATFORM }}">Open the platform {{ icon('arrow') }}</a>
+          </div>
+          <div class="media"><div class="shot browser"><img src="/site/img/pf-notices-1200.webp" srcset="/site/img/pf-notices-640.webp 640w, /site/img/pf-notices-1200.webp 1200w" sizes="(max-width:860px) 92vw, 600px" width="1200" height="769" loading="lazy" decoding="async" alt="The Notices page on the organisation platform, with a USSD preview of the notice beside the form."></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8. For organisations -->
+<section id="organisations" class="alt" aria-labelledby="org-title">
+  <div class="wrap">
+    <div class="deep-intro">
+      <div class="rv">
+        <span class="eyebrow">For organisations</span>
+        <h2 id="org-title">Edit once. Everyone is updated.</h2>
+        <p class="lead">The bursar got a new number? Change it once on the platform. It goes straight into every member's own phone book, so nobody calls the old one.</p>
+        <a class="btn btn-solid" href="{{ PLATFORM }}">Set up your organisation {{ icon('arrow') }}</a>
+      </div>
+      <div class="flow rv" role="img" aria-label="An admin changes the Bursar's Office number from 0700 301 002 to 0700 301 020. The change travels to three member phones, and each one shows the new number with a tick.">
+        <div class="admin" aria-hidden="true">
+          <small>Contact directory · Admin</small>
+          <div class="row"><b>Bursar's Office</b><span class="saved">Saved</span></div>
+          <span class="num-swap"><span class="old">0700 301 002</span><span class="new">0700 301 020</span></span>
+        </div>
+        <div class="wires" aria-hidden="true">
+          <div class="wire"><span class="pulse" style="--w:0s"></span></div>
+          <div class="wire"><span class="pulse" style="--w:.15s"></span></div>
+          <div class="wire"><span class="pulse" style="--w:.3s"></span></div>
+        </div>
+        <div class="members" aria-hidden="true">
+          {% for who, d in [('Parent', '0s'), ('Teacher', '.15s'), ('Driver', '.3s')] %}
+          <div class="mphone" style="--w:{{ d }}"><div class="scr"><span class="who">{{ who }}'s phone</span><b>Bursar's Office</b>
+            <span class="num-swap"><span class="old">0700 301 002</span><span class="new">0700 301 020</span></span>
+            <span class="tick">{{ icon('check') }}</span></div></div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g3" data-stagger>
+      <div class="card lift"><div class="ico">{{ icon('megaphone') }}</div><h3>Notices</h3><p>Pinned, urgent and expiring notices that members see in the app and on USSD.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('search') }}</div><h3>Contacts directory</h3><p>A directory and emergency contacts, with "who can see this" by role, department or group.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('refresh') }}</div><h3>Straight into phone books</h3><p>The right contacts go into each member's own phone book and stay up to date.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('folder') }}</div><h3>Contact groups</h3><p>Groups like "Claims team", given to departments, groups or roles, in an order you set by dragging.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('layers') }}</div><h3>Your structure</h3><p>Nested departments, groups for classes, teams or client segments, job titles and custom roles.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('user-plus') }}</div><h3>Members</h3><p>Add members yourself or approve sign-up requests.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('id') }}</div><h3>Roles</h3><p>Super Admin, Admin/Operator, Department Supervisor, Content Publisher, Teacher, Member, Guardian, Client and Auditor.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('mobile') }}</div><h3>Own-phone rules</h3><p>"Only from your own phone" rules for the menus that need them.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('clock') }}</div><h3>Reminders</h3><p>SMS and/or in-app, now or scheduled, to everyone, a department or a group. The cost estimate shows first.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('image') }}</div><h3>Your profile</h3><p>Your logo and details on your organisation's page in the app.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('eye') }}</div><h3>Phone preview</h3><p>See exactly what members see on USSD before they do.</p></div>
+      <div class="card lift"><div class="ico">{{ icon('history') }}</div><h3>History and audit log</h3><p>Restore earlier versions, and see every change in the activity log.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 9. Security -->
+<section id="security" aria-labelledby="security-title">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="lock-motif">{{ icon('lock') }}</div>
+      <span class="eyebrow">Security and trust</span>
+      <h2 id="security-title">Your contacts stay yours</h2>
+      <p class="lead">Built so the people you trust with your number are the only ones who see it.</p>
+    </div>
+    <div class="grid g3 sec-grid" data-stagger>
+      <div class="card"><div class="ico">{{ icon('key') }}</div><div><h3>PIN and password</h3><p>A 4-digit PIN for USSD and a password for the app, with lockouts after wrong tries.</p></div></div>
+      <div class="card"><div class="ico">{{ icon('sms') }}</div><div><h3>SMS one-time codes</h3><p>Optional one-time codes by SMS for an extra check at login.</p></div></div>
+      <div class="card"><div class="ico">{{ icon('lock') }}</div><div><h3>Encrypted at rest</h3><p>Personal contacts are encrypted where they're stored.</p></div></div>
+      <div class="card"><div class="ico">{{ icon('building') }}</div><div><h3>Each organisation is separate</h3><p>Every organisation sees only its own data.</p></div></div>
+      <div class="card"><div class="ico">{{ icon('eye') }}</div><div><h3>Private stays private</h3><p>Organisation staff never see a person's private contacts.</p></div></div>
+      <div class="card"><div class="ico">{{ icon('file') }}</div><div><h3>Full audit log</h3><p>Every change on the platform is recorded.</p></div></div>
+    </div>
+    <p class="price-note">Kenya-first: +254 numbers, with USSD and SMS through Africa's Talking.</p>
+  </div>
+</section>
+
+<!-- 10. Pricing -->
+<section id="pricing" class="alt" aria-labelledby="pricing-title">
+  <div class="wrap">
+    <div class="sec-head center rv" style="text-align:center">
+      <span class="eyebrow">Pricing</span>
+      <h2 id="pricing-title">Simple prices in shillings</h2>
+      <p class="lead center">Pay for what you use. Organisations pay per month, by the number of members.</p>
+    </div>
+    <div data-tabs>
+      <div class="seg-wrap"><div class="tablist seg" role="tablist" aria-label="Pricing">
+        <button role="tab" id="t-pi" aria-controls="p-pi" aria-selected="true">Individuals</button>
+        <button role="tab" id="t-po" aria-controls="p-po" aria-selected="false" tabindex="-1">Organisations</button>
+        <button role="tab" id="t-pu" aria-controls="p-pu" aria-selected="false" tabindex="-1">USSD access</button>
+        <span class="tab-ind" aria-hidden="true"></span>
+      </div></div>
+
+      <div class="tabpanel on" role="tabpanel" id="p-pi" aria-labelledby="t-pi" tabindex="0">
+        <h3 class="panel-title">Individuals</h3>
+        <div class="plans">
+          <div class="card plan"><div class="name">Pay per restore</div><div class="price">KES 50</div><div class="per">per restore</div>
+            <ul><li>{{ icon('check') }}Pay only when you need your contacts back</li></ul>
+            <a class="btn btn-ghost" href="{{ REGISTER }}">Get started</a></div>
+          <div class="card plan"><div class="name">Plus</div><div class="price">KES 99<small> /month</small></div><div class="per">for one person</div>
+            <ul><li>{{ icon('check') }}A monthly plan for your own phone book</li></ul>
+            <a class="btn btn-ghost" href="{{ REGISTER }}">Get started</a></div>
+          <div class="card plan"><div class="name">Family</div><div class="price">KES 249<small> /month</small></div><div class="per">up to 5 people</div>
+            <ul><li>{{ icon('check') }}One plan for the household</li></ul>
+            <a class="btn btn-ghost" href="{{ REGISTER }}">Get started</a></div>
+        </div>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="p-po" aria-labelledby="t-po" tabindex="0">
+        <h3 class="panel-title">Organisations</h3>
+        <div class="plans">
+          <div class="card plan"><div class="name">Starter</div><div class="price">KES 2,500<small> /month</small></div><div class="per">includes 50 members</div>
+            <ul><li>{{ icon('check') }}Then KES 30 per extra member</li><li>{{ icon('check') }}Shared USSD code included</li></ul>
+            <a class="btn btn-ghost" href="{{ PLATFORM }}">Set up</a></div>
+          <div class="card plan hl"><div class="name">Standard</div><div class="price">KES 7,500<small> /month</small></div><div class="per">includes 250 members</div>
+            <ul><li>{{ icon('check') }}Then KES 25 per extra member</li><li>{{ icon('check') }}Shared USSD code included</li></ul>
+            <a class="btn btn-solid" href="{{ PLATFORM }}">Set up</a></div>
+          <div class="card plan"><div class="name">Pro</div><div class="price">KES 20,000<small> /month</small></div><div class="per">includes 1,000 members</div>
+            <ul><li>{{ icon('check') }}Then KES 20 per extra member</li><li>{{ icon('check') }}Shared USSD code included</li></ul>
+            <a class="btn btn-ghost" href="{{ PLATFORM }}">Set up</a></div>
+          <div class="card plan"><div class="name">Custom / Enterprise</div><div class="price">Quoted</div><div class="per">for larger organisations</div>
+            <ul><li>{{ icon('check') }}Volume tiers and annual discounts</li></ul>
+            <a class="btn btn-ghost" href="mailto:odumacorp@gmail.com?subject=Custom%20pricing%20for%20Remote%20Phonebook">Talk to us</a></div>
+        </div>
+        <p class="price-note">Volume tiers and annual discounts are available.</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="p-pu" aria-labelledby="t-pu" tabindex="0">
+        <h3 class="panel-title">USSD access</h3>
+        <div class="plans">
+          <div class="card plan hl"><div class="name">Shared code</div><div class="price">Included</div><div class="per">in every organisation plan</div>
+            <ul><li>{{ icon('check') }}Members dial *384*88041*&lt;org code&gt;#</li></ul>
+            <a class="btn btn-solid" href="{{ PLATFORM }}">Set up</a></div>
+          <div class="card plan"><div class="name">Dedicated extension</div><div class="price">KES 3,000<small> /month</small></div><div class="per">plus KES 5,000 setup</div>
+            <ul><li>{{ icon('check') }}An extension of your own</li></ul>
+            <a class="btn btn-ghost" href="mailto:odumacorp@gmail.com?subject=Dedicated%20USSD%20extension">Talk to us</a></div>
+          <div class="card plan"><div class="name">Dedicated shortcode</div><div class="price">KES 15,000<small> /month</small></div><div class="per">plus KES 25,000 setup, plus carrier charges</div>
+            <ul><li>{{ icon('check') }}A shortcode of your own</li></ul>
+            <a class="btn btn-ghost" href="mailto:odumacorp@gmail.com?subject=Dedicated%20USSD%20shortcode">Talk to us</a></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="addons" aria-label="Add-ons">
+      <b>Add-ons:</b><span>Auto-backup</span><span>Multi-device sync</span><span>Restore points</span><span>School results and assignments</span><span>SACCO financial details</span><span>Law-firm matters</span><span>Client contacts</span>
+    </div>
+    <p class="talk"><a href="mailto:odumacorp@gmail.com?subject=Custom%20or%20volume%20pricing">Talk to us about Custom/Enterprise and volume pricing</a></p>
+    <div class="reseller rv">
+      <div><h3>Resellers</h3><p>Onboard schools, SACCOs, companies, law firms and insurers onto Remote Phonebook.</p></div>
+      <a class="btn" href="mailto:odumacorp@gmail.com?subject=Reselling%20Remote%20Phonebook">{{ icon('mail') }} Talk to us</a>
+    </div>
+  </div>
+</section>
+
+<!-- 11. FAQ -->
+<section id="faq" aria-labelledby="faq-title">
+  <div class="wrap">
+    <div class="sec-head center rv" style="text-align:center"><span class="eyebrow">FAQ</span><h2 id="faq-title">Questions people ask</h2></div>
+    <div class="faq">
+      {% set faqs = [
+        ('Do I need internet?', 'No. Dial *384*88041# from any phone, even a basic phone with no internet. Log in with your phone number and 4-digit PIN, and your contacts are there. You only need internet for the app and the website.'),
+        ('Does it work on a borrowed phone?', 'Yes. Your phone number decides whose phone book opens, so you can dial from a friend\'s or relative\'s phone. Choose "SMS me my contacts" and they come to the phone you\'re holding. Organisations can restrict their own menus to members\' own phones.'),
+        ('Who can see my contacts?', 'Only you. Personal contacts are encrypted at rest, and organisation staff never see a person\'s private contacts. Each organisation sees only its own data.'),
+        ('How do organisations add members?', 'On the organisation platform, admins add members themselves or approve sign-up requests. Each member gets a role, and can be put in departments and groups.'),
+        ('What does USSD cost?', 'For organisations, the shared code is included in every plan: members dial *384*88041*<org code>#. A dedicated extension is KES 5,000 setup plus KES 3,000 a month. A dedicated shortcode is KES 25,000 setup plus KES 15,000 a month, plus carrier charges.'),
+        ('Is there an iPhone app?', 'It\'s coming soon. It\'s in TestFlight now. Until then, iPhone users can dial *384*88041# or use the website.'),
+      ] %}
+      {% for q, a in faqs %}
+      <div class="faq-item">
+        <h3 style="margin:0;font-size:inherit"><button class="faq-q" type="button" aria-expanded="false" aria-controls="faq-{{ loop.index }}" id="faq-q-{{ loop.index }}">{{ q }}{{ icon('chev') }}</button></h3>
+        <div class="faq-a" id="faq-{{ loop.index }}" role="region" aria-labelledby="faq-q-{{ loop.index }}"><p>{{ a }}</p></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- 12. Final CTA -->
+<section class="cta-band" aria-labelledby="cta-title">
+  <div class="wrap">
+    <h2 id="cta-title">Keep your contacts safe today</h2>
+    <p class="lead center" style="color:#DCE7FF">Create your account in a few minutes. Your phone book is then one dial away, from any phone.</p>
+    <div class="hero-cta">
+      <a class="btn btn-light" href="{{ REGISTER }}">Create your account {{ icon('arrow') }}</a>
+      <a class="btn btn-outline-light" href="{{ LOGIN }}" data-login>Log in</a>
+    </div>
+    <p style="margin:0">Running a school, SACCO or company? <a href="{{ PLATFORM }}">Set up your organisation</a></p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <h3>Remote Phonebook by Oduma Corp</h3>
+        <p>Your contacts, on any phone. Dial <a href="{{ DIAL }}">*384*88041#</a>.</p>
+        <ul>
+          <li><a href="mailto:odumacorp@gmail.com">{{ icon('mail') }} odumacorp@gmail.com</a></li>
+          <li><a href="tel:+254182759166">{{ icon('phone') }} 0182 759 166</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Explore</h3>
+        <ul>
+          <li><a href="#services">Services</a></li>
+          <li><a href="#solutions">Solutions</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="#security">Security</a></li>
+          <li><a href="#faq">FAQ</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Get the app</h3>
+        <ul>
+          <li><a href="/android">{{ icon('download') }} Android app</a></li>
+          <li><span>{{ icon('mobile') }} iPhone: coming soon</span></li>
+          <li><a href="{{ LOGIN }}" data-login>Log in</a></li>
+          <li><a href="{{ REGISTER }}">Create an account</a></li>
+          <li><a href="{{ PLATFORM }}">Organisation platform</a></li>
+          <li><a href="/help">Help</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom"><span>&copy; {{ year }} Oduma Corp. All rights reserved.</span><a href="#top">Back to top</a></div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var doc = document.documentElement;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Already logged in on this browser: "Log in" becomes "Open the app"
+  try { if (localStorage.getItem('phonebook.token')) document.querySelectorAll('[data-login]').forEach(function (a) { a.textContent = 'Open the app'; }); } catch (e) {}
+
+  // Header border once scrolled
+  var hdr = document.querySelector('.hdr');
+  var onScroll = function () { hdr.classList.toggle('scrolled', scrollY > 8); };
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+  // Mobile menu
+  var btn = document.getElementById('menu-btn'), drawer = document.getElementById('drawer');
+  function setMenu(open) {
+    document.body.classList.toggle('menu-open', open);
+    btn.setAttribute('aria-expanded', open);
+    btn.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+    btn.querySelector('use').setAttribute('href', open ? '#i-x' : '#i-menu');
+    if (open) drawer.querySelector('a').focus();
+  }
+  btn.addEventListener('click', function () { setMenu(btn.getAttribute('aria-expanded') !== 'true'); });
+  drawer.addEventListener('click', function (e) { if (e.target.closest('a') && document.body.classList.contains('menu-open')) setMenu(false); });
+  document.getElementById('scrim').addEventListener('click', function () { setMenu(false); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.body.classList.contains('menu-open')) { setMenu(false); btn.focus(); }
+  });
+
+  // Tabs (WAI-ARIA tabs pattern; without JS every panel shows, stacked)
+  document.querySelectorAll('[data-tabs]').forEach(function (box) {
+    var tabs = Array.prototype.slice.call(box.querySelectorAll('[role=tab]'));
+    var ind = box.querySelector('.tab-ind'), list = box.querySelector('[role=tablist]');
+    function move(t) { if (ind && t) ind.style.transform = 'translateX(' + t.offsetLeft + 'px) scaleX(' + (t.offsetWidth / 100) + ')'; }
+    function select(t, focus) {
+      tabs.forEach(function (x) {
+        var on = x === t;
+        x.setAttribute('aria-selected', on);
+        x.tabIndex = on ? 0 : -1;
+        var panel = document.getElementById(x.getAttribute('aria-controls'));
+        panel.hidden = !on;
+        panel.classList.toggle('on', on);
+      });
+      if (focus) { t.focus(); t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+      requestAnimationFrame(function () { move(t); }); // read layout after the writes above
+    }
+    tabs.forEach(function (t, i) {
+      t.addEventListener('click', function () { select(t); });
+      t.addEventListener('keydown', function (e) {
+        var j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : null;
+        if (j === null) return;
+        e.preventDefault();
+        select(tabs[(j + tabs.length) % tabs.length], true);
+      });
+    });
+    var current = function () { return tabs.filter(function (t) { return t.tabIndex === 0; })[0]; };
+    select(tabs.filter(function (t) { return t.getAttribute('aria-selected') === 'true'; })[0] || tabs[0]);
+    requestAnimationFrame(function () { list.classList.add('tabs-ready'); });
+    addEventListener('resize', function () { move(current()); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { move(current()); });
+  });
+
+  // FAQ accordion
+  document.querySelectorAll('.faq-q').forEach(function (b) {
+    var a = document.getElementById(b.getAttribute('aria-controls'));
+    a.hidden = true;
+    b.addEventListener('click', function () {
+      var open = b.getAttribute('aria-expanded') === 'true';
+      b.setAttribute('aria-expanded', !open);
+      a.hidden = open;
+    });
+  });
+
+  // Scroll reveal: fade up once, staggered 80ms (skipped when motion is reduced)
+  if (!reduce && 'IntersectionObserver' in window) {
+    document.querySelectorAll('[data-stagger]').forEach(function (g) {
+      Array.prototype.forEach.call(g.children, function (c, i) { c.classList.add('rv'); c.style.setProperty('--d', Math.min(i, 8) * 80 + 'ms'); });
+    });
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('.rv').forEach(function (el) { io.observe(el); });
+    doc.classList.add('reveal-on');
+  }
+})();
+</script>
+</body>
+</html>

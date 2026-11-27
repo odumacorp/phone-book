@@ -1,7 +1,9 @@
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useEffect, useContext, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
+  Animated,
   AppState,
   FlatList,
   Image,
@@ -135,7 +137,10 @@ function Main() {
   const narrow = useWindowDimensions().width < 480; // phones: logo only, so the header buttons fit
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
-  const [view, setView] = useState<View_>('login');
+  // The website's "Get started" links to /app?start=register: open on the sign-up screen
+  const [view, setView] = useState<View_>(() =>
+    isWeb && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('start') === 'register' ? 'register' : 'login',
+  );
   const [notice, setNotice] = useState('');
   const [booting, setBooting] = useState(true);
   const [editing, setEditing] = useState<Contact | null>(null);
@@ -338,6 +343,18 @@ function Main() {
       />
     );
 
+  // Website, logged out: log in, sign up, reset password and report a problem get the branded layout
+  if (isWeb && !booting && !token) {
+    const page = (['register', 'reset', 'report'] as string[]).includes(view) ? (view as AuthPage) : 'login';
+    return (
+      <InAuthLayout.Provider value={true}>
+        <AuthShell page={page} onBack={page === 'login' ? undefined : back}>
+          {content}
+        </AuthShell>
+      </InAuthLayout.Provider>
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
@@ -349,8 +366,17 @@ function Main() {
               <Text style={styles.backButton}>‹ Back</Text>
             </Pressable>
           ) : null}
-          <Image source={require('./assets/logo.png')} style={styles.logo} accessibilityLabel="Oduma Corp" />
-          {(narrow && token) || (narrow && showBack) ? null : <Text style={styles.title}>Remote Phonebook</Text>}
+          {/* Website: the logo goes back to the landing page (phone-book.odumacorp.com/), logged in or not */}
+          <Pressable
+            onPress={isWeb ? () => openSite('/') : undefined}
+            disabled={!isWeb}
+            accessibilityRole={isWeb ? 'link' : undefined}
+            accessibilityLabel={isWeb ? 'Remote Phonebook website' : undefined}
+            style={styles.brand}
+          >
+            <Image source={require('./assets/logo.png')} style={styles.logo} accessibilityLabel="Oduma Corp" />
+            {(narrow && token) || (narrow && showBack) ? null : <Text style={styles.title}>Remote Phonebook</Text>}
+          </Pressable>
         </View>
         {token && !booting && view !== 'register' && view !== 'reset' ? (
           <View style={styles.headerActions}>
@@ -423,6 +449,7 @@ function useForm() {
 
 /** Scrollable card for forms, so long ones stay usable with the keyboard open. */
 function Form({ children }: { children: React.ReactNode }) {
+  if (useContext(InAuthLayout)) return <View style={auth.formInner}>{children}</View>;
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.list}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.formScroll}>
@@ -430,6 +457,135 @@ function Form({ children }: { children: React.ReactNode }) {
       </ScrollView>
     </KeyboardAvoidingView>
   );
+}
+
+// ---------------------------------------------------------------- website: log in / sign up layout
+// Matches the public website (phone-book.odumacorp.com): a brand panel beside the form on computers, a compact
+// header above it on phones. Only used on the website; the phone app keeps its own screens.
+type AuthPage = 'login' | 'register' | 'reset' | 'report';
+const InAuthLayout = createContext(false);
+const AUTH_TEXT: Record<AuthPage, [string, string]> = {
+  login: ['Welcome back', 'Log in with your phone number or email.'],
+  register: ['Create your account', 'Choose a password for the app and a 4-digit PIN for *384*88041#.'],
+  reset: ['Reset your password', 'We will text a code to the phone number on your account.'],
+  report: ['Report a problem', 'Tell us what went wrong and we will look into it.'],
+};
+const BRAND = { ink: '#0F1B33', body: '#4A5568', blue: '#1F6FEB', deep: '#1658C4', tint: '#E3ECFD', warm: '#F29D38', paper: '#FBFAF7' };
+const gradient = (css: string) => (isWeb ? ({ backgroundImage: css } as object) : {});
+
+function AuthShell({ page, onBack, children }: { page: AuthPage; onBack?: () => void; children: React.ReactNode }) {
+  const width = useWindowDimensions().width;
+  const wide = width >= 700;
+  const showArt = width >= 1000; // the graphics beside the form, on computers
+  const [title, subtitle] = AUTH_TEXT[page];
+  // Switching between log in and sign up: the card fades and slides in (sign up from the right, back to log in from
+  // the left). Skipped when the device asks for reduced motion.
+  const fade = useRef(new Animated.Value(1)).current;
+  const slide = useRef(new Animated.Value(0)).current;
+  const first = useRef(true);
+  const float = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    let loop: Animated.CompositeAnimation | null = null;
+    AccessibilityInfo.isReduceMotionEnabled().catch(() => false).then((reduce) => {
+      if (reduce) return;
+      const step = (toValue: number) => Animated.timing(float, { toValue, duration: 3200, useNativeDriver: !isWeb });
+      loop = Animated.loop(Animated.sequence([step(-4), step(0)]));
+      loop.start();
+    });
+    return () => loop?.stop();
+  }, []);
+  useEffect(() => {
+    if (first.current) { first.current = false; fade.setValue(0); slide.setValue(14); }
+    else { fade.setValue(0); slide.setValue(page === 'login' ? -36 : 36); }
+    let cancelled = false;
+    AccessibilityInfo.isReduceMotionEnabled().catch(() => false).then((reduce) => {
+      if (cancelled) return;
+      if (reduce) { fade.setValue(1); slide.setValue(0); return; }
+      Animated.parallel([
+        Animated.timing(fade, { toValue: 1, duration: 260, useNativeDriver: !isWeb }),
+        Animated.spring(slide, { toValue: 0, damping: 18, stiffness: 160, mass: 0.9, useNativeDriver: !isWeb }),
+      ]).start();
+    });
+    return () => { cancelled = true; };
+  }, [page]);
+
+  const backLink = onBack ? (
+    <Pressable onPress={onBack} accessibilityRole="button" style={auth.topLink}>
+      <Text style={auth.topLinkText}>‹ Log in</Text>
+    </Pressable>
+  ) : (
+    <Pressable onPress={() => openSite('/')} accessibilityRole="link" style={auth.topLink}>
+      <Text style={auth.topLinkText}>‹ Website</Text>
+    </Pressable>
+  );
+  return (
+    <View style={[auth.page, gradient('linear-gradient(150deg,#1F6FEB 0%,#1A63D8 45%,#1658C4 100%)')]}>
+      <ScrollView style={auth.scrollView} contentContainerStyle={auth.scroll} keyboardShouldPersistTaps="handled">
+        <View style={auth.top}>
+          <Pressable onPress={() => openSite('/')} accessibilityRole="link" accessibilityLabel="Remote Phonebook website" style={auth.brand}>
+            <Image source={require('./assets/logo.png')} style={auth.logo} accessibilityLabel="" />
+            <View>
+              <Text style={auth.brandName}>Remote Phonebook</Text>
+              <Text style={auth.brandSub}>by Oduma Corp</Text>
+            </View>
+          </Pressable>
+          {backLink}
+        </View>
+        <View style={[auth.center, showArt && auth.centerRow]}>
+          {showArt ? (
+            <View style={auth.art}>
+              <Text style={auth.artH}>Your contacts, on any phone.</Text>
+              <Text style={auth.artP}>
+                Dial *384*88041# from any phone, even a basic one with no internet, and your contacts are there.
+              </Text>
+              {['Works on any phone', 'No internet needed', 'Encrypted at rest', 'Built for Kenya (+254)'].map((t) => (
+                <View key={t} style={auth.tick}>
+                  <View style={auth.tickDot}><Text style={auth.tickMark}>✓</Text></View>
+                  <Text style={auth.tickText}>{t}</Text>
+                </View>
+              ))}
+              <View style={auth.phone} accessibilityLabel="The Remote Phone-Book USSD menu on a basic phone">
+                <View style={auth.phoneTop} />
+                <View style={auth.ussd}>
+                  <Text style={auth.ussdText} {...({ dataSet: { mono: 'true' } } as object)}>
+                    {'Remote Phone-Book\n1. My contacts\n2. Emergency numbers\n3. My organisations\n4. Add contact\n5. Search contact'}
+                  </Text>
+                </View>
+                <View style={auth.keys}>
+                  {['1', '2', '3', '4', '5', '6'].map((k) => <View key={k} style={auth.key}><Text style={auth.keyText}>{k}</Text></View>)}
+                </View>
+              </View>
+              <Pressable onPress={() => openSite('tel:*384*88041%23')} accessibilityRole="link" style={[auth.chip, { alignSelf: 'flex-start' }]}>
+                <Text style={auth.chipText}>📞 Dial <Text style={auth.code}>*384*88041#</Text></Text>
+              </Pressable>
+            </View>
+          ) : null}
+          <View style={showArt ? auth.formSide : auth.formStack}>
+          <Animated.View
+            style={[auth.cardWrap, page === 'register' && wide && auth.cardWrapWide, { opacity: fade, transform: [{ translateX: slide }, { translateY: float }] }]}
+          >
+            <View style={[auth.glowCard, !wide && auth.glowCardNarrow]}>
+              <Text style={auth.h1} accessibilityRole="header">{title}</Text>
+              <Text style={auth.sub}>{subtitle}</Text>
+              {children}
+            </View>
+          </Animated.View>
+          {showArt ? null : (
+            <Pressable onPress={() => openSite('tel:*384*88041%23')} accessibilityRole="link" style={auth.chip}>
+              <Text style={auth.chipText}>📞 No internet? Dial <Text style={auth.code}>*384*88041#</Text></Text>
+            </Pressable>
+          )}
+          </View>
+        </View>
+        <Text style={auth.foot}>© {new Date().getFullYear()} Oduma Corp · odumacorp@gmail.com</Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+/** A form's heading; on the website's log-in pages the page title already says it. */
+function CardHeading({ children }: { children: string }) {
+  return useContext(InAuthLayout) ? null : <Text style={styles.heading}>{children}</Text>;
 }
 
 const isEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim());
@@ -578,7 +734,7 @@ function RegisterScreen({ onDone, onCancel }: { onDone: (token: string, message?
 
   return (
     <Form>
-      <Text style={styles.heading}>Create an account</Text>
+      <CardHeading>Create an account</CardHeading>
       {!codeSent ? (
         <>
           <Text style={styles.label}>Your name</Text>
@@ -706,7 +862,7 @@ function ResetPasswordScreen({ onDone, onCancel }: { onDone: (token: string) => 
 
   return (
     <Form>
-      <Text style={styles.heading}>Reset your password</Text>
+      <CardHeading>Reset your password</CardHeading>
       {!sentTo ? (
         <>
           <Text style={styles.hint}>We will text a 6-digit code to the phone number on your account.</Text>
@@ -1018,7 +1174,7 @@ function ReportScreen({ token, onBack, onLogout }: { token: string | null; onBac
 
   return (
     <Form>
-      <Text style={styles.heading}>Report a problem</Text>
+      <CardHeading>Report a problem</CardHeading>
       <Text style={styles.hint}>Tell us what went wrong or what you'd like changed. The team reads every report.</Text>
       <Text style={styles.label}>What happened?</Text>
       <TextInput placeholderTextColor={COLORS.placeholder}
@@ -3180,4 +3336,53 @@ const styles = StyleSheet.create({
   menuText: { flex: 1, fontSize: 16, color: COLORS.text },
   badge: { backgroundColor: COLORS.primary, color: '#fff', fontSize: 12, fontWeight: '700', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 99, overflow: 'hidden' },
   chevron: { fontSize: 22, color: COLORS.muted, lineHeight: 22 },
+});
+
+const auth = StyleSheet.create({
+  page: { flex: 1, backgroundColor: BRAND.blue, overflow: 'hidden' },
+  scrollView: { flex: 1 },
+  scroll: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 28 },
+  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%', maxWidth: 1120, alignSelf: 'center' },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
+  logo: { width: 36, height: 36, borderRadius: 18 },
+  brandName: { fontSize: 17, fontWeight: '700', color: '#fff', letterSpacing: -0.3 },
+  brandSub: { fontSize: 12, color: '#DCE7FF' },
+  topLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', backgroundColor: 'rgba(255,255,255,0.08)' },
+  topLinkText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 28, gap: 18 },
+  centerRow: { flexDirection: 'row', gap: 72, width: '100%', maxWidth: 1120, alignSelf: 'center' },
+  formStack: { width: '100%', alignItems: 'center', gap: 18 },
+  formSide: { width: 520, flexShrink: 0, alignItems: 'center' },
+  art: { flex: 1, maxWidth: 500, gap: 14 },
+  artH: { fontSize: 48, lineHeight: 52, fontWeight: '700', color: '#fff', letterSpacing: -1.4, marginBottom: 4 },
+  artP: { fontSize: 18, lineHeight: 28, color: '#DCE7FF', marginBottom: 8 },
+  tick: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  tickDot: { width: 26, height: 26, borderRadius: 13, backgroundColor: BRAND.warm, alignItems: 'center', justifyContent: 'center' },
+  tickMark: { color: BRAND.ink, fontWeight: '700', fontSize: 14 },
+  tickText: { color: '#fff', fontSize: 17, fontWeight: '600' },
+  phone: { marginTop: 18, alignSelf: 'flex-start', width: 250, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderBottomLeftRadius: 36, borderBottomRightRadius: 36, backgroundColor: '#0F1B33', padding: 16, ...(isWeb ? ({ boxShadow: '0 24px 50px rgba(10,30,80,0.4)' } as object) : {}) },
+  phoneTop: { width: 40, height: 5, borderRadius: 3, backgroundColor: '#3D4E72', alignSelf: 'center', marginBottom: 12 },
+  ussd: { backgroundColor: '#DDE8D5', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14 },
+  ussdText: { fontSize: 13, lineHeight: 20, color: '#1C2A17', fontWeight: '600' },
+  keys: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  key: { width: 66, height: 26, borderRadius: 9, backgroundColor: '#2F4266', alignItems: 'center', justifyContent: 'center' },
+  keyText: { color: '#C8D4EC', fontSize: 12, fontWeight: '600' },
+  cardWrap: { width: '100%', maxWidth: 440 },
+  cardWrapWide: { maxWidth: 520 },
+  glowCard: {
+    backgroundColor: '#fff', borderRadius: 20, paddingHorizontal: 32, paddingTop: 32, paddingBottom: 26,
+    borderWidth: 1, borderColor: 'rgba(15,27,51,0.08)',
+    // floating: a soft shadow that sits below the card, no glow
+    ...(isWeb
+      ? ({ boxShadow: '0 1px 2px rgba(10,25,60,0.10), 0 8px 16px -4px rgba(10,25,60,0.14), 0 32px 48px -16px rgba(10,25,60,0.38)' } as object)
+      : SHADOW),
+  },
+  glowCardNarrow: { paddingHorizontal: 20, paddingTop: 26, borderRadius: 18 },
+  formInner: { gap: 8 },
+  chip: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', paddingVertical: 10, paddingHorizontal: 18, minHeight: 44, justifyContent: 'center' },
+  chipText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  code: { color: '#FCEBD5', fontWeight: '700' },
+  h1: { fontSize: 30, lineHeight: 36, fontWeight: '700', color: BRAND.ink, letterSpacing: -0.7, marginBottom: 4, textAlign: 'center' },
+  sub: { fontSize: 16, lineHeight: 24, color: BRAND.body, marginBottom: 18, textAlign: 'center' },
+  foot: { fontSize: 13, color: '#C9D8F7', textAlign: 'center' },
 });

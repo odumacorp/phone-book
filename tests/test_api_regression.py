@@ -8,6 +8,7 @@ def test_health_and_website(client):
     assert client.get("/health").status_code == 200
     resp = client.get("/")
     assert resp.status_code == 200 and b"<html" in resp.data.lower()
+    assert client.get("/app").status_code == 200  # the web app moved to /app; / is the public website
 
 
 def test_register_login_me(register, client):
