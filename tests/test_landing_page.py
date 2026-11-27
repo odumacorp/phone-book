@@ -24,10 +24,10 @@ def test_landing_states_facts_and_nothing_about_funding(client):
 
 def test_sector_photos_and_placeholders(client):
     html = client.get("/").get_data(as_text=True)
-    for name in ("school", "sacco", "company"):
+    for name in ("school", "sacco", "company", "feature-phone"):
         assert f'src="/site/img/photos/{name}.webp"' in html
         assert client.get(f"/site/img/photos/{name}-640.webp").status_code == 200
-    assert html.count("Photo to come") <= 1  # the "How it works" photo shows once its file is in site/img/photos/
+    assert "Photo to come" not in html
 
 
 def test_web_app_opens_on_register(client):
