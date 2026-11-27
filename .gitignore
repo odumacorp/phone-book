@@ -8,3 +8,6 @@ __pycache__/
 node_modules/
 docs/test-accounts.md
 
+
+# Marketing drafts: private, kept only on the developer's computer
+docs/marketing/
